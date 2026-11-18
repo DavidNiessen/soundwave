@@ -16,6 +16,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { keysOf } from '../input/bindings';
 import {
   BUILT_IN,
@@ -44,6 +45,7 @@ import { findVenue, VENUES } from '../render/stage/venues';
 import { deleteMedia, getMedia, mediaIds, mediaUrl, putMedia } from '../storage/stageMedia';
 import { useHints, type Action } from './actions';
 import { Dialog } from './Dialog';
+import { ColorPicker } from './ColorPicker';
 import { ICON_STROKE } from './icons';
 import { ON_OFF, RowView, type Row } from './SettingsScreen';
 
@@ -73,10 +75,10 @@ const TURNS = [
 ];
 /** The ways to start a new stage: what is behind the highway. */
 const STARTS: { kind: BackdropKind; label: string; help: string; icon: LucideIcon }[] = [
-  { kind: 'venue', label: '3D stage', help: 'The lit stage with its band and crowd, in colours and light of your own.', icon: Box },
-  { kind: 'video', label: 'My video', help: 'A video file of yours, playing silently behind the highway.', icon: Film },
-  { kind: 'image', label: 'My picture', help: 'A picture of yours behind the highway.', icon: ImageIcon },
-  { kind: 'gradient', label: 'Colour', help: 'A calm colour gradient, the lightest of all to draw.', icon: Palette },
+  { kind: 'venue', label: '3D stage', help: 'The live stage with lights, band and crowd.', icon: Box },
+  { kind: 'video', label: 'My video', help: 'A video of yours, on a loop.', icon: Film },
+  { kind: 'image', label: 'My picture', help: 'A picture of yours.', icon: ImageIcon },
+  { kind: 'gradient', label: 'Colour', help: 'A calm gradient. The lightest to draw.', icon: Palette },
 ];
 /** How long Test the drop runs the show at full tilt, seconds. */
 const DROP_SECONDS = 5;
@@ -133,6 +135,9 @@ function wheelSideways(row: HTMLDivElement | null) {
   row.addEventListener('wheel', wheel, { passive: false });
   return () => row.removeEventListener('wheel', wheel);
 }
+
+/** Where the stage's drawers open: over the whole game, as every other sheet does. */
+const drawerHost = (): Element => document.querySelector('.app') ?? document.body;
 
 /** A kept file's name, once it is read. */
 function useMediaName(id: string | null): string | null {
@@ -397,8 +402,8 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
       {dialog === 'new' && (
         <Dialog title="New stage" variant="card" className="new-stage-card" onClose={() => setDialog(null)} closeLabel="Cancel">
           <div className="new-stage">
-            <p className="new-stage-kicker">New stage</p>
-            <h2 className="new-stage-title">Start with what’s behind the highway</h2>
+            <h2 className="new-stage-title">New stage</h2>
+            <p className="new-stage-sub">What goes behind the highway? You can change anything later.</p>
             <div className="start-grid">
               {STARTS.map(({ kind, label, help, icon: Icon }, i) => (
                 <button
@@ -416,7 +421,6 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
                 </button>
               ))}
             </div>
-            <p className="new-stage-foot">You can change anything about it afterwards.</p>
           </div>
         </Dialog>
       )}
@@ -526,6 +530,12 @@ interface EditorProps {
 }
 
 function Editor({ def, actions, onClose, touch, activeRow, setActiveRow, onSave, onUndo, canUndo, onDelete }: EditorProps) {
+  const [pickerFor, setPickerFor] = useState<string | null>(null);
+  const picker = (label: string) => ({
+    label,
+    open: pickerFor === label,
+    onToggle: () => setPickerFor((p) => (p === label ? null : label)),
+  });
   const [more, setMore] = useState(false);
   const set = (patch: Partial<StageDef>) => onSave({ ...def, ...patch });
   const b = def.backdrop;
@@ -614,14 +624,23 @@ function Editor({ def, actions, onClose, touch, activeRow, setActiveRow, onSave,
           VENUES.length > 1
             ? {
                 kind: 'choice',
-                id: 'venue',
+                id: 'venueId',
                 label: 'Venue',
                 help: findVenue(def.venueId).description,
                 value: def.venueId,
                 options: VENUES.map((v) => ({ value: v.id, label: v.name, help: v.description })),
                 set: (v) => set({ venueId: v }),
               }
-            : { kind: 'info', id: 'venue', label: 'Venue', help: findVenue(def.venueId).description, body: findVenue(def.venueId).name },
+            : {
+                kind: 'choice',
+                id: 'venueId',
+                label: 'Venue',
+                help: `${findVenue(def.venueId).name} is the only venue installed. Other venues show up here once they are added.`,
+                value: def.venueId,
+                options: VENUES.map((v) => ({ value: v.id, label: v.name })),
+                disabled: true,
+                set: () => {},
+              },
           {
             kind: 'choice',
             id: 'sky',
@@ -733,13 +752,18 @@ function Editor({ def, actions, onClose, touch, activeRow, setActiveRow, onSave,
       );
   }
   const first = sections[0].rows[0];
-  return (
+  const help =
+    sections.flatMap((sec) => sec.rows).find((r) => r.id === activeRow)?.help ??
+    'Every change shows on the stage behind and is kept as you make it. Point at a setting to see what it does.';
+  return createPortal(
     <Dialog title={`Customize ${def.name}`} className="see-through stage-drawer" closeLabel="Done" onClose={onClose} actions={actions}>
       {(closeDrawer) => (
         <div className="sheet-body stage-sheet" data-nav-group="stage-editor">
-          <div>
+          <div className="stage-head">
             <h2 className="display meta-heading">Customize</h2>
-            <p className="hint">Every change shows on the stage behind and is kept as you make it.</p>
+            <p className="stage-help" aria-live="polite">
+              {help}
+            </p>
           </div>
           {sections.map((sec) => (
             <section key={sec.title} className="set-section">
@@ -756,8 +780,8 @@ function Editor({ def, actions, onClose, touch, activeRow, setActiveRow, onSave,
               ))}
               {sec.gradient && b.kind === 'gradient' && (
                 <>
-                  <ColorRow label="Top" value={b.from} onPick={(hex) => set({ backdrop: { ...b, from: hex } })} />
-                  <ColorRow label="Bottom" value={b.to} onPick={(hex) => set({ backdrop: { ...b, to: hex } })} />
+                  <ColorRow {...picker('Top')} value={b.from} onPick={(hex) => set({ backdrop: { ...b, from: hex } })} />
+                  <ColorRow {...picker('Bottom')} value={b.to} onPick={(hex) => set({ backdrop: { ...b, to: hex } })} />
                 </>
               )}
               {sec.colors && def.colors && (
@@ -765,7 +789,7 @@ function Editor({ def, actions, onClose, touch, activeRow, setActiveRow, onSave,
                   {(['key', 'accent', 'wash'] as const).map((k) => (
                     <ColorRow
                       key={k}
-                      label={{ key: 'Beams', accent: 'Second beams', wash: 'Stage' }[k]}
+                      {...picker({ key: 'Beams', accent: 'Second beams', wash: 'Stage' }[k])}
                       value={def.colors![k]}
                       onPick={(hex) => set({ colors: { ...def.colors!, [k]: hex } })}
                     />
@@ -794,41 +818,73 @@ function Editor({ def, actions, onClose, touch, activeRow, setActiveRow, onSave,
               <ImageIcon strokeWidth={ICON_STROKE} aria-hidden /> Choose a file above: until then the background stays dark.
             </p>
           )}
-          <div className="sheet-actions">
-            <DeleteButton onDelete={onDelete} />
-            <button type="button" className="btn" disabled={!canUndo} onClick={onUndo}>
-              <Undo2 strokeWidth={ICON_STROKE} aria-hidden /> Undo
-            </button>
-            <button type="button" className="btn primary" data-sfx="back" onClick={closeDrawer}>
-              Done
-            </button>
+          <div className="stage-foot">
+            <div className="sheet-actions">
+              <DeleteButton onDelete={onDelete} />
+              <button type="button" className="btn" disabled={!canUndo} onClick={onUndo}>
+                <Undo2 strokeWidth={ICON_STROKE} aria-hidden /> Undo
+              </button>
+              <button type="button" className="btn primary" data-sfx="back" onClick={closeDrawer}>
+                Done
+              </button>
+            </div>
           </div>
         </div>
       )}
-    </Dialog>
+    </Dialog>,
+    drawerHost(),
   );
 }
 
-function ColorRow({ label, value, onPick }: { label: string; value: string; onPick(hex: string): void }) {
+/**
+ * A colour of the stage: a press on one of the ready colours, or the picker (the rainbow dot) for
+ * any colour at all, opening beneath the row.
+ */
+function ColorRow({
+  label,
+  value,
+  open,
+  onToggle,
+  onPick,
+}: {
+  label: string;
+  value: string;
+  open: boolean;
+  onToggle(): void;
+  onPick(hex: string): void;
+}) {
+  const own = !SWATCHES.some((hex) => hex.toLowerCase() === value.toLowerCase());
   return (
-    <div className="color-row" role="group" aria-label={label}>
-      <span className="set-label">{label}</span>
-      <span className="color-swatches">
-        {SWATCHES.map((hex) => (
+    <div className={`color-block ${open ? 'open' : ''}`}>
+      <div className="color-row" role="group" aria-label={label}>
+        <span className="set-label">{label}</span>
+        <span className="color-swatches">
+          {SWATCHES.map((hex) => (
+            <button
+              key={hex}
+              type="button"
+              className={`color-dot ${hex.toLowerCase() === value.toLowerCase() ? 'on' : ''}`}
+              style={{ background: hex }}
+              aria-label={hex}
+              aria-pressed={hex.toLowerCase() === value.toLowerCase()}
+              onClick={() => onPick(hex)}
+            />
+          ))}
           <button
-            key={hex}
             type="button"
-            className={`color-dot ${hex.toLowerCase() === value.toLowerCase() ? 'on' : ''}`}
-            style={{ background: hex }}
-            aria-label={hex}
-            aria-pressed={hex.toLowerCase() === value.toLowerCase()}
-            onClick={() => onPick(hex)}
-          />
-        ))}
-        <label className="color-own" title="Any colour">
-          <input type="color" value={value} onChange={(e) => onPick(e.target.value)} aria-label={`${label}: any colour`} />
-        </label>
-      </span>
+            className={`color-own ${own ? 'on' : ''} ${open ? 'open' : ''}`}
+            style={own ? { ['--own' as string]: value } : undefined}
+            aria-label={open ? `${label}: close the colour picker` : `${label}: pick any colour`}
+            aria-expanded={open}
+            title="Any colour"
+            onClick={onToggle}
+          >
+            <span className="own-wheel" aria-hidden />
+            {own && <span className="own-fill" aria-hidden />}
+          </button>
+        </span>
+      </div>
+      {open && <ColorPicker label={label} value={value} onChange={onPick} />}
     </div>
   );
 }
@@ -877,7 +933,7 @@ function TemplatePanel({
   onClose(): void;
 }) {
   const start = mode === 'start';
-  return (
+  return createPortal(
     <Dialog title={start ? 'Pick a 3D stage' : 'Templates'} className="see-through stage-drawer" onClose={onClose}>
       <div className="sheet-body template-panel" data-nav-group="templates">
         <div>
@@ -924,6 +980,7 @@ function TemplatePanel({
           ))}
         </ul>
       </div>
-    </Dialog>
+    </Dialog>,
+    drawerHost(),
   );
 }
