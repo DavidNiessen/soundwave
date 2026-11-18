@@ -47,8 +47,8 @@ function apply() {
 
 /* ------------------------------------------------------------------ the screens' video */
 
-/** Frames sent to the stage's screens per second: plenty for a picture that size, and light. */
-const SCREEN_FPS = 30;
+/** Frames sent to the stage's screens per second at most: plenty for screens that size, and light. */
+const SCREEN_FPS = 24;
 let video: HTMLVideoElement | null = null;
 let videoId: string | null = null;
 let timer = 0;
@@ -75,8 +75,11 @@ async function showScreenVideo(id: string | null) {
   video = v;
   void v.play().catch(() => {});
   let busy = false;
+  let lastTime = -1;
   timer = window.setInterval(() => {
-    if (busy || v.readyState < 2 || v.paused) return;
+    // Only a new frame, and none while the window is hidden or one is still on its way.
+    if (busy || v.readyState < 2 || v.paused || document.hidden || v.currentTime === lastTime) return;
+    lastTime = v.currentTime;
     busy = true;
     void sendScreenFrame(v).finally(() => (busy = false));
   }, 1000 / SCREEN_FPS);

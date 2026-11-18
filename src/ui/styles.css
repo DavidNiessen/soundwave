@@ -6032,7 +6032,6 @@ a.btn {
   padding: 0.5rem 0.5rem 0.65rem;
   border-radius: var(--r-l);
   background: var(--panel);
-  backdrop-filter: blur(var(--glass-blur));
   color: var(--ink);
   text-align: left;
   border: 2px solid transparent;
@@ -6131,7 +6130,6 @@ a.btn {
   bottom: 0;
   width: min(30rem, 46vw);
   overflow-y: auto;
-  backdrop-filter: blur(var(--glass-blur));
   animation: stage-editor-in 0.3s var(--ease) backwards;
   z-index: 2;
 }
@@ -6901,4 +6899,186 @@ button.color-own {
   inset: 24%;
   background: var(--own);
   box-shadow: 0 0 0 2px rgb(0 0 0 / 0.5);
+}
+
+/* The stage cards are the main menu's tiles: the picture edge to edge, the title in the display face
+   and the details under it, no frame; they rise into place one after another, and lift and brighten
+   under the pointer or the focus. The stage in use wears a badge on its picture. */
+.card-row .stage-card {
+  position: relative;
+  width: clamp(10.5rem, 14vw, 13.5rem);
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--r-l);
+  background: var(--panel);
+  animation:
+    tile-rise 0.5s var(--ease-soft) backwards,
+    tile-fade 0.25s ease-out backwards;
+  transition:
+    transform 0.28s var(--ease),
+    background 0.2s;
+}
+.card-row .stage-card:nth-child(2) {
+  animation-delay: 50ms;
+}
+.card-row .stage-card:nth-child(3) {
+  animation-delay: 100ms;
+}
+.card-row .stage-card:nth-child(4) {
+  animation-delay: 150ms;
+}
+.card-row .stage-card:nth-child(n + 5) {
+  animation-delay: 200ms;
+}
+.card-row .stage-card:is(.is-focus, .focused),
+:root[data-input='mouse'] .card-row .stage-card:hover {
+  transform: translateY(-0.4rem);
+  background: var(--raised);
+  border: 0;
+}
+.card-row .stage-card:active {
+  transform: scale(0.98);
+}
+.card-row .stage-card.active {
+  border: 0;
+}
+.stage-art {
+  position: relative;
+  display: grid;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  background: var(--deep);
+}
+.card-row .stage-art .stage-swatch {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+.stage-art .mosaic.blank {
+  margin: 0.6rem;
+}
+.stage-art .mosaic.blank svg {
+  width: 2.2rem;
+  height: 2.2rem;
+}
+.card-row .stage-card:is(:hover, .is-focus) .mosaic.dashed {
+  border-color: var(--ink-3);
+  color: var(--ink-2);
+}
+.stage-badge {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.55rem 0.2rem 0.4rem;
+  border-radius: 999px;
+  background: var(--pink);
+  color: var(--pink-ink);
+  font-size: 0.72rem;
+  font-weight: 800;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.35);
+}
+.stage-badge svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+.card-row .stage-card .tile-text {
+  gap: 0.3rem;
+  padding: 0.75rem 0.9rem 0.9rem;
+}
+.stage-title {
+  font-size: clamp(1rem, 1.25vw, 1.2rem);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stage-meta {
+  min-height: 2.5em;
+  font-size: 0.82rem;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.card-group-label {
+  font-stretch: 112%;
+  font-style: italic;
+  font-weight: 900;
+}
+
+/* New stage, like the game's other cards: the display heading, and its four choices as small tiles
+   of the main menu (the picture edge to edge, the title in the display face, lifting on hover). */
+.overlay.card.new-stage-card .dialog {
+  width: min(46rem, 100%);
+}
+.new-stage.pause-card {
+  padding: 1.5rem;
+}
+.new-stage .new-stage-title {
+  font-size: clamp(1.7rem, 3vw, 2.4rem);
+}
+.new-stage .start-grid {
+  margin-top: 0.6rem;
+  gap: 0.75rem;
+}
+.new-stage .start-option {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--r-l);
+  background: var(--panel);
+  animation:
+    tile-rise 0.45s var(--ease-soft) backwards,
+    tile-fade 0.22s ease-out backwards;
+  transition:
+    transform 0.28s var(--ease),
+    background 0.2s;
+}
+.new-stage .start-option:nth-child(2) {
+  animation-delay: 45ms;
+}
+.new-stage .start-option:nth-child(3) {
+  animation-delay: 90ms;
+}
+.new-stage .start-option:nth-child(4) {
+  animation-delay: 135ms;
+}
+.new-stage .start-option:is(.is-focus, :focus-visible),
+:root[data-input='mouse'] .new-stage .start-option:hover {
+  transform: translateY(-0.35rem);
+  background: var(--raised);
+  border: 0;
+}
+.new-stage .start-option:active {
+  transform: scale(0.98);
+}
+.new-stage .start-art {
+  margin: 0;
+  border-radius: 0;
+  aspect-ratio: 4 / 3;
+  background: radial-gradient(90% 100% at 50% 100%, var(--tint), transparent 80%), var(--deep);
+}
+.new-stage .start-art svg {
+  width: 2.3rem;
+  height: 2.3rem;
+}
+.new-stage .tile-text {
+  gap: 0.3rem;
+  padding: 0.75rem 0.9rem 0.9rem;
+}
+.new-stage .start-label {
+  padding: 0;
+  font-size: 1.05rem;
+}
+.new-stage .start-help {
+  padding: 0;
+  font-size: 0.8rem;
+  line-height: 1.3;
 }

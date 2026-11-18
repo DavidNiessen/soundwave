@@ -83,6 +83,10 @@ const STARTS: { kind: BackdropKind; label: string; help: string; icon: LucideIco
 /** How long Test the drop runs the show at full tilt, seconds. */
 const DROP_SECONDS = 5;
 const pct = (v: number) => `${Math.round(v * 100)}%`;
+/** The stage behind follows the card in focus once it has stayed there this long, ms. */
+const PREVIEW_SETTLE_MS = 70;
+/** An edit reaches the settings (and the disk) once changes have paused this long, ms. */
+const COMMIT_MS = 350;
 /** Edits closer together than this are undone as one (a slider dragged along). */
 const UNDO_JOIN_MS = 700;
 
@@ -178,37 +182,73 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
   const setAll = (on: boolean) => setPanel(on ? 'templates' : null);
   const [activeRow, setActiveRow] = useState<string | null>(null);
   const history = useRef<History>([]);
-  const editing = on && editId ? (stages.mine.find((d) => d.id === editId) ?? null) : null;
+  /**
+   * The stage being edited as it is right now. A change shows at once (on the stage and in the
+   * editor); it reaches the settings, and with them the disk, once the changes pause, so dragging a
+   * colour or a slider does not save every setting there is on every frame.
+   */
+  const [draft, setDraft] = useState<StageDef | null>(null);
+  const draftRef = useRef<StageDef | null>(null);
+  const commitTimer = useRef(0);
+  const editing = on && editId ? ((draft?.id === editId ? draft : null) ?? stages.mine.find((d) => d.id === editId) ?? null) : null;
   const shown = editing ?? findStage(stages, focusId);
 
   // The real stage shows the stage in focus or being edited; leaving the tab puts the one in use back.
   const preview = on ? JSON.stringify(shown) : '';
-  useEffect(() => setPreviewStage(preview ? (JSON.parse(preview) as StageDef) : null), [preview]);
+  // Sweeping across the cards does not switch the stage for every card passed (each switch can start
+  // a video): it follows once the pointer or focus settles. Edits show at once.
+  const instant = !!editing;
+  useEffect(() => {
+    const show = () => setPreviewStage(preview ? (JSON.parse(preview) as StageDef) : null);
+    if (instant || !preview) return show();
+    const t = setTimeout(show, PREVIEW_SETTLE_MS);
+    return () => clearTimeout(t);
+  }, [preview, instant]);
   useEffect(() => () => setPreviewStage(null), []);
   const latest = useRef(stages);
   latest.current = stages;
   // Leaving the tab closes the editor.
   useEffect(() => {
     if (on) return;
+    flushRef.current();
     setEditId(null);
     setDialog(null);
     setAll(false);
     setFocusId(latest.current.active);
   }, [on]);
 
-  const equip = (id: string) => onChange({ ...stages, active: id });
+  const equip = (id: string) => onChange({ ...flush(), active: id });
+  /** Hands the edited stage to the settings now; gives the settings as they then are. */
+  const flush = (): StageSettings => {
+    clearTimeout(commitTimer.current);
+    const d = draftRef.current;
+    if (!d) return latest.current;
+    draftRef.current = null;
+    const next = { ...latest.current, mine: latest.current.mine.map((x) => (x.id === d.id ? d : x)) };
+    latest.current = next;
+    onChange(next);
+    setDraft(null);
+    return next;
+  };
+  const flushRef = useRef(flush);
+  flushRef.current = flush;
+  useEffect(() => () => void flushRef.current(), []);
   const save = (def: StageDef) => {
-    const before = latest.current.mine.find((d) => d.id === def.id);
+    const before = draftRef.current?.id === def.id ? draftRef.current : latest.current.mine.find((d) => d.id === def.id);
     if (before) remember(history.current, before);
-    onChange({ ...latest.current, mine: latest.current.mine.map((d) => (d.id === def.id ? def : d)) });
+    draftRef.current = def;
+    setDraft(def);
+    clearTimeout(commitTimer.current);
+    commitTimer.current = window.setTimeout(() => flushRef.current(), COMMIT_MS);
   };
   const undo = () => {
+    const s = flush();
     const last = history.current.pop();
-    if (last) onChange({ ...stages, mine: stages.mine.map((d) => (d.id === last.def.id ? last.def : d)) });
+    if (last) onChange({ ...s, mine: s.mine.map((d) => (d.id === last.def.id ? last.def : d)) });
   };
   /** A copy of `from` (changed by `patch`) as a new stage of the player's, in use and open in the editor. */
   const create = (from: StageDef, patch: Partial<StageDef> = {}) => {
-    const s = latest.current;
+    const s = flush();
     const def = { ...copyStage(s, from), ...patch };
     onChange({ active: def.id, mine: [...s.mine, def] });
     setFocusId(def.id);
@@ -238,11 +278,15 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
     history.current = [];
   };
   const close = () => {
+    const s = flush();
     setEditId(null);
     history.current = [];
-    void tidyMedia(latest.current);
+    void tidyMedia(s);
   };
   const remove = (def: StageDef) => {
+    clearTimeout(commitTimer.current);
+    draftRef.current = null;
+    setDraft(null);
     const next = { active: stages.active === def.id ? 'festival' : stages.active, mine: stages.mine.filter((d) => d.id !== def.id) };
     onChange(next);
     setEditId(null);
@@ -373,12 +417,16 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
               <div className="card-row">
                 {stages.mine.map((d) => card(d))}
                 <button type="button" className="stage-card new" onClick={() => setDialog('new')} onFocus={() => setFocusId(stages.active)}>
-                  <span className="stage-swatch blank" aria-hidden>
-                    <Plus strokeWidth={ICON_STROKE} />
+                  <span className="stage-art" aria-hidden>
+                    <span className="mosaic blank dashed">
+                      <Plus strokeWidth={ICON_STROKE} />
+                    </span>
                   </span>
-                  <span className="stage-name">New stage</span>
-                  <span className="stage-tags">
-                    {stages.mine.length ? 'A 3D stage, video, picture or colour' : 'Make your first stage'}
+                  <span className="tile-text">
+                    <span className="tile-title stage-title">New stage</span>
+                    <span className="tile-meta stage-meta">
+                      {stages.mine.length ? 'A 3D stage, video, picture or colour' : 'Make your first stage'}
+                    </span>
                   </span>
                 </button>
               </div>
@@ -388,11 +436,15 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
               <div className="card-row">
                 {templates.map((d) => card(d))}
                 <button type="button" className="stage-card new" onClick={() => setAll(true)} onFocus={() => setFocusId(stages.active)}>
-                  <span className="stage-swatch blank" aria-hidden>
-                    <LayoutGrid strokeWidth={ICON_STROKE} />
+                  <span className="stage-art" aria-hidden>
+                    <span className="mosaic blank dashed">
+                      <LayoutGrid strokeWidth={ICON_STROKE} />
+                    </span>
                   </span>
-                  <span className="stage-name">All templates</span>
-                  <span className="stage-tags">{BUILT_IN.length} to choose from</span>
+                  <span className="tile-text">
+                    <span className="tile-title stage-title">All templates</span>
+                    <span className="tile-meta stage-meta">{BUILT_IN.length} to choose from</span>
+                  </span>
                 </button>
               </div>
             </div>
@@ -401,9 +453,9 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
       </div>
       {dialog === 'new' && (
         <Dialog title="New stage" variant="card" className="new-stage-card" onClose={() => setDialog(null)} closeLabel="Cancel">
-          <div className="new-stage">
-            <h2 className="new-stage-title">New stage</h2>
-            <p className="new-stage-sub">What goes behind the highway? You can change anything later.</p>
+          <div className="pause-card new-stage">
+            <h2 className="display new-stage-title">New stage</h2>
+            <p className="hint">What goes behind the highway? You can change anything later.</p>
             <div className="start-grid">
               {STARTS.map(({ kind, label, help, icon: Icon }, i) => (
                 <button
@@ -416,8 +468,10 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
                   <span className="start-art" aria-hidden>
                     <Icon strokeWidth={1.8} />
                   </span>
-                  <span className="start-label">{label}</span>
-                  <span className="start-help">{help}</span>
+                  <span className="tile-text">
+                    <span className="tile-title start-label">{label}</span>
+                    <span className="tile-meta start-help">{help}</span>
+                  </span>
                 </button>
               ))}
             </div>
@@ -505,12 +559,18 @@ function StageCard({
       onPointerEnter={(e) => e.pointerType === 'mouse' && onFocus()}
       onClick={onPick}
     >
-      <Swatch def={def} />
-      <span className="stage-name">
-        {def.name}
-        {active && <Check className="in-use" strokeWidth={3} aria-label="In use" />}
+      <span className="stage-art">
+        <Swatch def={def} />
+        {active && (
+          <span className="stage-badge">
+            <Check strokeWidth={3} aria-hidden /> In use
+          </span>
+        )}
       </span>
-      <span className="stage-tags">{info ?? tags.join(' · ')}</span>
+      <span className="tile-text">
+        <span className="tile-title stage-title">{def.name}</span>
+        <span className="tile-meta stage-meta">{info ?? tags.join(' · ')}</span>
+      </span>
     </button>
   );
 }

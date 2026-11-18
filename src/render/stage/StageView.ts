@@ -73,7 +73,7 @@ export async function sendScreenFrame(source: CanvasImageSource | null) {
   }
   for (const view of list) {
     try {
-      view.screenFrame(await createImageBitmap(source as ImageBitmapSource, { resizeWidth: 640, resizeHeight: 360 }));
+      view.screenFrame(await createImageBitmap(source as ImageBitmapSource, { resizeWidth: 480, resizeHeight: 270, resizeQuality: 'low' }));
     } catch {
       /* the video has no frame yet */
     }
