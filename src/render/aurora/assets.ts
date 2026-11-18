@@ -1,43 +1,13 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
-import type { StageCameras, Vec3 } from '../stage/Director';
-import type { DeckInfo } from './materials';
+import type { Vec3 } from '../stage/Director';
+import { DEFAULT_VENUE, findVenue } from '../stage/venues';
+import { readVenue, type VenueData } from '../stage/venueSchema';
 import type { TerrainParams } from './terrain';
 
-/** What tools/stage/aurora/build_venue.py writes next to venue.glb (three.js coordinates). */
-export interface VenueData {
-  version: number;
-  cameras: StageCameras;
-  band: Record<string, Vec3>;
-  /** The low platform the band plays on: centre (at its top) and half axes. */
-  island?: { center: Vec3; a: number; b: number };
-  /** The podium each player stands on: half axes, and how far it can rise from where it rests. */
-  podiums?: Record<string, { rx: number; ry: number; travel: number }>;
-  fixtures: Fixture[];
-  /** The main screen: centre and radius of the moon drawn on it, and the arch outline it fills. */
-  moon: { center: Vec3; radius: number; arch?: { halfWidth: number; height: number; power: number } };
-  fireworks: FireworkSpec[];
-  co2: Vec3[];
-  /** Spots in the audience that stay free: the mix position, delay towers. */
-  clear?: { pos: Vec3; radius: number }[];
-  deck: DeckInfo;
-}
-
-/** A fan of sparks: rays spread (degrees) around a lean from vertical, each `length` metres long. */
-export interface FireworkSpec {
-  origin: Vec3;
-  n: number;
-  spread: number;
-  length: [number, number];
-  lean: number;
-}
-
-export interface Fixture {
-  group: string;
-  pos: Vec3;
-  dir: Vec3;
-}
+/** A venue's data, fixtures and fireworks: see the venue schema (src/render/stage/venueSchema.ts). */
+export type { Fixture, FireworkSpec, VenueData } from '../stage/venueSchema';
 
 export interface Clip {
   name: string;
@@ -99,7 +69,8 @@ export interface VenueAssets {
   crowd: FigureSet;
 }
 
-let cache: Promise<VenueAssets> | null = null;
+/** Each venue's files, loaded once (by venue id). */
+const cache = new Map<string, Promise<VenueAssets>>();
 
 /** How much of the venue has arrived (0..1), for the loading screen. */
 const PARTS = 5;
@@ -113,10 +84,12 @@ export function watchVenue(cb: (share: number) => void): () => void {
   return () => void watchers.delete(cb);
 }
 
-/** Loads the venue once; later callers share the same promise. */
-export function loadVenue(): Promise<VenueAssets> {
-  if (cache) return cache;
-  const base = `${import.meta.env.BASE_URL}stage/aurora/`;
+/** Loads a venue's files (see venues.ts) once; later callers share the same promise. */
+export function loadVenue(id: string = DEFAULT_VENUE): Promise<VenueAssets> {
+  const venueId = findVenue(id).id;
+  const cached = cache.get(venueId);
+  if (cached) return cached;
+  const base = `${import.meta.env.BASE_URL}${findVenue(venueId).folder}`;
   const draco = new DRACOLoader().setDecoderPath(`${import.meta.env.BASE_URL}draco/`);
   const loader = new GLTFLoader().setDRACOLoader(draco);
   const get = async (name: string) => {
@@ -144,9 +117,9 @@ export function loadVenue(): Promise<VenueAssets> {
       tell();
       return v;
     });
-  cache = Promise.all([
+  const loading = Promise.all([
     part(loader.loadAsync(`${base}venue.glb`)),
-    part(get('venue.json').then((r) => r.json() as Promise<VenueData>)),
+    part(get('venue.json').then(async (r) => readVenue(await r.json(), findVenue(venueId).name))),
     part(people('band')),
     part(people('crowd')),
     part(scenery),
@@ -154,8 +127,7 @@ export function loadVenue(): Promise<VenueAssets> {
     draco.dispose();
     return { scene: venue.scene, data, band, crowd, scenery: land };
   });
-  cache.catch(() => {
-    cache = null;
-  });
-  return cache;
+  cache.set(venueId, loading);
+  loading.catch(() => cache.delete(venueId));
+  return loading;
 }

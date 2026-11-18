@@ -3,7 +3,8 @@
  * with the game; the player can copy one and make it their own (the Stage tab, src/ui/StageBrowser.tsx). They are
  * kept in the settings, so they travel with a library backup.
  */
-import type { StageLook } from '../render/stage/look';
+import type { Sky, StageLook } from '../render/stage/look';
+import { DEFAULT_VENUE, findVenue } from '../render/stage/venues';
 
 /** A colour as `#rrggbb`. */
 export type Hex = string;
@@ -32,6 +33,10 @@ export interface StageDef {
   id: string;
   name: string;
   backdrop: Backdrop;
+  /** The 3D venue (see src/render/stage/venues.ts). */
+  venueId: string;
+  /** The sky over the 3D stage. */
+  sky: Sky;
   /** How much a video, picture or gradient is darkened behind the highway, 0..0.85. */
   dim: number;
   /** A video of the player's own on the 3D venue's screens (null: the show's own pictures). */
@@ -69,6 +74,8 @@ export const RANGES = {
 
 const base: Omit<StageDef, 'id' | 'name'> = {
   backdrop: { kind: 'venue' },
+  venueId: DEFAULT_VENUE,
+  sky: 'night',
   dim: 0.35,
   screens: null,
   screensTurn: 0,
@@ -84,6 +91,12 @@ const base: Omit<StageDef, 'id' | 'name'> = {
   pyro: true,
 };
 
+export const SKIES: { value: Sky; label: string; help: string }[] = [
+  { value: 'night', label: 'Night', help: 'A clouded night with stars and a moon.' },
+  { value: 'aurora', label: 'Aurora', help: 'Clear skies full of northern lights.' },
+  { value: 'black', label: 'Pitch black', help: 'No sky at all.' },
+];
+
 /** What each template is like, for the template list. */
 export const TEMPLATE_INFO: Record<string, string> = {
   festival: 'The full show: the stage’s own colours, changing with the music.',
@@ -97,7 +110,7 @@ export const TEMPLATE_INFO: Record<string, string> = {
 };
 
 /** The templates shown in the browser itself; the rest are in its list of all templates. */
-export const FEATURED = ['festival', 'blackout', 'neon'];
+export const FEATURED = ['blackout'];
 
 /** The stages that come with the game (the templates). They cannot be changed, only copied. */
 export const BUILT_IN: readonly StageDef[] = [
@@ -174,6 +187,8 @@ function normalizeDef(raw: unknown): StageDef | null {
     id: d.id,
     name: typeof d.name === 'string' && d.name.trim() ? d.name.trim().slice(0, 32) : 'My stage',
     backdrop: normalizeBackdrop(d.backdrop),
+    venueId: findVenue(typeof d.venueId === 'string' ? d.venueId : undefined).id,
+    sky: d.sky === 'aurora' || d.sky === 'black' ? d.sky : 'night',
     dim: clamp(d.dim, RANGES.dim, 0.35),
     screens: typeof d.screens === 'string' && d.screens ? d.screens : null,
     screensTurn: [0, 1, 2, 3].includes(Number(d.screensTurn)) ? Number(d.screensTurn) : 0,
@@ -255,6 +270,8 @@ const hexToRgb = (hex: Hex): [number, number, number] => {
 /** The stage as the renderer takes it. */
 export function stageLook(d: StageDef): StageLook {
   return {
+    venueId: d.venueId,
+    sky: d.sky,
     colors: d.colors && { key: hexToRgb(d.colors.key), accent: hexToRgb(d.colors.accent), wash: hexToRgb(d.colors.wash) },
     brightness: d.brightness,
     venue: d.venue,

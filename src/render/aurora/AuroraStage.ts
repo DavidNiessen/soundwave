@@ -81,7 +81,7 @@ export class AuroraStage {
    * where it runs beside the page instead of in it. Nothing here touches the page.
    */
   static async create(canvas: HTMLCanvasElement | OffscreenCanvas, g: GraphicsSettings, opts: StageOptions): Promise<AuroraStage> {
-    return new AuroraStage(canvas, await loadVenue(), g, opts);
+    return new AuroraStage(canvas, await loadVenue(opts.look?.venueId), g, opts);
   }
 
   readonly director: Director;
@@ -360,7 +360,10 @@ export class AuroraStage {
    */
   private applyVenueLight() {
     const v = this.look.venue;
-    shared.uSkyLevel.value = 0.12 + 0.88 * Math.min(1, v);
+    const sky = this.look.sky;
+    shared.uSkyLevel.value = sky === 'black' ? 0.02 : 0.12 + 0.88 * Math.min(1, v);
+    shared.uAuroraLevel.value = sky === 'aurora' ? 9 : 1;
+    shared.uCloudLevel.value = sky === 'aurora' ? 0.25 : 1;
     shared.uHazeFar.value.copy(BASE_HAZE_FAR).multiplyScalar(0.15 + 0.85 * Math.min(1, v));
     shared.uMoonCol.value.copy(BASE_MOON).multiplyScalar(0.1 + 0.9 * v);
     this.shoreColors.forEach((c, i) => shared.uShoreCol.value[i].copy(c).multiplyScalar(0.1 + 0.9 * v));
@@ -553,8 +556,8 @@ export class AuroraStage {
    */
   private renderMirror(pos: readonly number[], target: readonly number[]) {
     const mirror = this.mirror;
-    shared.uMirrorOn.value = mirror ? 1 : 0;
-    if (!mirror || !this.water) return;
+    shared.uMirrorOn.value = mirror && this.water?.visible ? 1 : 0;
+    if (!mirror || !this.water?.visible) return;
     const level = shared.uWaterLevel.value;
     const cam = this.mirrorCamera;
     cam.fov = this.camera.fov;
@@ -664,33 +667,32 @@ export class AuroraStage {
 
     for (let i = 0; i < this.beams.states.length; i++) {
       const b = this.beams.states[i];
-      const group = this.beams.fixtures[i].group;
+      const role = this.beams.fixtures[i].role;
       let level = s.beamLevel;
       let pan = 0;
       let tilt = 0;
-      switch (group) {
-        case 'Sky':
+      switch (role) {
+        case 'sky':
           pan = Math.sin(t * 0.22 + i) * 0.16;
           tilt = Math.sin(t * 0.17 + i * 1.7) * 0.1;
           level *= i % 2 ? 0.7 : 0;
           break;
-        case 'Ribbon':
+        case 'ribbon':
           // Glints along the ribbon: lenses without a beam worth the name.
           level *= 0.12;
           break;
-        case 'Truss':
+        case 'truss':
           level = 0.25 + 0.2 * this.barPulse + 0.12 * this.low;
           break;
-        case 'Halo':
+        case 'halo':
           // The ring over the band: every head stays on its player and breathes with the bar.
           tilt = Math.sin(t * 0.4 + i) * 0.012;
           level = 0.25 + 0.16 * this.barPulse + 0.15 * s.beamLevel;
           break;
-        case 'Delay':
-        case 'Foh':
+        case 'house':
           level = 0.14;
           break;
-        case 'Floor':
+        case 'floor':
           pan = Math.sin(t * 0.5 + i * 0.6) * 0.25;
           level *= 0.35 + 0.4 * this.pulse;
           break;
@@ -714,7 +716,7 @@ export class AuroraStage {
       b.pan += (pan - b.pan) * ease(4);
       b.tilt += (tilt - b.tilt) * ease(4);
       b.level += (level - b.level) * ease(level > b.level ? 16 : 5);
-      b.color.lerp(group === 'Sky' || i % 3 === 0 ? this.accent : this.key, ease(3));
+      b.color.lerp(role === 'sky' || i % 3 === 0 ? this.accent : this.key, ease(3));
     }
   }
 

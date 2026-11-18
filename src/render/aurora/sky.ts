@@ -41,7 +41,7 @@ export function buildSky(): THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMateria
           float q = (d.y - mid) / 0.075;
           curtain += exp(-q * q) * (0.4 + 0.6 * vnoise(vec2(az * 36.0 + fi * 5.0, uTime * 0.1))) * (1.0 - 0.4 * fi);
         }
-        col += mix(vec3(0.1, 0.9, 0.55), vec3(0.5, 0.3, 1.0), smoothstep(0.3, 0.62, d.y)) * curtain * 0.05 * (0.7 + 0.3 * sin(uTime * 0.06));
+        col += mix(vec3(0.1, 0.9, 0.55), vec3(0.5, 0.3, 1.0), smoothstep(0.3, 0.62, d.y)) * curtain * 0.05 * uAuroraLevel * (0.7 + 0.3 * sin(uTime * 0.06));
         // A shooting star every so often.
         float turn = uTime / 23.0;
         float id = floor(turn);
@@ -71,8 +71,8 @@ export function buildSky(): THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMateria
           vec3 body = mix(vec3(0.022, 0.055, 0.2), vec3(0.006, 0.014, 0.07), smoothstep(0.55, 0.9, n));
           vec3 cloud = body + (vec3(0.035, 0.09, 0.3) + uHazeNear * (0.1 + 0.9 * pow(toStage, 2.0)) + uMoonCol * exp(-away * 4.5) * 0.7) * edge;
           float fade = smoothstep(0.0, 0.2, d.y);
-          col = mix(col, cloud, cover * fade * 0.92);
-          stars *= 1.0 - cover;
+          col = mix(col, cloud, cover * fade * 0.92 * uCloudLevel);
+          stars *= 1.0 - cover * uCloudLevel;
         }
         col += vec3(0.8, 0.9, 1.0) * stars * smoothstep(0.02, 0.2, d.y);
         // Three ridges of hills close the horizon, each nearer one darker.

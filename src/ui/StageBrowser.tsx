@@ -1,7 +1,9 @@
 import {
+  ArrowLeft,
   Box,
   Check,
   ChevronDown,
+  Copy,
   Dices,
   Film,
   Image as ImageIcon,
@@ -10,13 +12,12 @@ import {
   Palette,
   Plus,
   Sparkles,
+  Trash2,
   Undo2,
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { keysOf } from '../input/bindings';
-import { PadGlyph } from '../input/glyphs';
-import { confirmInput } from '../input/pads';
 import {
   BUILT_IN,
   copyStage,
@@ -27,6 +28,7 @@ import {
   RANGES,
   stageMedia,
   stageWeight,
+  SKIES,
   SWATCHES,
   TEMPLATE_INFO,
   type BackdropKind,
@@ -35,12 +37,14 @@ import {
   type StageSettings,
 } from '../game/stages';
 import type { Settings } from '../game/settings';
+import { playSfx } from '../audio/sfx';
+import { menuPulse } from '../input/rumble';
 import { boostMenuStage } from '../render/aurora/menuStage';
 import { setPreviewStage } from '../render/stage/showStage';
+import { findVenue, VENUES } from '../render/stage/venues';
 import { deleteMedia, getMedia, mediaIds, mediaUrl, putMedia } from '../storage/stageMedia';
 import { useHints, type Action } from './actions';
 import { Dialog } from './Dialog';
-import { HoldButton } from './HoldButton';
 import { ICON_STROKE } from './icons';
 import { ON_OFF, RowView, type Row } from './SettingsScreen';
 
@@ -75,6 +79,8 @@ const STARTS: { kind: BackdropKind; label: string; help: string; icon: LucideIco
   { kind: 'image', label: 'My picture', help: 'A picture of yours behind the highway.', icon: ImageIcon },
   { kind: 'gradient', label: 'Colour', help: 'A calm colour gradient, the lightest of all to draw.', icon: Palette },
 ];
+/** How long Test the drop runs the show at full tilt, seconds. */
+const DROP_SECONDS = 5;
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 /** Edits closer together than this are undone as one (a slider dragged along). */
 const UNDO_JOIN_MS = 700;
@@ -114,6 +120,21 @@ function pickMedia(kind: 'video' | 'image'): Promise<{ id: string; name: string 
   });
 }
 
+/**
+ * Makes the mouse wheel run a row sideways (a ref callback: it holds for as long as the row is on
+ * the page). Each notch moves the row at once, so nothing in the row's own scrolling pulls it back.
+ */
+function wheelSideways(row: HTMLDivElement | null) {
+  if (!row) return;
+  const wheel = (e: WheelEvent) => {
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || row.scrollWidth <= row.clientWidth) return;
+    e.preventDefault();
+    row.scrollLeft += e.deltaY * (e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? row.clientWidth : 1);
+  };
+  row.addEventListener('wheel', wheel, { passive: false });
+  return () => row.removeEventListener('wheel', wheel);
+}
+
 /** A kept file's name, once it is read. */
 function useMediaName(id: string | null): string | null {
   const [name, setName] = useState<string | null>(null);
@@ -143,10 +164,16 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
   /** The card in focus (its stage shows behind the menu), and the stage open in the editor. */
   const [focusId, setFocusId] = useState(stages.active);
   const [editId, setEditId] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<'new' | 'templates' | null>(null);
+  const [dialog, setDialog] = useState<'new' | null>(null);
+  /**
+   * A panel beside the stage in place of the cards: every template to use or copy, or (for a new
+   * 3D stage) the 3D stages to start from.
+   */
+  const [panel, setPanel] = useState<'templates' | 'start' | null>(null);
+  const all = panel !== null;
+  const setAll = (on: boolean) => setPanel(on ? 'templates' : null);
   const [activeRow, setActiveRow] = useState<string | null>(null);
   const history = useRef<History>([]);
-  const cardsRef = useRef<HTMLDivElement>(null);
   const editing = on && editId ? (stages.mine.find((d) => d.id === editId) ?? null) : null;
   const shown = editing ?? findStage(stages, focusId);
 
@@ -161,20 +188,9 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
     if (on) return;
     setEditId(null);
     setDialog(null);
+    setAll(false);
     setFocusId(latest.current.active);
   }, [on]);
-  // The mouse wheel runs the cards sideways.
-  useEffect(() => {
-    const row = cardsRef.current;
-    if (!on || !row) return;
-    const wheel = (e: WheelEvent) => {
-      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
-      e.preventDefault();
-      row.scrollBy({ left: e.deltaY * (e.deltaMode === 1 ? 40 : 1), behavior: 'smooth' });
-    };
-    row.addEventListener('wheel', wheel, { passive: false });
-    return () => row.removeEventListener('wheel', wheel);
-  }, [on, editing]);
 
   const equip = (id: string) => onChange({ ...stages, active: id });
   const save = (def: StageDef) => {
@@ -193,13 +209,17 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
     onChange({ active: def.id, mine: [...s.mine, def] });
     setFocusId(def.id);
     setEditId(def.id);
+    setAll(false);
     history.current = [];
   };
   /** A new stage, from what is to be behind the highway. */
   const start = async (kind: BackdropKind) => {
     setDialog(null);
-    const venue = shown.backdrop.kind === 'venue' ? shown : BUILT_IN[0];
-    if (kind === 'venue') return create(venue);
+    // A new 3D stage starts from one of the 3D stages, picked in the panel beside the stage.
+    if (kind === 'venue') {
+      setFocusId(BUILT_IN[0].id);
+      return setPanel('start');
+    }
     if (kind === 'gradient') {
       const c = randomColors();
       return create(BUILT_IN[0], { name: 'My colour', backdrop: { kind, from: c.wash, to: c.key } });
@@ -226,8 +246,40 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
     history.current = [];
     void tidyMedia(next);
   };
-  const drop = () => boostMenuStage(5);
+  // Test the drop: the stage plays one for a few seconds, and the button says so meanwhile. Only a
+  // 3D stage has a show to drop.
+  const [dropping, setDropping] = useState(false);
+  useEffect(() => {
+    if (!dropping) return;
+    const t = setTimeout(() => setDropping(false), DROP_SECONDS * 1000);
+    return () => clearTimeout(t);
+  }, [dropping]);
+  const drop = () => {
+    if (dropping) return;
+    boostMenuStage(DROP_SECONDS);
+    playSfx('launch');
+    menuPulse('launch');
+    setDropping(true);
+  };
+  const dropAction = (def: StageDef): Action[] =>
+    def.backdrop.kind === 'venue'
+      ? [
+          {
+            id: 'drop',
+            label: dropping ? 'Dropping…' : 'Test the drop',
+            icon: Sparkles,
+            ...keysOf('stages.drop'),
+            disabled: dropping,
+            sfx: 'none',
+            run: drop,
+          },
+        ]
+      : [];
 
+  const leaveAll = () => {
+    setAll(false);
+    setFocusId(latest.current.active);
+  };
   const actions: Action[] =
     !on || dialog
       ? []
@@ -245,11 +297,12 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
                   },
                 ]
               : []),
-            { id: 'drop', label: 'Test the drop', icon: Sparkles, ...keysOf('stages.drop'), run: drop },
+            ...dropAction(editing),
             { id: 'undo', label: 'Undo', icon: Undo2, ...keysOf('stages.undo'), bar: false, run: undo },
           ]
         : [
-            { id: 'new', label: 'New stage', icon: Plus, ...keysOf('stages.new'), primary: true, run: () => setDialog('new') },
+            ...(all ? [{ id: 'templates-back', label: 'Close', icon: ArrowLeft, kbd: 'Escape', sfx: 'back', run: leaveAll }] : []),
+            { id: 'new', label: 'New stage', icon: Plus, ...keysOf('stages.new'), primary: !all, run: () => setDialog('new') },
             {
               id: 'edit',
               label: isBuiltIn(shown.id) ? 'Copy and customize' : 'Customize',
@@ -257,15 +310,16 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
               ...keysOf('stages.edit'),
               run: () => customize(shown),
             },
-            { id: 'drop', label: 'Test the drop', icon: Sparkles, ...keysOf('stages.drop'), run: drop },
+            ...dropAction(shown),
           ];
 
   // The templates in view: the featured ones, and the one in use when it is another.
   const templates = BUILT_IN.filter((d) => FEATURED.includes(d.id) || d.id === stages.active);
-  const card = (d: StageDef) => (
+  const card = (d: StageDef, info?: string) => (
     <StageCard
       key={d.id}
       def={d}
+      info={info}
       active={d.id === stages.active}
       focused={d.id === shown.id}
       onFocus={() => setFocusId(d.id)}
@@ -276,14 +330,15 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
   const view = (
     <div className={`stages ${editing ? 'is-editing' : ''}`}>
       <div className="edit-head">
-        <h2 className="page-title">{editing ? 'Customize' : 'Pick a stage'}</h2>
-        <p className="head-count">{editing ? editing.name : `${inUse.name} in use · press a stage to use it`}</p>
+        <h2 className="page-title">{editing ? 'Customize' : panel === 'start' ? 'New 3D stage' : all ? 'Templates' : 'Pick a stage'}</h2>
+        <p className="head-count">
+          {editing ? editing.name : all ? 'Point at one to see it on the stage' : `${inUse.name} in use · press a stage to use it`}
+        </p>
       </div>
       <div className="stages-body">
-        {editing && (
+        {editing ? (
           <Editor
             def={editing}
-            hints={hints}
             touch={touch}
             activeRow={activeRow}
             setActiveRow={setActiveRow}
@@ -292,121 +347,83 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
             canUndo={history.current.length > 0}
             onDelete={() => remove(editing)}
           />
+        ) : all ? (
+          <TemplatePanel
+            mode={panel === 'start' ? 'start' : 'browse'}
+            active={stages.active}
+            shown={shown.id}
+            onFocus={setFocusId}
+            onUse={(id) => {
+              if (panel === 'start') return create(findStage(stages, id));
+              equip(id);
+              setAll(false);
+              setFocusId(id);
+            }}
+            onCopy={(d) => create(d)}
+          />
+        ) : (
+          <div className="stage-cards" ref={wheelSideways} data-nav-group="stage-cards">
+            <div className="card-group" role="listbox" aria-label="Your stages">
+              <span className="card-group-label">Your stages</span>
+              <div className="card-row">
+                {stages.mine.map((d) => card(d))}
+                <button type="button" className="stage-card new" onClick={() => setDialog('new')} onFocus={() => setFocusId(stages.active)}>
+                  <span className="stage-swatch blank" aria-hidden>
+                    <Plus strokeWidth={ICON_STROKE} />
+                  </span>
+                  <span className="stage-name">New stage</span>
+                  <span className="stage-tags">
+                    {stages.mine.length ? 'A 3D stage, video, picture or colour' : 'Make your first stage'}
+                  </span>
+                </button>
+              </div>
+            </div>
+            <div className="card-group" role="listbox" aria-label="Templates">
+              <span className="card-group-label">Templates</span>
+              <div className="card-row">
+                {templates.map((d) => card(d))}
+                <button type="button" className="stage-card new" onClick={() => setAll(true)} onFocus={() => setFocusId(stages.active)}>
+                  <span className="stage-swatch blank" aria-hidden>
+                    <LayoutGrid strokeWidth={ICON_STROKE} />
+                  </span>
+                  <span className="stage-name">All templates</span>
+                  <span className="stage-tags">{BUILT_IN.length} to choose from</span>
+                </button>
+              </div>
+            </div>
+          </div>
         )}
-        <div className="stage-cards" ref={cardsRef} data-nav-group="stage-cards" inert={editing ? true : undefined}>
-          <div className="card-group" role="listbox" aria-label="Your stages">
-            <span className="card-group-label">Your stages</span>
-            <div className="card-row">
-              {stages.mine.map(card)}
-              <button type="button" className="stage-card new" onClick={() => setDialog('new')} onFocus={() => setFocusId(stages.active)}>
-                <span className="stage-swatch blank" aria-hidden>
-                  <Plus strokeWidth={ICON_STROKE} />
-                </span>
-                <span className="stage-name">New stage</span>
-                <span className="stage-tags">{stages.mine.length ? 'A 3D stage, video, picture or colour' : 'Make your first stage'}</span>
-              </button>
-            </div>
-          </div>
-          <div className="card-group" role="listbox" aria-label="Templates">
-            <span className="card-group-label">Templates</span>
-            <div className="card-row">
-              {templates.map(card)}
-              <button
-                type="button"
-                className="stage-card new"
-                onClick={() => setDialog('templates')}
-                onFocus={() => setFocusId(stages.active)}
-              >
-                <span className="stage-swatch blank" aria-hidden>
-                  <LayoutGrid strokeWidth={ICON_STROKE} />
-                </span>
-                <span className="stage-name">All templates</span>
-                <span className="stage-tags">{BUILT_IN.length} to choose from</span>
-              </button>
-            </div>
-          </div>
-        </div>
       </div>
       {dialog === 'new' && (
-        <Dialog title="New stage" variant="card" onClose={() => setDialog(null)} closeLabel="Cancel">
-          <div className="pause-card new-stage">
-            <h2 className="display">What’s behind the highway?</h2>
+        <Dialog title="New stage" variant="card" className="new-stage-card" onClose={() => setDialog(null)} closeLabel="Cancel">
+          <div className="new-stage">
+            <p className="new-stage-kicker">New stage</p>
+            <h2 className="new-stage-title">Start with what’s behind the highway</h2>
             <div className="start-grid">
               {STARTS.map(({ kind, label, help, icon: Icon }, i) => (
                 <button
                   key={kind}
                   type="button"
-                  className="start-option"
+                  className={`start-option start-${kind}`}
                   data-autofocus={i === 0 ? '' : undefined}
                   onClick={() => void start(kind)}
                 >
-                  <Icon strokeWidth={ICON_STROKE} aria-hidden />
+                  <span className="start-art" aria-hidden>
+                    <Icon strokeWidth={1.8} />
+                  </span>
                   <span className="start-label">{label}</span>
                   <span className="start-help">{help}</span>
                 </button>
               ))}
             </div>
+            <p className="new-stage-foot">You can change anything about it afterwards.</p>
           </div>
-        </Dialog>
-      )}
-      {dialog === 'templates' && (
-        <Dialog
-          title="Templates"
-          className="see-through"
-          onClose={() => {
-            setDialog(null);
-            setFocusId(latest.current.active);
-          }}
-        >
-          {(closeList) => (
-            <div className="template-list" data-nav-group="templates">
-              <p className="hint">Point at a template to see it behind the menu. Use it as it is, or copy it to make it your own.</p>
-              {BUILT_IN.map((d) => (
-                <div
-                  key={d.id}
-                  className={`template-row ${d.id === stages.active ? 'active' : ''}`}
-                  onPointerEnter={() => setFocusId(d.id)}
-                >
-                  <Swatch def={d} />
-                  <span className="template-text">
-                    <span className="stage-name">
-                      {d.name}
-                      {d.id === stages.active && <Check className="in-use" strokeWidth={3} aria-label="In use" />}
-                    </span>
-                    <span className="stage-tags">{TEMPLATE_INFO[d.id]}</span>
-                  </span>
-                  <button
-                    type="button"
-                    className="btn small"
-                    data-autofocus={d.id === stages.active ? '' : undefined}
-                    onFocus={() => setFocusId(d.id)}
-                    onClick={() => {
-                      equip(d.id);
-                      closeList();
-                    }}
-                  >
-                    Use
-                  </button>
-                  <button
-                    type="button"
-                    className="btn small"
-                    onFocus={() => setFocusId(d.id)}
-                    onClick={() => {
-                      setDialog(null);
-                      create(d);
-                    }}
-                  >
-                    Copy
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
         </Dialog>
       )}
     </div>
   );
-  return { view, actions, editing: !!editing };
+  // While a stage is edited or every template is shown, Esc steps back here, not out of the game.
+  return { view, actions, editing: !!editing || (on && all) };
 }
 
 /** A stage at a glance: its colours and darkness for a 3D stage, else its picture, video or colour. */
@@ -453,12 +470,15 @@ function Swatch({ def }: { def: StageDef }) {
 
 function StageCard({
   def,
+  info,
   active,
   focused,
   onFocus,
   onPick,
 }: {
   def: StageDef;
+  /** What the stage is like, in place of its tags (the list of all templates). */
+  info?: string;
   active: boolean;
   focused: boolean;
   onFocus(): void;
@@ -466,7 +486,8 @@ function StageCard({
 }) {
   const b = def.backdrop;
   const tags = [
-    b.kind !== 'venue' ? BACKDROP_LABEL[b.kind] : def.screens ? 'Video on the screens' : !def.colors ? 'Changes with the show' : null,
+    b.kind !== 'venue' ? BACKDROP_LABEL[b.kind] : !def.colors ? 'Changes with the show' : null,
+    b.kind === 'venue' && def.screens ? 'Video on the screens' : null,
     WEIGHT_LABEL[stageWeight(def)],
   ].filter(Boolean);
   return (
@@ -485,14 +506,13 @@ function StageCard({
         {def.name}
         {active && <Check className="in-use" strokeWidth={3} aria-label="In use" />}
       </span>
-      <span className="stage-tags">{tags.join(' · ')}</span>
+      <span className="stage-tags">{info ?? tags.join(' · ')}</span>
     </button>
   );
 }
 
 interface EditorProps {
   def: StageDef;
-  hints: ReturnType<typeof useHints>;
   touch: boolean;
   activeRow: string | null;
   setActiveRow(id: string): void;
@@ -502,7 +522,7 @@ interface EditorProps {
   onDelete(): void;
 }
 
-function Editor({ def, hints, touch, activeRow, setActiveRow, onSave, onUndo, canUndo, onDelete }: EditorProps) {
+function Editor({ def, touch, activeRow, setActiveRow, onSave, onUndo, canUndo, onDelete }: EditorProps) {
   const [more, setMore] = useState(false);
   const set = (patch: Partial<StageDef>) => onSave({ ...def, ...patch });
   const b = def.backdrop;
@@ -585,6 +605,31 @@ function Editor({ def, hints, touch, activeRow, setActiveRow, onSave, onUndo, ca
   ];
   if (venue) {
     sections.push(
+      {
+        title: 'Venue and sky',
+        rows: [
+          VENUES.length > 1
+            ? {
+                kind: 'choice',
+                id: 'venue',
+                label: 'Venue',
+                help: findVenue(def.venueId).description,
+                value: def.venueId,
+                options: VENUES.map((v) => ({ value: v.id, label: v.name, help: v.description })),
+                set: (v) => set({ venueId: v }),
+              }
+            : { kind: 'info', id: 'venue', label: 'Venue', help: findVenue(def.venueId).description, body: findVenue(def.venueId).name },
+          {
+            kind: 'choice',
+            id: 'sky',
+            label: 'Sky',
+            help: SKIES.map((x) => `${x.label}: ${x.help}`).join(' '),
+            value: def.sky,
+            options: SKIES,
+            set: (v) => set({ sky: v as StageDef['sky'] }),
+          },
+        ],
+      },
       {
         title: 'Colours and light',
         colors: true,
@@ -744,14 +789,7 @@ function Editor({ def, hints, touch, activeRow, setActiveRow, onSave, onUndo, ca
         <button type="button" className="btn small" disabled={!canUndo} onClick={onUndo}>
           <Undo2 strokeWidth={ICON_STROKE} aria-hidden /> Undo
         </button>
-        <HoldButton
-          tone="danger"
-          label="Delete stage"
-          hint={hints.mode === 'keyboard' ? 'Hold Enter to delete' : 'Hold to delete'}
-          glyph={hints.mode === 'pad' ? <PadGlyph input={confirmInput(hints.style)} style={hints.style} /> : undefined}
-          glyphStyle={hints.style}
-          onComplete={onDelete}
-        />
+        <DeleteButton onDelete={onDelete} />
       </section>
     </aside>
   );
@@ -778,5 +816,96 @@ function ColorRow({ label, value, onPick }: { label: string; value: string; onPi
         </label>
       </span>
     </div>
+  );
+}
+
+/** Deleting a stage takes two presses: the first asks, the second (within a few seconds) deletes. */
+function DeleteButton({ onDelete }: { onDelete(): void }) {
+  const [asking, setAsking] = useState(false);
+  useEffect(() => {
+    if (!asking) return;
+    const t = setTimeout(() => setAsking(false), 4000);
+    return () => clearTimeout(t);
+  }, [asking]);
+  return (
+    <button
+      type="button"
+      className={`btn small ${asking ? 'danger' : 'quiet-danger'}`}
+      onClick={() => (asking ? onDelete() : setAsking(true))}
+      onBlur={() => setAsking(false)}
+    >
+      <Trash2 strokeWidth={ICON_STROKE} aria-hidden /> {asking ? 'Press again to delete' : 'Delete'}
+    </button>
+  );
+}
+
+/**
+ * Every template beside the stage: a row each with its picture, name and what it is like. Pointing at
+ * one (or moving to it) shows it on the stage; pressing it puts it in use; its copy button makes a
+ * stage of the player's own from it.
+ */
+function TemplatePanel({
+  mode,
+  active,
+  shown,
+  onFocus,
+  onUse,
+  onCopy,
+}: {
+  /** `browse`: use a template or copy it; `start`: pick the 3D stage a new one starts from. */
+  mode: 'browse' | 'start';
+  active: string;
+  shown: string;
+  onFocus(id: string): void;
+  onUse(id: string): void;
+  onCopy(d: StageDef): void;
+}) {
+  const start = mode === 'start';
+  return (
+    <aside className="stage-editor template-panel" data-nav-group="templates" aria-label={start ? 'Pick a 3D stage' : 'Templates'}>
+      <div className="template-head">
+        <h2 className="set-heading">{start ? 'Pick a 3D stage' : 'Templates'}</h2>
+        <p className="template-sub">
+          {start
+            ? `In the ${findVenue(undefined).name} venue. Point at one to see it, then press it to make it yours.`
+            : 'Use one as it is, or copy it to make it your own.'}
+        </p>
+      </div>
+      <ul className="template-list">
+        {BUILT_IN.map((d) => (
+          <li key={d.id} className={`template-row ${d.id === active ? 'active' : ''} ${d.id === shown ? 'shown' : ''}`}>
+            <button
+              type="button"
+              className="template-use"
+              data-autofocus={(start ? d.id === BUILT_IN[0].id : d.id === active) ? '' : undefined}
+              onFocus={() => onFocus(d.id)}
+              onPointerEnter={(e) => e.pointerType === 'mouse' && onFocus(d.id)}
+              onClick={() => onUse(d.id)}
+            >
+              <Swatch def={d} />
+              <span className="template-text">
+                <span className="stage-name">
+                  {d.name}
+                  {!start && d.id === active && <span className="pill ready">In use</span>}
+                </span>
+                <span className="stage-tags">{TEMPLATE_INFO[d.id]}</span>
+              </span>
+            </button>
+            {!start && (
+              <button
+                type="button"
+                className="template-copy"
+                aria-label={`Copy ${d.name} and customize it`}
+                title="Copy and customize"
+                onFocus={() => onFocus(d.id)}
+                onClick={() => onCopy(d)}
+              >
+                <Copy strokeWidth={ICON_STROKE} aria-hidden />
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </aside>
   );
 }

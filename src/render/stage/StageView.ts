@@ -167,7 +167,9 @@ export class StageView {
   /** Resolves once the stage's first frame is drawn; rejects if it cannot be built. */
   readonly ready: Promise<void>;
   private canvas!: HTMLCanvasElement;
-  private readonly id = nextId++;
+  private id = nextId++;
+  /** The venue the stage was built in: a look in another one builds it again. */
+  private venue = '';
   private target: Target = 'page';
   private pageHandle: ((m: ToStage) => void) | null = null;
   /** Messages for the page's host until it has loaded. */
@@ -221,6 +223,7 @@ export class StageView {
     this.lastSize = '';
     const { width, height, dpr } = this.measure();
     const options = { ...this.options, look: currentLook };
+    this.venue = currentLook.venueId;
     const base = { type: 'create' as const, id: this.id, graphics: this.graphics, options, width, height, dpr };
     if (target === 'worker') {
       const offscreen = canvas.transferControlToOffscreen();
@@ -305,7 +308,18 @@ export class StageView {
 
   /** @internal How the stage looks (see setStageLook). */
   setLook(look: StageLook) {
+    if (look.venueId !== this.venue) return this.rebuild();
     this.send({ type: 'look', id: this.id, look });
+  }
+
+  /** Builds the stage again (in another venue): the old one goes, a new canvas takes its place. */
+  private rebuild() {
+    if (this.disposed) return;
+    this.send({ type: 'dispose', id: this.id });
+    views.delete(this.id);
+    this.id = nextId++;
+    views.set(this.id, this);
+    this.start(this.target);
   }
 
   /** @internal A frame of the video on the stage's screens (see sendScreenFrame). */

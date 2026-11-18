@@ -169,7 +169,8 @@ export function HomeScreen({
             },
             { id: 'new', label: 'New track', icon: FilePlus2, ...keysOf('home.new'), primary: true, run: () => setPicks((n) => n + 1) },
           ]),
-    ...(stage.editing ? [] : [{ id: 'settings', label: 'Settings', icon: SettingsIcon, ...keysOf('home.settings'), run: onSettings }]),
+    // The Stage tab has its own actions; Settings has nothing to do with it there.
+    ...(tab === 'stage' ? [] : [{ id: 'settings', label: 'Settings', icon: SettingsIcon, ...keysOf('home.settings'), run: onSettings }]),
     ...(update
       ? [{ id: 'update', label: `Update to ${update}`, icon: Download, ...keysOf('home.update'), bar: false, run: onUpdate }]
       : []),

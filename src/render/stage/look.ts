@@ -1,10 +1,17 @@
 import type { Rgb } from './LightShow';
+import { DEFAULT_VENUE } from './venues';
 
 /**
  * How the stage looks, as the renderer takes it: the player's stage (src/game/stages.ts) turned into
  * numbers. It can change while the stage runs, without building it again.
  */
+/** The sky over it: the clouded night, a sky full of aurora, or none at all. */
+export type Sky = 'night' | 'aurora' | 'black';
+
 export interface StageLook {
+  /** The venue the stage stands in (see venues.ts). Another venue builds the stage again. */
+  venueId: string;
+  sky: Sky;
   /** The show's colours: key (beams, bulbs), accent (second beam colour) and wash (the venue). Null: the show's own, changing as it goes. */
   colors: { key: Rgb; accent: Rgb; wash: Rgb } | null;
   /** Overall brightness, 0.3..1.5 (1 = as the stage was made). */
@@ -28,6 +35,8 @@ export interface StageLook {
 }
 
 export const DEFAULT_LOOK: StageLook = {
+  venueId: DEFAULT_VENUE,
+  sky: 'night',
   colors: null,
   brightness: 1,
   venue: 1,

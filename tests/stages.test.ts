@@ -11,6 +11,7 @@ import {
   TEMPLATE_INFO,
 } from '../src/game/stages';
 import { normalizeSettings } from '../src/game/settings';
+import { VENUES } from '../src/render/stage/venues';
 
 describe('stages', () => {
   it('starts on the Festival stage with no stages of the player’s own', () => {
@@ -60,6 +61,18 @@ describe('stages', () => {
   it('features a few templates, each of them described', () => {
     for (const id of FEATURED) expect(BUILT_IN.some((d) => d.id === id)).toBe(true);
     for (const d of BUILT_IN) expect(TEMPLATE_INFO[d.id]).toBeTruthy();
+  });
+
+  it('keeps a stage’s venue, and falls back to the first one for a venue that is gone', () => {
+    const [d, gone] = normalizeStages({
+      mine: [
+        { id: 'mine-5', venueId: 'moonrise' },
+        { id: 'mine-6', venueId: 'nowhere' },
+      ],
+    }).mine;
+    expect(d.venueId).toBe('moonrise');
+    expect(gone.venueId).toBe(VENUES[0].id);
+    expect(stageLook(d).venueId).toBe('moonrise');
   });
 
   it('falls back to Festival when the stage in use is gone', () => {

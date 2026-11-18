@@ -26,6 +26,9 @@ export const shared = {
   uHazeDensity: { value: 0.0024 },
   /** How bright the sky is drawn, 0..1 (a black stage dims it). */
   uSkyLevel: { value: 1 },
+  /** How strong the aurora's curtains are, and how much of the sky the clouds may cover (1 = as made). */
+  uAuroraLevel: { value: 1 },
+  uCloudLevel: { value: 1 },
   /** How lit the venue's own forms are, 0..1.2 (a black stage puts them out). */
   uVenueLevel: { value: 1 },
   /**
@@ -97,6 +100,8 @@ uniform vec3 uHazeFar;
 uniform vec3 uHazeNear;
 uniform float uHazeDensity;
 uniform float uSkyLevel;
+uniform float uAuroraLevel;
+uniform float uCloudLevel;
 uniform float uVenueLevel;
 uniform vec3 uPaintA;
 uniform vec3 uPaintB;
