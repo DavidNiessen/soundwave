@@ -45,7 +45,7 @@ There's no leaderboard, no accounts and no avatars.
 - **Finding the host:** on the same network, hosts show up automatically (mDNS, `_soundwave._tcp`). Elsewhere,
   friends open the invite link or type the code.
 - **Names:** each player is shown by a display name, set the first time and stored locally. There are no accounts.
-- **Size:** up to **8 players** per session. That's an open question; see the end.
+- **Size (decided):** up to **16 players** per session.
 - **Browser version:** it can **join** a local session, but can't host one, because a browser tab can't run a server.
   Signed in to a server, a browser player **can** host a party there (see [3.1](#31-what-a-server-offers)).
 
@@ -98,8 +98,10 @@ With **Friends anywhere**, the host's app tries these in order and uses the firs
    most home routers offer. The invite code then carries the host's public address. The forward is removed when
    the session ends.
 2. **Direct connection (WebRTC):** it connects peer to peer through the routers using WebRTC data channels, with
-   public STUN servers to find each side's address. The two apps exchange their connection offers through the
-   invite link, or through a small signalling service (see the open questions).
+   public STUN servers to find each side's address. Decided: **the invite link carries the connection offer.**
+   The host's offer is packed into the link (compressed, about 300–500 characters). The friend's game answers
+   over the same path back: their answer goes into a short reply code that the host's app reads. Nothing central
+   is needed and the project runs no service.
 3. **Manual forward:** if neither works (strict carrier networks, some company or school networks), the game says
    so and explains how to forward the port by hand. Otherwise it suggests a server.
 
@@ -234,17 +236,24 @@ what it hands out. So the server gives its owner the tools to run it responsibly
 
 ### 4.1 Showdown (battle mode)
 
-An original competitive mode for 2–8 players on a server, played over a set. Decided: **elimination, with hits**.
+An original competitive mode for 2–16 players on a server, played over a set. Decided: **elimination, with hits**.
 
 - **Same song, own chart:** everyone plays the same song, each on their own part and difficulty. Scores are
   normalised to the chart's par, the same par the stars use, so a hard part doesn't win just by having more notes.
 - **Rounds:** each song is a round. After each round the **lowest** player is out, and the set continues until
-  one is left. With fewer songs than players, the bottom half goes out each round.
+  one is left. With fewer songs than players, enough players go out each round to leave one winner after the
+  last song (with 16 players and 4 songs: 16 → 8 → 4 → 2 → 1).
+- **Scoreboard with 16:** the board beside the highway shows the top 5, the players just above and below you, and
+  how many are left.
 - **Charge and hits:** streaks build **charge**. A full charge can be spent on a **hit** against the player just
-  above you on the board. A hit is a short, fair disturbance lasting about 4 s:
+  above you on the board. A hit is a short disturbance lasting about 4 s. Decided so far:
   - **Fog:** the far half of their highway is hazed.
-  - **Shuffle:** their next notes show in different colours, with lanes unchanged.
-  - **Rush:** their highway runs 1.25× faster.
+
+  The rest of the set is to be designed in the spirit of the attacks in battle modes of other rhythm games, with
+  names, visuals and numbers of our own (see the open questions). Candidates to try in play: a colour shuffle
+  (notes in other colours, lanes unchanged), a rush (the highway runs faster), a **shield** (spend a charge to
+  block the next hit on you), and a **swap** of the targeted player's next two lanes.
+
 - **No hits option:** a lobby setting turns hits off for a pure score race.
 - **Accessibility:** a player can opt out of receiving visual effects, for example because of photosensitivity.
   Hits on them turn into a small score penalty instead.
@@ -356,7 +365,5 @@ Each milestone is its own PR, and the game ships after every one.
 
 ## 8. Open questions
 
-1. **Session size:** is 8 players right for a local session, and for Showdown?
-2. **Showdown hits:** are fog, colour shuffle and rush fair, and is 4 s right? Which others?
-3. **Signalling for direct connections:** should a tiny public signalling service exist (run by the project) to
-   make Friends anywhere smoother, or do invite links carry the connection offers so nothing central is needed?
+1. **Showdown hits:** besides Fog, which effects should there be? Name the ones you liked in other games'
+   battle modes, and we design our own versions of them (own names and look), then tune lengths and strength in play.
