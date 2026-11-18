@@ -56,6 +56,9 @@ The lobby is the existing set lobby, with everyone in it:
 - **Shared set:** the host picks the set; everyone sees it.
 - **Own choices:** each player picks their own part and difficulty, shown next to their name with a ready tick.
 - **Starting:** the host starts once everyone is ready, or anytime with a hold-to-start.
+- **Calibration check:** scores are compared, so each player's audio/video offset matters. Next to every name the
+  lobby shows **Calibrated** or **Not calibrated** (never calibrated, or the output device changed since). A player
+  can run the game's existing calibration from the lobby without leaving it. It's a hint, not a requirement.
 
 ### 2.3 Having the songs
 
@@ -67,6 +70,11 @@ the game already uses.
   audio, cover, analysis and hand-made charts. This only happens if the host allows it (a **Share my songs with
   the session** switch, on by default, to match whole-song sharing on servers) and the player accepts each song.
 - **Without the song:** a player who doesn't get it sits that song out and watches the others' scores.
+- **Everyone plays the same notes:** charts are made from each player's own analysis of the song. Two game
+  versions, or a chart edited by hand, could give different notes for the same audio. So at the start of every
+  song the host (or the server, in a party) sends **the chart itself** for each part and difficulty in play: a few KB
+  of notes, with its **chart id** (a hash of the notes). Every player plays exactly that chart, whatever their own
+  analysis says, so scores compare fairly and leaderboards stay clean.
 
 ### 2.4 Playing in sync
 
@@ -89,6 +97,16 @@ Everyone should hear the first note at the same moment, give or take a few milli
 - **The host leaves:** the session ends for everyone, with a "The host ended the session" card. There's no host
   migration in level 1.
 - **Pausing:** a player can pause their own run, but the song doesn't pause for anyone else.
+- **Connection drops:** the song keeps playing on the player's own machine, because the music and the judging are
+  local. The game reconnects in the background, and the scoreboard shows the player as **reconnecting** in the
+  meantime.
+  - **Back in time:** within 30 s, the player rejoins where they are and sends their score as it is now. Nothing is
+    lost, and in Showdown they aren't knocked out for it.
+  - **Gone longer:** the song finishes locally and the result is sent as soon as the connection is back, up to the
+    end of the next song. In Showdown, a result that's still missing when a round is decided counts as that
+    player's last known score.
+  - **Rejoining a session:** a player who closed the game can rejoin with the same code. Their place and their
+    results so far are kept for the rest of the set.
 
 ### 2.6 Reaching friends over the internet
 
@@ -189,6 +207,21 @@ an **in-game server list**:
   TypeScript), and rejects scores that don't match. That stops casual cheating, though not a determined bot.
 - **Modifiers:** runs with modifiers (if the modifiers idea is built) get their own boards.
 
+### 3.3b Challenges
+
+**Beat my run (async):** every checked score already comes with its input log (3.3), so a friend can play against
+it whenever they like, without being online at the same time.
+
+- **Sending a challenge:** from a leaderboard or a friend's profile, **Challenge** sends a run to a friend on the
+  server. The friend sees it in the connected main menu.
+- **Playing it:** they play the same chart, and the run is a **ghost** on the scoreboard beside the highway: its
+  score moves as it did when it was played, note for note.
+- **Afterwards:** a result card shows both runs, and the challenger is told how it went.
+
+**Server challenges (weekly):** the owner or a moderator sets a weekly challenge: a set of songs, optionally a
+modifier, and a start and end. It has a leaderboard of its own, shown at the top of the connected main menu. Past
+challenges and their winners stay viewable.
+
 ### 3.4 Song sharing (decided: whole songs)
 
 Players share **whole songs**: the `.soundwave` file with its audio, cover, analysis and hand-made charts. A player
@@ -227,6 +260,9 @@ what it hands out. So the server gives its owner the tools to run it responsibly
     automatically.
 - **Privacy:** no telemetry. The server stores only what the features above need. Players can delete their account
   and everything with it.
+- **Data export:** a player can download everything the server holds about them, at any time, from Settings →
+  Online. That's one zip file with their profile and avatar, scores and input logs, replays, challenges, invites
+  they made, and the songs they shared, plus a readable `README` of what each file is.
 - **Versioning:** the client and the server announce a protocol version. A client too old or too new for the
   server is told so and plays offline.
 
@@ -334,6 +370,38 @@ Offline, the sidebar is gone and the menu looks exactly as today.
 
 ---
 
+### 4.4 Replays (in the game, and shared on a server)
+
+Replays are part of the game itself, offline too, and a server can share them.
+
+- **In the game:** every finished song keeps its input log with the best score (a few tens of KB). On the results
+  screen and in the song's best scores, **Watch** plays the run back on the real highway and stage, note for
+  note, with the song.
+  - **Controls:** pause, ±10 s, and 0.5×/1× speed.
+  - **Storage:** kept with the song's scores, so a library backup takes them along. A setting chooses how many are
+    kept per song (best only, by default).
+- **Same chart:** a replay holds its chart id, and plays only against the chart it was played on. If the chart has
+  changed since (a new analysis, or a hand edit), the replay says so and plays the chart that was recorded with it.
+- **On a server:** checked scores already carry their input logs (3.3), so every leaderboard entry has **Watch**.
+  A player can also **share** a replay of their own to the server's replay list, and **Beat my run** (3.3b) is a
+  replay played as a ghost.
+- **Files:** a replay can be saved as a small `.soundwave-replay` file (chart id, song id, inputs, settings that
+  affect play) and opened in the game, if the player has the song.
+
+### 4.5 Band mode (co-op)
+
+The calm counterpart to Showdown: up to four players, one per part (lead, vocals, bass, drums), playing a song
+**together**.
+
+- **Band score:** everyone's notes add to one band score. The band's stars come from it.
+- **Band overdrive:** when two or more players activate overdrive within the same bar, it becomes **band
+  overdrive**. The multiplier goes up for the whole band, and the stage goes all out.
+- **Saving a player:** a player who fails a stretch (a long miss streak) dims out. Bandmates bring them back by
+  playing their next overdrive phrase, instead of the song ending.
+- **On stage:** every player's avatar (4.2) stands at their part, so the band on stage is the actual band.
+- **Where:** works in local sessions (level 1) and in parties on a server. Band scores get their own leaderboard
+  on a server, keyed by the set of charts played.
+
 ## 5. Smaller pieces
 
 ### 5.1 Settings → Online
@@ -341,6 +409,7 @@ Offline, the sidebar is gone and the menu looks exactly as today.
 - **How to play:** Just me / With friends nearby / On a server.
 - **Display name:** the name used in local sessions.
 - **Server:** its address, signed-in account, and **Sign out** / **Forget this server**.
+- **Friends can join from Discord:** off by default (5.4).
 - **Showdown hits reach me as:** **Fog** (default) or **Drain** (calm hits, nothing on the highway moves or flashes).
 - **Sharing:** **Share my songs with the session** (level 1, on by default; friends still accept each song).
 
@@ -358,6 +427,20 @@ When connected to a server, the Discord status's large picture becomes the song'
 backend" note in `src-tauri/src/discord.rs`. The server only serves covers of songs shared with it, and only on
 public servers or if the owner allows it, because the cover link becomes visible to Discord friends.
 
+### 5.4 Join from Discord
+
+Discord's status can carry a **Join** button (Rich Presence "join secrets"). A friend presses it on your Discord
+profile and lands straight in your session or party, with the game starting if it isn't running.
+
+- **Only when both hold:**
+  1. the player turned it on: **Settings → Online → Friends can join from Discord**, off by default;
+  2. the session or party isn't **private**. Sessions and parties get a **Private** switch in their lobby, and private
+     ones never show the button.
+- **What it carries:** the join secret holds the session's invite (code and connection offer, see 2.6) or the party's
+  invite on the server. It's only shown to the player's Discord friends.
+- **Full or started:** a full session, or a set already under way, shows the button greyed out ("Party full",
+  "Playing"). Joining mid-set waits in the lobby until the next song.
+
 ---
 
 ## 6. Protocol sketch
@@ -373,11 +456,13 @@ client → host/server
   strike       { charge }                    // Showdown: spend charge on the player above
   finish       { songIndex, results, inputLog? }
   request-song { songId }
+  resume       { session, player, songIndex, score }   // back after a dropped connection
 
 host/server → client
   welcome      { session, you, players, protocol }
   pong         { t, hostT }
   lobby        { set, players: [{ id, name, part, difficulty, ready, avatar? }] }
+  chart        { songIndex, part, difficulty, chartId, notes }   // the chart everyone plays
   start        { songIndex, at }             // host time to start
   board        { players: [{ id, score, streak, stars, out? }] }   // 10/s
   hit          { from, ms, at }               // Showdown: a hit starting at `at`, for `ms`
@@ -394,21 +479,31 @@ host/server → client
 - **Covers:** `GET /covers/:songId.jpg`.
 - **Profiles:** `GET /profiles/:id`, `PUT /me/profile`.
 - **Invites:** `POST /invites`, `POST /keys` (owner/moderators).
+- **Replays:** `GET /replays/:scoreId`, `POST /replays` (share), `GET /replays?song=`.
+- **Challenges:** `POST /challenges` (to a friend), `GET /me/challenges`, `GET /weekly`, `PUT /weekly` (owner/moderators).
+- **Data export:** `GET /me/export` (a zip of everything held about the player).
 
 ---
 
 ## 7. Milestones
 
-| #   | Milestone                 | Done when                                                                                |
-| --- | ------------------------- | ---------------------------------------------------------------------------------------- |
-| 1   | **Local session MVP**     | Two desktop apps on one network play a set together with live scores and shared results. |
-| 2   | Song transfer in sessions | A missing song can be fetched from the host with consent.                                |
-| 3   | **Server MVP**            | Accounts, public/password/invite/key-file joining, parties over the internet.            |
-| 4   | Leaderboards              | Scores submitted, checked from input logs, and shown in the game.                        |
-| 5   | Shared charts and covers  | Charts-only sharing, covers over HTTPS, cover art in the Discord status.                 |
-| 6   | Connected main menu       | Sidebar with you, party, leaderboard and friends.                                        |
-| 7   | Avatars                   | Avatar editor, and avatars on stage at their parts.                                      |
-| 8   | **Showdown**              | The battle mode, playable and tuned.                                                     |
+| #   | Milestone                 | Done when                                                                                    |
+| --- | ------------------------- | -------------------------------------------------------------------------------------------- |
+| 1   | **Local session MVP**     | Two desktop apps on one network play a set together with live scores and shared results.     |
+| 2   | Song transfer in sessions | A missing song can be fetched from the host with consent.                                    |
+| 3   | **Server MVP**            | Accounts, public/password/invite/key-file joining, parties over the internet.                |
+| 4   | Leaderboards              | Scores submitted, checked from input logs, and shown in the game.                            |
+| 5   | Shared charts and covers  | Charts-only sharing, covers over HTTPS, cover art in the Discord status.                     |
+| 6   | Connected main menu       | Sidebar with you, party, leaderboard and friends.                                            |
+| 7   | Avatars                   | Avatar editor, and avatars on stage at their parts.                                          |
+| 8   | **Showdown**              | The battle mode, playable and tuned.                                                         |
+| 9   | Replays                   | Watch your own runs in the game, offline; then **Watch** on leaderboards and shared replays. |
+| 10  | Challenges                | Beat my run with ghosts, and weekly server challenges.                                       |
+| 11  | Band mode                 | Co-op for up to four, with band overdrive and saves.                                         |
+| 12  | Join from Discord         | The opt-in Join button, never on private sessions.                                           |
+
+Calibration checks, the host's chart, reconnecting and data export aren't milestones of their own: they belong to
+milestones 1, 1, 1 and 3.
 
 Each milestone is its own PR, and the game ships after every one.
 
