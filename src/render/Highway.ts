@@ -279,8 +279,11 @@ const TILE_MARGIN = 0.12;
  * the camera's gaze, so a tile keeps its shape all the way down the lane.
  */
 const TILE_LEAN = 0.44;
-/** A release marker's pointer, above the bar's top: the height of its shoulders and of its tip; its width at its foot and at its shoulders. */
-const POINTER = { shoulder: 0.5, tip: 0.69, foot: 0.54, top: 0.42 } as const;
+/**
+ * A hold that must be let go on time: its neck, the wide band of crystal running from its tile to
+ * where it is let go, and the arrow it ends in (width, and the arrow's length along the lane).
+ */
+const NECK = { w: 0.56, arrow: 0.5 } as const;
 
 const tileCommon = /* glsl */ `
 #define NB ${TILE_BANDS.length}
@@ -301,11 +304,11 @@ float between(float x, float a, float b, float soft) {
 `;
 
 /**
- * Tiles (and release markers) are painted, not modelled: each is a card standing on the deck and
- * leaning back, with a glossy bar of coloured glass drawn on it. `aTile` is the tile's kind (a
- * palette), how far it has turned to overdrive's colours, its brightness, and for a release marker
- * the scale of its pointer (0 for a plain tile). `vP` is a point on the card in highway units: x
- * across the bar, y up from the deck.
+ * Tiles are painted, not modelled: each is a card standing on the deck and leaning back, with a
+ * glossy bar of coloured glass drawn on it. `aTile` is the tile's kind (a palette), how far it has
+ * turned to overdrive's colours, its brightness, and 1 for the tile of a hold that must be let go
+ * on time (lighter glass), else 0. `vP` is a point on the card in highway units: x across the bar,
+ * y up from the deck.
  */
 const tileVertex = /* glsl */ `
 attribute vec4 aTile;
@@ -313,8 +316,7 @@ varying vec2 vP;
 varying vec4 vTile;
 void main() {
   vTile = aTile;
-  float top = ${glslFloat(TILE_H + TILE_MARGIN)} + (aTile.w > 0.0 ? ${glslFloat(POINTER.tip)} * aTile.w : 0.0);
-  vec2 p = vec2((uv.x - 0.5) * ${glslFloat(TILE_W + 2 * TILE_MARGIN)}, mix(${glslFloat(-TILE_MARGIN)}, top, uv.y));
+  vec2 p = vec2((uv.x - 0.5) * ${glslFloat(TILE_W + 2 * TILE_MARGIN)}, mix(${glslFloat(-TILE_MARGIN)}, ${glslFloat(TILE_H + TILE_MARGIN)}, uv.y));
   vP = p;
   // Leant back, with the bar's middle over the note's place on the deck.
   float c = cos(${glslFloat(TILE_LEAN)});
@@ -331,28 +333,6 @@ varying vec4 vTile;
 #define W ${glslFloat(TILE_W / 2)}
 #define H ${glslFloat(TILE_H)}
 vec3 band(int b) { return pal(vTile.x, vTile.y, b); }
-
-/** Signed distance to the pointer: a tapering column with a pitched roof. */
-float pointerShape(vec2 p) {
-  vec2 v[5];
-  v[0] = vec2(-${glslFloat(POINTER.foot / 2)}, H * 0.6);
-  v[1] = vec2(${glslFloat(POINTER.foot / 2)}, H * 0.6);
-  v[2] = vec2(${glslFloat(POINTER.top / 2)}, H + ${glslFloat(POINTER.shoulder)});
-  v[3] = vec2(0.0, H + ${glslFloat(POINTER.tip)});
-  v[4] = vec2(-${glslFloat(POINTER.top / 2)}, H + ${glslFloat(POINTER.shoulder)});
-  float d = dot(p - v[0], p - v[0]);
-  float s = 1.0;
-  for (int i = 0; i < 5; i++) {
-    int j = i == 0 ? 4 : i - 1;
-    vec2 e = v[j] - v[i];
-    vec2 w = p - v[i];
-    vec2 b = w - e * clamp(dot(w, e) / dot(e, e), 0.0, 1.0);
-    d = min(d, dot(b, b));
-    bvec3 k = bvec3(p.y >= v[i].y, p.y < v[j].y, e.x * w.y > e.y * w.x);
-    if (all(k) || all(not(k))) s *= -1.0;
-  }
-  return s * sqrt(d);
-}
 
 void main() {
   vec2 p = vP;
@@ -405,29 +385,10 @@ void main() {
   float foot = smoothstep(0.4, 0.2, v) * (1.0 - smoothstep(thick - H * 0.02, thick + H * 0.02, depth));
   c = mix(c, mix(band(B_BASE) * 0.8, band(B_BASE), smoothstep(0.0, H * 0.05, p.y)), foot);
 
-  // A release marker is lighter glass with pale edges, with a crystal pointer standing on its far
-  // side: pale edges, a pitched roof lighter round its rim, a body deepening upward in soft bands.
-  float k = vTile.w;
-  vec4 ptr = vec4(0.0);
-  if (k > 0.0) {
+  // The tile of a hold that must be let go on time is lighter glass, with pale edges.
+  if (vTile.w > 0.0) {
     c = mix(c, band(B_BASE) * 0.72, 0.22);
     c = mix(c, mix(band(B_BASE), vec3(1.0), 0.2), (1.0 - smoothstep(H * 0.04, H * 0.09, depth)) * (1.0 - foot) * 0.85);
-    vec2 pp = vec2(p.x, p.y - H) / k + vec2(0.0, H);
-    float dq = pointerShape(pp);
-    float qa = fwidth(dq) * 1.3;
-    float body = 1.0 - smoothstep(-qa, qa, dq);
-    float shoulder = H + ${glslFloat(POINTER.shoulder)};
-    float hgt = clamp((pp.y - H) / ${glslFloat(POINTER.shoulder)}, 0.0, 1.0);
-    vec3 deep = mix(band(B_LOW), band(B_BASE), 0.3) * 0.95;
-    vec3 warm = mix(band(B_UP), band(B_BASE), 0.3) * 0.74;
-    vec3 col = mix(warm, deep, smoothstep(0.1, 0.75, hgt));
-    col *= 1.0 + 0.1 * sin(hgt * 17.0);
-    col = mix(col, mix(band(B_UP), band(B_BASE), 0.5), between(-dq, 0.03, 0.06, 0.012) * step(pp.x, 0.0) * 0.6);
-    float roof = smoothstep(shoulder - 0.004, shoulder + 0.004, pp.y);
-    col = mix(col, mix(mix(band(B_LOW), band(B_BASE), 0.4), band(B_BASE), smoothstep(0.075, 0.02, -dq)), roof);
-    col = mix(col, band(B_BASE), exp(-pow((pp.y - shoulder) / 0.014, 2.0)));
-    col = mix(col, mix(band(B_BASE), vec3(1.0), 0.35), 1.0 - smoothstep(0.016, 0.03, -dq));
-    ptr = vec4(col, 1.0) * body;
   }
 
   // Outside the bar: its shadow on the deck in front of it, and a little of its light round it
@@ -441,8 +402,6 @@ void main() {
   float dim = vTile.z;
   vec3 col = c * bar;
   float a = bar;
-  col += (1.0 - a) * ptr.rgb;
-  a += (1.0 - a) * ptr.a;
   float sh = (1.0 - a) * shadow * 0.75;
   vec3 lightCol = band(B_HALO) * halo * (1.0 - a);
   gl_FragColor = vec4((col + lightCol) * dim, a + sh + halo * 0.2 * (1.0 - a));
@@ -450,7 +409,7 @@ void main() {
 `;
 
 /** A sustain's rod: its width, and how far its glow reaches beside it (in rod widths). */
-const ROD_W = 0.08;
+const ROD_W = 0.11;
 const ROD_SPAN = 3;
 /** A sustain is a rod lying along the lane: lit along both sides, shaded down its middle. */
 const rodVertex = /* glsl */ `
@@ -475,11 +434,63 @@ void main() {
   float body = 1.0 - smoothstep(1.0 - aa, 1.0 + aa, t);
   vec3 hi = pal(vRod.x, vRod.y, B_RODHI);
   vec3 lo = pal(vRod.x, vRod.y, B_RODLO);
-  vec3 c = mix(lo, hi, exp(-pow((t - 0.5) / 0.26, 2.0)));
-  c *= mix(1.0, 0.5, smoothstep(0.7, 1.0, t));
+  vec3 c = mix(lo, hi, exp(-pow((t - 0.5) / 0.3, 2.0))) * 1.2;
+  c *= mix(1.0, 0.65, smoothstep(0.75, 1.0, t));
   float glow = vRod.w * exp(-max(t - 1.0, 0.0) * 1.6) * (1.0 - smoothstep(${glslFloat(ROD_SPAN * 0.6)}, ${glslFloat(ROD_SPAN)}, t));
   vec3 light = pal(vRod.x, vRod.y, B_HALO) * glow * (1.0 - body);
   gl_FragColor = vec4((c * body + mix(c, vec3(1.0), 0.35) * body * vRod.w * 0.4) * vRod.z + light, body + glow * 0.12 * (1.0 - body));
+}
+`;
+
+/**
+ * A hold that must be let go on time runs as a neck: a wide band of crystal lying along the lane
+ * from its tile, with pale edges and soft bands across it, deepening toward the arrow it ends in,
+ * which is lighter round its rim, with a pale line across its foot. `aNeck` is the kind,
+ * overdrive, brightness and the length drawn; `aNeckEnd` how far the arrow's tip is from the start.
+ */
+const neckVertex = /* glsl */ `
+attribute vec4 aNeck;
+attribute float aNeckEnd;
+varying vec2 vUv;
+varying vec4 vNeck;
+varying float vEnd;
+void main() {
+  vUv = uv;
+  vNeck = aNeck;
+  vEnd = aNeckEnd;
+  gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+}
+`;
+const NECK_QUAD = NECK.w + 0.08;
+const neckFragment = /* glsl */ `
+${tileCommon}
+varying vec2 vUv;
+varying vec4 vNeck;
+varying float vEnd;
+void main() {
+  float along = vUv.y * vNeck.w;
+  float s = (vUv.x - 0.5) * ${glslFloat(NECK_QUAD)};
+  float hw = ${glslFloat(NECK.w / 2)};
+  float shoulder = vEnd - ${glslFloat(NECK.arrow)};
+  // Inside the band, and inside the arrow's two edges.
+  float dSide = abs(s) - hw;
+  float dTip = dot(vec2(abs(s) - hw, along - shoulder), normalize(vec2(${glslFloat(NECK.arrow)}, hw)));
+  float d = max(dSide, dTip);
+  float aa = fwidth(d) * 1.3;
+  float inside = 1.0 - smoothstep(-aa, aa, d);
+  vec3 low = pal(vNeck.x, vNeck.y, B_LOW);
+  vec3 up = pal(vNeck.x, vNeck.y, B_UP);
+  vec3 base = pal(vNeck.x, vNeck.y, B_BASE);
+  vec3 deep = mix(low, base, 0.32) * 0.88;
+  vec3 warm = mix(up, base, 0.3) * 0.7;
+  vec3 col = mix(deep, warm, smoothstep(0.15, 1.1, shoulder - along));
+  col *= 1.0 + 0.07 * sin(along * 5.0);
+  col = mix(col, mix(up, base, 0.5), between(-d, 0.035, 0.07, 0.012) * step(s, 0.0) * step(along, shoulder) * 0.6);
+  float tip = smoothstep(shoulder - 0.008, shoulder + 0.008, along);
+  col = mix(col, mix(mix(low, base, 0.35) * 0.9, base, smoothstep(0.05, 0.015, -d)), tip);
+  col = mix(col, base, exp(-pow((along - shoulder) / 0.028, 2.0)));
+  col = mix(col, mix(base, vec3(1.0), 0.35), 1.0 - smoothstep(0.018, 0.034, -d));
+  gl_FragColor = vec4(col * vNeck.z * inside, inside * 0.95);
 }
 `;
 
@@ -671,18 +682,19 @@ export class Highway {
   /** Motes owed since the last frame (a fraction carries over). */
   private moteDebt = 0;
   private flare = 0;
-  /**
-   * The tiles and the release markers (a lighter tile with a pointer standing on it), painted on
-   * cards (see tileFragment). One mesh, drawn from the far end in, so a nearer tile covers a further one.
-   */
+  /** The tiles, painted on cards (see tileFragment), drawn from the far end in, so a nearer tile covers a further one. */
   private readonly gems: THREE.InstancedMesh;
   private readonly gemData = new Float32Array(MAX_GEMS * 4);
-  /** The tiles of this frame before they are sorted: z, x, scale, kind, overdrive, brightness, pointer. */
+  /** The tiles of this frame before they are sorted: z, x, scale, kind, overdrive, brightness, lighter glass. */
   private readonly gemList = new Float32Array(MAX_GEMS * 7);
   private readonly gemOrder: number[] = [];
   /** Sustain rods (see rodFragment). */
   private readonly tails: THREE.InstancedMesh;
   private readonly tailData = new Float32Array(MAX_TAILS * 4);
+  /** The necks of holds that must be let go on time, each ending in its arrow (see neckFragment). */
+  private readonly necks: THREE.InstancedMesh;
+  private readonly neckData = new Float32Array(MAX_TAILS * 4);
+  private readonly neckEnd = new Float32Array(MAX_TAILS);
   private readonly lines: THREE.InstancedMesh;
   /** The strike targets: islands of glass ringed with their lanes' light (see islandFragment). */
   private readonly pads: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>[] = [];
@@ -921,6 +933,26 @@ export class Highway {
     this.tails.frustumCulled = false;
     this.tails.renderOrder = 0;
     this.root.add(this.tails);
+    const neckGeo = new THREE.PlaneGeometry(1, 1);
+    neckGeo.rotateX(-Math.PI / 2);
+    neckGeo.translate(0, 0, -0.5);
+    neckGeo.setAttribute('aNeck', new THREE.InstancedBufferAttribute(this.neckData, 4));
+    neckGeo.setAttribute('aNeckEnd', new THREE.InstancedBufferAttribute(this.neckEnd, 1));
+    this.necks = new THREE.InstancedMesh(
+      neckGeo,
+      new THREE.ShaderMaterial({
+        vertexShader: neckVertex,
+        fragmentShader: neckFragment,
+        transparent: true,
+        premultipliedAlpha: true,
+        depthWrite: false,
+        uniforms: { uPal: { value: palette } },
+      }),
+      MAX_TAILS,
+    );
+    this.necks.frustumCulled = false;
+    this.necks.renderOrder = 0;
+    this.root.add(this.necks);
 
     const tex = radialTexture();
 
@@ -1308,10 +1340,9 @@ export class Highway {
     }
     let gi = 0;
     let ti = 0;
+    let ni = 0;
     // How far overdrive has come on (it eases in and out with the lane's own glow).
     const drive = this.trackMat.uniforms.uOverdrive.value as number;
-    // Pending release pointers breathe, so they read as an instruction rather than a note to hit.
-    const breathe = 1 + 0.06 * Math.sin(now / 140);
     const list = this.gemList;
     this.q.identity();
     for (let i = this.firstNote; i < notes.length; i++) {
@@ -1324,40 +1355,33 @@ export class Highway {
       // A tile that holds overdrive is silver; in overdrive every tile turns light blue.
       const kind = n.phrase >= 0 && !session.isPhraseFailed(n.phrase) ? PHRASE_KIND : n.lane;
 
-      if (n.dur > 0 && ti < MAX_TAILS) {
+      if (n.dur > 0) {
         const startZ = held ? 0 : -(n.t - t) * speed;
-        const endZ = Math.max(-LENGTH, -(n.t + n.dur - t) * speed);
+        const end = -(n.t + n.dur - t) * speed;
+        const endZ = Math.max(-LENGTH, end);
         const len = startZ - endZ;
+        // A held one burns brighter; a missed one is all but out.
+        const bright = missed || (n.release && session.isReleaseMissed(i)) ? MISSED_TINT : held ? 1.2 + 0.12 * Math.sin(now / 90) : 1;
         if (len > 0.01 && (!hit || held)) {
-          this.v.set(x, 0.012, startZ);
-          this.s.set(ROD_W * ROD_SPAN, 1, len);
-          this.m.compose(this.v, this.q, this.s);
-          this.tails.setMatrixAt(ti, this.m);
-          // A held rod burns brighter, glows and breathes; a missed one is all but out.
-          const k = ti * 4;
-          this.tailData[k] = kind;
-          this.tailData[k + 1] = drive;
-          this.tailData[k + 2] = missed ? MISSED_TINT : held ? 1.2 + 0.12 * Math.sin(now / 90) : 1;
-          this.tailData[k + 3] = held ? 1 : kind === PHRASE_KIND ? 0.45 : 0;
-          ti++;
+          if (n.release && ni < MAX_TAILS) {
+            // A hold to be let go on time: a neck running to the arrow where it is let go.
+            this.v.set(x, 0.011, startZ);
+            this.s.set(NECK_QUAD, 1, len);
+            this.m.compose(this.v, this.q, this.s);
+            this.necks.setMatrixAt(ni, this.m);
+            this.neckData.set([kind, drive, bright, len], ni * 4);
+            this.neckEnd[ni] = startZ - end;
+            ni++;
+          } else if (!n.release && ti < MAX_TAILS) {
+            this.v.set(x, 0.012, startZ);
+            this.s.set(ROD_W * ROD_SPAN, 1, len);
+            this.m.compose(this.v, this.q, this.s);
+            this.tails.setMatrixAt(ti, this.m);
+            this.tailData.set([kind, drive, bright, held ? 1 : kind === PHRASE_KIND ? 0.6 : 0.4], ti * 4);
+            ti++;
+          }
         }
         if (held) this.padLight[n.lane] = Math.max(this.padLight[n.lane], 0.8);
-
-        // The release marker sits at the tail's end until the release is judged.
-        const capZ = -(n.t + n.dur - t) * speed;
-        if (n.release && !session.isReleased(i) && capZ > -LENGTH && capZ < 1.5 && gi < MAX_GEMS) {
-          const dimmed = session.isReleaseMissed(i) || missed;
-          const k = gi * 7;
-          list[k] = capZ;
-          list[k + 1] = x;
-          // Like the notes, the marker grows in at the far end.
-          list[k + 2] = arrived(capZ + LENGTH);
-          list[k + 3] = kind;
-          list[k + 4] = drive;
-          list[k + 5] = dimmed ? MISSED_TINT : 1;
-          list[k + 6] = dimmed ? 1 : breathe;
-          gi++;
-        }
       }
 
       if (hit || gi >= MAX_GEMS) continue;
@@ -1375,10 +1399,10 @@ export class Highway {
       list[k + 4] = drive;
       // In overdrive their light swells and ebbs, a wave running down the lane toward the player.
       list[k + 5] = missed ? MISSED_TINT : 1 + drive * (0.05 + 0.12 * (0.5 + 0.5 * Math.sin(now / 150 + z * 0.8)));
-      list[k + 6] = 0;
+      list[k + 6] = n.release ? 1 : 0;
       gi++;
     }
-    // The far ones first, so a nearer tile (or the pointer of a release marker) covers a further one.
+    // The far ones first, so a nearer tile covers a further one.
     const order = this.gemOrder;
     order.length = gi;
     for (let j = 0; j < gi; j++) order[j] = j;
@@ -1398,6 +1422,10 @@ export class Highway {
     this.gems.geometry.getAttribute('aTile').needsUpdate = true;
     this.tails.instanceMatrix.needsUpdate = true;
     this.tails.geometry.getAttribute('aRod').needsUpdate = true;
+    this.necks.count = ni;
+    this.necks.instanceMatrix.needsUpdate = true;
+    this.necks.geometry.getAttribute('aNeck').needsUpdate = true;
+    this.necks.geometry.getAttribute('aNeckEnd').needsUpdate = true;
 
     // The islands: pressed, they fill with light and stand in a column of it; struck, they flare.
     for (let i = 0; i < this.lanes; i++) {
