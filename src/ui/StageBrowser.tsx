@@ -535,6 +535,8 @@ function Editor({ def, actions, onClose, touch, activeRow, setActiveRow, onSave,
     label,
     open: pickerFor === label,
     onToggle: () => setPickerFor((p) => (p === label ? null : label)),
+    // Picking one of the ready colours (in any row) puts the open picker away.
+    onPreset: () => setPickerFor(null),
   });
   const [more, setMore] = useState(false);
   const set = (patch: Partial<StageDef>) => onSave({ ...def, ...patch });
@@ -845,12 +847,15 @@ function ColorRow({
   value,
   open,
   onToggle,
+  onPreset,
   onPick,
 }: {
   label: string;
   value: string;
   open: boolean;
   onToggle(): void;
+  /** A ready colour was picked: the picker closes. */
+  onPreset(): void;
   onPick(hex: string): void;
 }) {
   const own = !SWATCHES.some((hex) => hex.toLowerCase() === value.toLowerCase());
@@ -867,7 +872,10 @@ function ColorRow({
               style={{ background: hex }}
               aria-label={hex}
               aria-pressed={hex.toLowerCase() === value.toLowerCase()}
-              onClick={() => onPick(hex)}
+              onClick={() => {
+                onPick(hex);
+                onPreset();
+              }}
             />
           ))}
           <button
