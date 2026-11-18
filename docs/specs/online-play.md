@@ -238,28 +238,78 @@ what it hands out. So the server gives its owner the tools to run it responsibly
 
 An original competitive mode for 2–16 players on a server, played over a set. Decided: **elimination, with hits**.
 
-- **Same song, own chart:** everyone plays the same song, each on their own part and difficulty. Scores are
-  normalised to the chart's par, the same par the stars use, so a hard part doesn't win just by having more notes.
-- **Rounds:** each song is a round. After each round the **lowest** player is out, and the set continues until
-  one is left. With fewer songs than players, enough players go out each round to leave one winner after the
-  last song (with 16 players and 4 songs: 16 → 8 → 4 → 2 → 1).
-- **Scoreboard with 16:** the board beside the highway shows the top 5, the players just above and below you, and
-  how many are left.
-- **Charge and hits:** streaks build **charge**. A full charge can be spent on a **hit** against the player just
-  above you on the board. A hit is a short disturbance lasting about 4 s. Decided so far:
-  - **Fog:** the far half of their highway is hazed.
+The design draws on how battle modes in other rhythm games worked, especially what players found unfair about
+them. It keeps what made them exciting and avoids what didn't:
 
-  The rest of the set is to be designed in the spirit of the attacks in battle modes of other rhythm games, with
-  names, visuals and numbers of our own (see the open questions). Candidates to try in play: a colour shuffle
-  (notes in other colours, lanes unchanged), a rush (the highway runs faster), a **shield** (spend a charge to
-  block the next hit on you), and a **swap** of the targeted player's next two lanes.
+- **Kept:** charge earned by playing well, saving it up for a bigger hit, aiming at the player just ahead of you,
+  and an elimination after every song.
+- **Avoided:**
+  - hits piling up on one player
+  - hits that hide the notes **and** cut the score at the same time
+  - unclear targeting
+  - instruments with sparse charts winning too easily
+  - no way out for players sensitive to visual effects
 
-- **No hits option:** a lobby setting turns hits off for a pure score race.
-- **Accessibility:** a player can opt out of receiving visual effects, for example because of photosensitivity.
-  Hits on them turn into a small score penalty instead.
-- **Spectating:** players who are out watch the rest with the scoreboard.
+#### Rounds
 
-The names and balancing numbers are placeholders to tune in play.
+- **Same song, own chart:** everyone plays the same song, each on their own part and difficulty.
+- **Scoring:** a player's score in Showdown is their share of what their chart can earn at most. That's the
+  chart's par, the same par the stars use, so a dense part doesn't win just by having more notes, and a sparse
+  part doesn't win by having less to miss.
+- **Rests:** stretches where a part has no notes count as "resting". Charge can't be built while resting, so a part
+  that sits out half the song doesn't save up hits.
+- **Elimination:** after each song, the lowest players go out. A set of 4 songs with 16 players runs
+  16 → 12 → 8 → 4 → 1, so the last song is a final of four. Other sizes cut evenly so that one player is left
+  after the last song.
+- **Scoreboard:** beside the highway it shows the top 5, the players just above and below you, and how many are
+  left. Arrows show who you would hit, and who can hit you.
+- **Spectating:** players who are out watch the rest with the scoreboard, and can cheer (a small, harmless
+  reaction shown to the players).
+
+#### Charge and Strike
+
+Showdown uses the game's existing **overdrive meter**. When it has charge, the player chooses how to spend it:
+
+| Button     | What it does                                                                     |
+| ---------- | -------------------------------------------------------------------------------- |
+| Overdrive  | As in a normal song: their own multiplier goes up while it lasts.                |
+| **Strike** | Spends the charge on a hit against the player just above them on the scoreboard. |
+
+- **Bigger charge, longer hit:** a quarter meter (the minimum) gives a 3 s hit, and a full meter 8 s, scaling in
+  between. Saving up is a real choice: a big hit later, or overdrive points now.
+- **Who's hit:** the player directly above. If that player is protected (see below), the Strike goes to the next
+  one up. First place has no one above, so for them the meter is only overdrive.
+- **Before it lands:** the target sees a warning half a second before the hit starts, with the attacker's name.
+
+#### What a hit does
+
+A hit has **one** effect, never two. Each player chooses in Settings → Online how hits reach them:
+
+| Mode                  | What a hit does to you                                                                                                                                                                                                                                      |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Fog** (default)     | A haze over the far part of your highway: notes come out of it later, so you have less time to read them. The haze never covers the strike line or the last third of the highway, so nothing you have to hit right now is hidden. Your score isn't touched. |
+| **Drain** (calm hits) | Your multiplier is capped at 2× while it lasts. The highway stays fully readable, with only a coloured edge and a timer showing the hit. Nothing moves or flashes.                                                                                          |
+
+Fog is the fun one to see coming. Drain is the same disadvantage in points, for players who can't or don't want
+to play through visual effects (for example photosensitivity or visual snow). Both are tuned to cost about the
+same, so choosing Drain is never a handicap.
+
+#### Keeping it fair
+
+- **One hit at a time:** a player under a hit can't be hit again until it ends.
+- **Protection:** after a hit ends, the player can't be targeted for 6 s.
+- **Diminishing hits:** a second hit on the same player within 30 s lasts half as long.
+- **No pile-ons:** at most two players can have a given player as their next target. A third Strike goes to the
+  next player up instead.
+- **Clear targeting:** the scoreboard arrows, the warning, and the attacker's name on every hit.
+
+#### Lobby options
+
+- **Hits:** on (default), or off for a pure score race.
+- **Parts:** any part, or one part only (all drums, all vocals, …).
+- **Set:** the server's rotation, or a set the host picks.
+
+All numbers (durations, protection, the 2× cap) are starting values to tune in play.
 
 ### 4.2 Accounts and avatars (decided: the band's 3D characters)
 
@@ -319,7 +369,7 @@ client → host/server
   ping         { t }                         // clock sync
   ready        { part, difficulty, ready }
   progress     { songIndex, score, streak, stars, overdrive }
-  hit          { target }                    // Showdown: spend a full charge
+  strike       { charge }                    // Showdown: spend charge on the player above
   finish       { songIndex, results, inputLog? }
   request-song { songId }
 
@@ -329,7 +379,7 @@ host/server → client
   lobby        { set, players: [{ id, name, part, difficulty, ready, avatar? }] }
   start        { songIndex, at }             // host time to start
   board        { players: [{ id, score, streak, stars, out? }] }   // 10/s
-  hit          { from, effect, ms }           // Showdown
+  hit          { from, ms, at }               // Showdown: a hit starting at `at`, for `ms`
   results      { songIndex, players: [...] }
   song         { songId, chunk, of }          // a .soundwave file, in pieces
   bye          { reason }
@@ -365,5 +415,4 @@ Each milestone is its own PR, and the game ships after every one.
 
 ## 8. Open questions
 
-1. **Showdown hits:** besides Fog, which effects should there be? Name the ones you liked in other games'
-   battle modes, and we design our own versions of them (own names and look), then tune lengths and strength in play.
+None at the moment. Numbers in Showdown (durations, protection, the 2× cap) are tuned in play.
