@@ -1,6 +1,7 @@
 import { LogOut, Pause, Play, RotateCcw, Settings as SettingsIcon, SkipForward, Zap } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { showSong } from '../app/discord';
+import { StageBackdrop } from './StageBackdrop';
 import { getEngine } from '../audio/engine';
 import { playSfx } from '../audio/sfx';
 import type { Chart } from '../chart/types';
@@ -249,6 +250,7 @@ export function PlayScreen({
       inert={settingsOpen}
     >
       <div ref={stageRef} className="layer stage-host" />
+      <StageBackdrop />
       <canvas ref={hwRef} className="layer highway" />
       <div ref={hudRef} className="hud">
         <div className="touch-layer" data-hud="touch" />

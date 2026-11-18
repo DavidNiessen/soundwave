@@ -139,7 +139,7 @@ interface Base {
   help: string;
   disabled?: boolean;
 }
-type Row =
+export type Row =
   | (Base & { kind: 'choice'; value: string; options: Option[]; set(v: string): void })
   | (Base & { kind: 'slider'; value: number; min: number; max: number; step: number; format(v: number): string; set(v: number): void })
   | (Base & { kind: 'action'; button: string; run(): void; note?: ReactNode; danger?: boolean })
@@ -170,7 +170,7 @@ function assign(list: string[], index: number, input: string): string[] {
   return out;
 }
 
-const ON_OFF: Option[] = [
+export const ON_OFF: Option[] = [
   { value: 'off', label: 'Off' },
   { value: 'on', label: 'On' },
 ];
@@ -1340,7 +1340,19 @@ function useBindingMoves(ref: React.RefObject<HTMLElement | null>, on: boolean) 
   }, [ref, on]);
 }
 
-function RowView({ row, active, first, touch, onActive }: { row: Row; active: boolean; first: boolean; touch: boolean; onActive(): void }) {
+export function RowView({
+  row,
+  active,
+  first,
+  touch,
+  onActive,
+}: {
+  row: Row;
+  active: boolean;
+  first: boolean;
+  touch: boolean;
+  onActive(): void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLSpanElement>(null);
   const index =

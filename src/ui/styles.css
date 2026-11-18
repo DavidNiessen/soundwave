@@ -5981,3 +5981,417 @@ a.btn {
     background: rgb(8 5 26 / 0.86);
   }
 }
+
+/* ------------------------------------------------------------------------------------------- */
+/* Stage browser                                                                                */
+
+/* The stage is the point here: it shows at full strength, with only a little night at the top
+   for the heading and at the bottom for the cards. */
+.menu:has(.home-body[data-tab='stage']) > .layer {
+  opacity: 1;
+}
+.menu:has(.home-body[data-tab='stage']) .veil {
+  background: linear-gradient(180deg, rgb(14 8 40 / 0.7), transparent 24%, transparent 58%, rgb(14 8 40 / 0.85));
+}
+.home-body[data-tab='stage'] {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.stages {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.stages .stages-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 1rem;
+  position: relative;
+}
+.stage-cards {
+  display: flex;
+  gap: 0.8rem;
+  overflow-x: auto;
+  padding: 0.6rem 0.2rem 0.4rem;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+  transition: opacity 0.25s;
+}
+.stages.is-editing .stage-cards {
+  opacity: 0.35;
+}
+.stage-card {
+  flex: 0 0 clamp(9.5rem, 13vw, 12.5rem);
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem 0.5rem 0.65rem;
+  border-radius: var(--r-l);
+  background: var(--panel);
+  backdrop-filter: blur(var(--glass-blur));
+  color: var(--ink);
+  text-align: left;
+  border: 2px solid transparent;
+  transition:
+    transform 0.22s var(--ease),
+    border-color 0.2s,
+    background 0.2s;
+}
+.stage-card:is(:hover, :focus-visible, .focused) {
+  transform: translateY(-0.3rem);
+  background: var(--raised);
+}
+.stage-card.active {
+  border-color: var(--pink);
+}
+/* A stage at a glance: its wash below, the two beam colours fanning up through it, darker the
+   darker the stage. */
+.stage-swatch {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 10;
+  border-radius: calc(var(--r-l) - 0.3rem);
+  overflow: hidden;
+  background:
+    linear-gradient(rgb(0 0 0 / calc(var(--dark) * 0.85)), rgb(0 0 0 / calc(var(--dark) * 0.85))),
+    radial-gradient(120% 70% at 50% 110%, var(--wash), transparent 70%), #07051a;
+}
+.stage-swatch::before,
+.stage-swatch::after {
+  content: '';
+  position: absolute;
+  bottom: -10%;
+  width: 22%;
+  height: 130%;
+  opacity: calc(0.35 + 0.65 * var(--beams));
+  filter: blur(3px);
+  transform-origin: 50% 100%;
+}
+.stage-swatch::before {
+  left: 24%;
+  background: linear-gradient(0deg, var(--key), transparent 85%);
+  transform: rotate(-18deg);
+}
+.stage-swatch::after {
+  right: 24%;
+  background: linear-gradient(0deg, var(--accent), transparent 85%);
+  transform: rotate(18deg);
+}
+.stage-swatch.blank {
+  background: var(--well);
+  color: var(--ink-2);
+}
+.stage-swatch.blank::before,
+.stage-swatch.blank::after {
+  display: none;
+}
+.stage-swatch.blank svg {
+  width: 2rem;
+  height: 2rem;
+}
+.stage-cycle {
+  position: relative;
+  z-index: 1;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: rgb(255 255 255 / 0.85);
+  text-shadow: 0 1px 4px rgb(0 0 0 / 0.8);
+}
+.stage-name {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 800;
+  font-size: 1.02rem;
+}
+.stage-name .in-use {
+  width: 1rem;
+  height: 1rem;
+  color: var(--pink);
+}
+.stage-tags {
+  font-size: 0.78rem;
+  color: var(--ink-3);
+  line-height: 1.3;
+}
+.stage-card.new .stage-name {
+  color: var(--ink-2);
+}
+
+/* The editor: a panel on the right, the stage in view beside it. */
+.stage-editor {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(30rem, 46vw);
+  overflow-y: auto;
+  backdrop-filter: blur(var(--glass-blur));
+  animation: stage-editor-in 0.3s var(--ease) backwards;
+  z-index: 2;
+}
+@keyframes stage-editor-in {
+  from {
+    opacity: 0;
+    transform: translateX(1.5rem);
+  }
+}
+.stage-editor .set-row {
+  grid-template-columns: minmax(7rem, 0.8fr) 1.2fr;
+}
+.stage-editor .set-help {
+  display: none;
+}
+.stage-editor .set-row.active .set-help {
+  display: block;
+}
+.color-row {
+  display: grid;
+  grid-template-columns: minmax(7rem, 0.8fr) 1.2fr;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.8rem;
+}
+.color-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.color-dot,
+.color-own {
+  width: 1.45rem;
+  height: 1.45rem;
+  border-radius: 50%;
+  border: 2px solid rgb(255 255 255 / 0.25);
+  cursor: pointer;
+  transition:
+    transform 0.15s,
+    border-color 0.15s;
+}
+.color-dot:is(:hover, :focus-visible) {
+  transform: scale(1.15);
+}
+.color-dot.on {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 2px var(--pink);
+}
+.color-own {
+  position: relative;
+  overflow: hidden;
+  background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red);
+}
+.color-own input {
+  position: absolute;
+  inset: -0.5rem;
+  opacity: 0;
+  cursor: pointer;
+}
+.stage-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.8rem;
+}
+.stage-tools .btn svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+@media (max-width: 760px) {
+  .stage-editor {
+    position: relative;
+    width: 100%;
+    flex: 1;
+  }
+}
+
+/* A stage's own background in place of the 3D stage: darkened for the notes in front of it, and
+   swelling a little with the bass. */
+.stage-backdrop {
+  pointer-events: none;
+  overflow: hidden;
+  background: #000;
+}
+.backdrop-fill {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: brightness(calc((1 - var(--dim, 0.35)) * (0.92 + 0.22 * var(--pulse, 0))));
+}
+.menu:has(.home-body[data-tab='stage']) > .stage-backdrop {
+  opacity: 1;
+}
+.stage-swatch.media {
+  background: var(--well);
+}
+.stage-swatch.media::before,
+.stage-swatch.media::after {
+  display: none;
+}
+.stage-swatch.media :is(img, video) {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.stage-swatch .media-icon {
+  position: relative;
+  z-index: 1;
+  width: 1.6rem;
+  height: 1.6rem;
+  color: #fff;
+  filter: drop-shadow(0 1px 4px rgb(0 0 0 / 0.8));
+}
+.stage-note {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0.8rem;
+  color: var(--ink-3);
+  font-size: 0.85rem;
+}
+.stage-note svg {
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+/* Your stages, then the templates: two groups in one row that runs sideways. */
+.stage-cards {
+  gap: 1.6rem;
+  align-items: flex-end;
+}
+.card-group {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.card-group + .card-group {
+  padding-left: 1.6rem;
+  border-left: 1px solid var(--line);
+}
+.card-group-label {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  text-shadow: 0 1px 6px rgb(0 0 0 / 0.7);
+}
+.card-row {
+  display: flex;
+  gap: 0.8rem;
+}
+.stage-card {
+  flex: none;
+  width: clamp(9.5rem, 13vw, 12.5rem);
+}
+
+/* New stage: what is behind the highway, as four big choices. */
+.new-stage {
+  max-width: 40rem;
+}
+.start-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin-top: 0.8rem;
+}
+.start-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 0.7rem;
+  align-items: center;
+  padding: 0.9rem 1rem;
+  border-radius: var(--r-l);
+  background: var(--raised);
+  color: var(--ink);
+  text-align: left;
+  transition:
+    background 0.2s,
+    transform 0.2s var(--ease);
+}
+.start-option:is(:hover, :focus-visible) {
+  background: var(--raised-hi);
+  transform: translateY(-2px);
+}
+.start-option svg {
+  grid-row: span 2;
+  width: 1.8rem;
+  height: 1.8rem;
+  color: var(--pink-2);
+}
+.start-label {
+  font-weight: 800;
+  font-size: 1.05rem;
+}
+.start-help {
+  font-size: 0.82rem;
+  color: var(--ink-3);
+  line-height: 1.3;
+}
+@media (max-width: 560px) {
+  .start-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Every template, with what it is like; pointing at one shows it behind the list. */
+.template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.template-row {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr auto auto;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.45rem;
+  border-radius: var(--r-m);
+  border: 2px solid transparent;
+}
+.template-row:hover,
+.template-row:focus-within {
+  background: var(--row-hi);
+}
+.template-row.active {
+  border-color: var(--pink);
+}
+.template-row .stage-swatch {
+  aspect-ratio: 16 / 10;
+}
+.template-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.more-toggle {
+  align-self: flex-start;
+  margin: 0.2rem 0.8rem 0;
+}
+.more-toggle svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  transition: transform 0.2s;
+}
+.more-toggle.open svg {
+  transform: rotate(180deg);
+}
+.stage-editor {
+  display: flex;
+  flex-direction: column;
+}

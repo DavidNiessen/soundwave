@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { BandMeter } from '../audio/bands';
 import { getEngine } from '../audio/engine';
 import { gpuKnown, resolveGraphics, type GraphicsSettings } from '../game/graphics';
-import { acquireMenuStage, releaseMenuStage } from '../render/aurora/menuStage';
+import { acquireMenuStage, menuStageBoosted, releaseMenuStage } from '../render/aurora/menuStage';
 import type { StageView } from '../render/stage/StageView';
 
 /**
@@ -43,7 +43,9 @@ export function MenuBackground({ graphics, onReady }: { graphics: GraphicsSettin
         const now = performance.now();
         const b = meter.update(Math.min(0.1, (now - last) / 1000));
         last = now;
-        stage.input({ intensity: Math.min(1, (b.low + b.mid) * 0.7), overdrive: false, barSeconds: 2, bands: b });
+        // A drop tried out in the stage browser runs the show at full tilt.
+        const boost = menuStageBoosted(now);
+        stage.input({ intensity: boost ? 1 : Math.min(1, (b.low + b.mid) * 0.7), overdrive: boost, barSeconds: 2, bands: b });
       };
       loop();
     };

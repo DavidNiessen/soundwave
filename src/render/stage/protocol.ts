@@ -1,6 +1,7 @@
 import type { BandLevels } from '../../audio/bands';
 import type { GraphicsSettings } from '../../game/graphics';
 import type { StageOptions } from '../aurora/AuroraStage';
+import type { StageLook } from './look';
 
 /** What the music is doing, as the page last heard it. The stage reads the latest on each of its frames. */
 export interface StageInput {
@@ -38,6 +39,10 @@ export type ToStage =
   | { type: 'input'; id: number; input: StageInput }
   | { type: 'beat'; id: number; beat: Beat }
   | { type: 'rate'; id: number; rate: StageRate }
+  /** How the player's stage looks (it can change while the stage runs). */
+  | { type: 'look'; id: number; look: StageLook }
+  /** The newest frame of the player's video on the stage's screens (null: their own pictures again). */
+  | { type: 'screen'; id: number; frame: ImageBitmap | null }
   | { type: 'overdrive'; id: number }
   | { type: 'finale'; id: number; seconds: number }
   | { type: 'debug'; id: number }

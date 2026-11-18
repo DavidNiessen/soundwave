@@ -24,6 +24,25 @@ export const shared = {
   uHazeFar: { value: new THREE.Color(0.007, 0.018, 0.08) },
   uHazeNear: { value: new THREE.Color(0.1, 0.09, 0.42) },
   uHazeDensity: { value: 0.0024 },
+  /** How bright the sky is drawn, 0..1 (a black stage dims it). */
+  uSkyLevel: { value: 1 },
+  /** How lit the venue's own forms are, 0..1.2 (a black stage puts them out). */
+  uVenueLevel: { value: 1 },
+  /**
+   * The player's own colours for the painted forms (the arches): a gradient from the wash through
+   * the accent to the key, and how far it replaces the forms' own colours (0 = not at all).
+   */
+  uPaintA: { value: new THREE.Color(0, 0, 0) },
+  uPaintB: { value: new THREE.Color(0, 0, 0) },
+  uPaintC: { value: new THREE.Color(0, 0, 0) },
+  uPaintMix: { value: 0 },
+  /** A video of the player's own on the screens: its latest frame, whether it shows, and its width over its height. */
+  uScreenVideo: { value: null as THREE.Texture | null },
+  uScreenVideoOn: { value: 0 },
+  uScreenVideoAspect: { value: 16 / 9 },
+  /** The video turned by quarter turns clockwise (0..3), and mirrored (1). */
+  uScreenVideoTurn: { value: 0 },
+  uScreenVideoMirror: { value: 0 },
   /** Centre of the stage's glow (the moon screen). */
   uGlowPos: { value: new THREE.Vector3(0, 16, -25.5) },
   /** Main screen: centre x, y, z and radius of the moon drawn on it. */
@@ -77,6 +96,12 @@ uniform vec3 uWash;
 uniform vec3 uHazeFar;
 uniform vec3 uHazeNear;
 uniform float uHazeDensity;
+uniform float uSkyLevel;
+uniform float uVenueLevel;
+uniform vec3 uPaintA;
+uniform vec3 uPaintB;
+uniform vec3 uPaintC;
+uniform float uPaintMix;
 uniform vec3 uGlowPos;
 uniform vec4 uMoon;
 uniform vec3 uArch;

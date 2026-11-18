@@ -7,6 +7,7 @@ import {
   Power,
   Search,
   Settings as SettingsIcon,
+  Theater,
   Upload,
   Download,
   MonitorDown,
@@ -26,6 +27,7 @@ import { useGlyphStyle } from '../input/usePads';
 import { Hint, useActions } from './actions';
 import { Mosaic } from './Cover';
 import { ICON_STROKE } from './icons';
+import { useStageBrowser } from './StageBrowser';
 import { TrackPicker, type TrackPickerProps } from './TrackPicker';
 import { useSlide } from './useSlide';
 import { keysOf } from '../input/bindings';
@@ -48,6 +50,8 @@ interface Props {
   /** What the Edit tab's list of tracks needs to bring songs in and open them in the editor. */
   tracks: Omit<TrackPickerProps, 'songs' | 'status' | 'settings'>;
   onSettings(): void;
+  /** The player's stages changed in the Stage tab. */
+  onStages(next: Settings['stage']): void;
   /** Asks whether to close the game (absent where the game cannot close itself, as in a browser tab). */
   onExit?(): void;
   /** The version of an update that is ready to install, when the desktop app found one. */
@@ -58,12 +62,14 @@ interface Props {
   settings: Settings;
 }
 
-/** The two halves of the main menu: playing sets, and making charts. */
-type Tab = 'play' | 'edit';
+/** The main menu's tabs: playing sets, making charts, and picking the stage they are played on. */
+type Tab = 'play' | 'edit' | 'stage';
 const TABS: [Tab, string, LucideIcon][] = [
   ['play', 'Play', Play],
   ['edit', 'Edit', PencilRuler],
+  ['stage', 'Stage', Theater],
 ];
+const tabIndex = (t: Tab) => TABS.findIndex(([id]) => id === t);
 /**
  * The tab the menu was on last, for as long as the game is open: coming back from the editor lands
  * on Edit again, and a fresh start is always Play.
@@ -88,6 +94,7 @@ export function HomeScreen({
   onAdd,
   tracks,
   onSettings,
+  onStages,
   onExit,
   update,
   onUpdate,
@@ -107,7 +114,7 @@ export function HomeScreen({
   const setTab = (t: Tab) => {
     if (t === tabRef.current) return;
     lastTab = t;
-    setTurn(t === 'edit' ? 'fwd' : 'back');
+    setTurn(tabIndex(t) > tabIndex(tabRef.current) ? 'fwd' : 'back');
     setTabState(t);
   };
 
@@ -117,7 +124,7 @@ export function HomeScreen({
       const next = TABS[TABS.findIndex(([id]) => id === tabRef.current) + (e as CustomEvent<number>).detail]?.[0];
       if (!next) return;
       playSfx('tab');
-      menuPulse(next === 'edit' ? 'tab-right' : 'tab-left');
+      menuPulse((e as CustomEvent<number>).detail > 0 ? 'tab-right' : 'tab-left');
       follow.current = true;
       setTab(next);
     };
@@ -144,21 +151,25 @@ export function HomeScreen({
   opening.current ??= new Set([...sets.map((s) => s.id), ...(empty ? ['add'] : [])]);
   const late = (id: string) => (opening.current!.has(id) ? '' : 'late');
 
+  const stage = useStageBrowser({ stages: settings.stage, settings, on: tab === 'stage', onChange: onStages });
+
   useActions([
-    ...(tab === 'play'
-      ? [{ id: 'add', label: importing ? `Importing ${importing}…` : 'Add songs', icon: Upload, ...keysOf('home.add'), run: onAdd }]
-      : [
-          {
-            id: 'search',
-            label: 'Search',
-            icon: Search,
-            ...keysOf('home.search'),
-            bar: false,
-            run: () => document.querySelector<HTMLInputElement>('.track-picker input[type=search]')?.focus(),
-          },
-          { id: 'new', label: 'New track', icon: FilePlus2, ...keysOf('home.new'), primary: true, run: () => setPicks((n) => n + 1) },
-        ]),
-    { id: 'settings', label: 'Settings', icon: SettingsIcon, ...keysOf('home.settings'), run: onSettings },
+    ...(tab === 'stage'
+      ? stage.actions
+      : tab === 'play'
+        ? [{ id: 'add', label: importing ? `Importing ${importing}…` : 'Add songs', icon: Upload, ...keysOf('home.add'), run: onAdd }]
+        : [
+            {
+              id: 'search',
+              label: 'Search',
+              icon: Search,
+              ...keysOf('home.search'),
+              bar: false,
+              run: () => document.querySelector<HTMLInputElement>('.track-picker input[type=search]')?.focus(),
+            },
+            { id: 'new', label: 'New track', icon: FilePlus2, ...keysOf('home.new'), primary: true, run: () => setPicks((n) => n + 1) },
+          ]),
+    ...(stage.editing ? [] : [{ id: 'settings', label: 'Settings', icon: SettingsIcon, ...keysOf('home.settings'), run: onSettings }]),
     ...(update
       ? [{ id: 'update', label: `Update to ${update}`, icon: Download, ...keysOf('home.update'), bar: false, run: onUpdate }]
       : []),
@@ -166,7 +177,7 @@ export function HomeScreen({
       ? [{ id: 'install-app', label: 'Get the app', icon: MonitorDown, ...keysOf('home.install'), bar: false, run: onInstallApp }]
       : []),
     // Esc and the controller's back button: there is nowhere further back than out.
-    ...(onExit ? [{ id: 'exit', label: 'Exit', icon: Power, kbd: 'Escape', bar: false, run: onExit }] : []),
+    ...(onExit && !stage.editing ? [{ id: 'exit', label: 'Exit', icon: Power, kbd: 'Escape', bar: false, run: onExit }] : []),
   ]);
 
   const tabRow = useSlide<HTMLDivElement>(tab);
@@ -228,7 +239,9 @@ export function HomeScreen({
         role="tabpanel"
         aria-labelledby={`home-tab-${tab}`}
       >
-        {tab === 'play' ? (
+        {tab === 'stage' ? (
+          stage.view
+        ) : tab === 'play' ? (
           <>
             <h2 className="page-title">Pick a set</h2>
             <div className="tiles" data-nav-group="tiles">

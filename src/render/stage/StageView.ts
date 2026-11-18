@@ -1,6 +1,7 @@
 import { gpuFound, type GraphicsSettings } from '../../game/graphics';
 import type { StageOptions } from '../aurora/AuroraStage';
 import { serveWorkerFetch } from '../../app/workerFetch';
+import { DEFAULT_LOOK, type StageLook } from './look';
 import type { Beat, FromStage, StageInput, StageRate, ToStage } from './protocol';
 
 /**
@@ -34,6 +35,50 @@ let pageHost: Promise<(m: ToStage) => void> | null = null;
 let nextId = 1;
 const views = new Map<number, StageView>();
 const debugAsks = new Map<number, (info: Record<string, unknown>) => void>();
+
+/** How every stage looks: the player's stage, or one being tried out in the stage browser. */
+let currentLook: StageLook = DEFAULT_LOOK;
+
+/** Changes how every stage looks, the ones running now and the ones built from now on. */
+export function setStageLook(look: StageLook) {
+  if (JSON.stringify(look) === JSON.stringify(currentLook)) return;
+  currentLook = look;
+  for (const view of views.values()) view.setLook(look);
+}
+
+export const stageLook = (): StageLook => currentLook;
+
+/** Something covers every stage (a video or picture in its place): they stop drawing until it goes. */
+let covered = false;
+const pageVisible = () => typeof document === 'undefined' || document.visibilityState !== 'hidden';
+
+function postVisible() {
+  const m: ToStage = { type: 'visible', visible: pageVisible() && !covered };
+  worker?.postMessage(m);
+  void pageHost?.then((handle) => handle(m));
+}
+
+export function setStageCovered(on: boolean) {
+  if (on === covered) return;
+  covered = on;
+  postVisible();
+}
+
+/** Hands every stage a frame of the video on its screens (each gets its own copy), or null to stop. */
+export async function sendScreenFrame(source: CanvasImageSource | null) {
+  const list = [...views.values()];
+  if (!source) {
+    for (const view of list) view.screenFrame(null);
+    return;
+  }
+  for (const view of list) {
+    try {
+      view.screenFrame(await createImageBitmap(source as ImageBitmapSource, { resizeWidth: 640, resizeHeight: 360 }));
+    } catch {
+      /* the video has no frame yet */
+    }
+  }
+}
 
 let venueShare = 0;
 const venueWatchers = new Set<(share: number) => void>();
@@ -85,7 +130,7 @@ function getWorker(): Worker | null {
       w.terminate();
       for (const view of views.values()) view.onFailed('the stage worker stopped', true);
     };
-    w.postMessage({ type: 'visible', visible: document.visibilityState !== 'hidden' } satisfies ToStage);
+    w.postMessage({ type: 'visible', visible: pageVisible() && !covered } satisfies ToStage);
     worker = w;
   } catch {
     worker = null;
@@ -96,18 +141,13 @@ function getWorker(): Worker | null {
 function getPageHost(): Promise<(m: ToStage) => void> {
   pageHost ??= import('./stageHost').then(({ createStageHost }) => {
     const host = createStageHost(receive);
-    host.handle({ type: 'visible', visible: document.visibilityState !== 'hidden' });
+    host.handle({ type: 'visible', visible: pageVisible() && !covered });
     return host.handle;
   });
   return pageHost;
 }
 
-if (typeof document !== 'undefined')
-  document.addEventListener('visibilitychange', () => {
-    const m: ToStage = { type: 'visible', visible: document.visibilityState !== 'hidden' };
-    worker?.postMessage(m);
-    void pageHost?.then((handle) => handle(m));
-  });
+if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => postVisible());
 
 /** Starts loading the venue now, ahead of the first stage, so it is there sooner. */
 export function preloadStage() {
@@ -180,7 +220,8 @@ export class StageView {
     this.observer.observe(canvas);
     this.lastSize = '';
     const { width, height, dpr } = this.measure();
-    const base = { type: 'create' as const, id: this.id, graphics: this.graphics, options: this.options, width, height, dpr };
+    const options = { ...this.options, look: currentLook };
+    const base = { type: 'create' as const, id: this.id, graphics: this.graphics, options, width, height, dpr };
     if (target === 'worker') {
       const offscreen = canvas.transferControlToOffscreen();
       worker!.postMessage({ ...base, canvas: offscreen } satisfies ToStage, [offscreen]);
@@ -195,9 +236,9 @@ export class StageView {
     }
   }
 
-  private send(m: ToStage) {
+  private send(m: ToStage, transfer: Transferable[] = []) {
     if (this.disposed && m.type !== 'dispose') return;
-    if (this.target === 'worker') worker?.postMessage(m);
+    if (this.target === 'worker') worker?.postMessage(m, transfer);
     else if (this.pageHandle) this.pageHandle(m);
     else this.queue.push(m);
   }
@@ -260,6 +301,17 @@ export class StageView {
 
   beat(beat: Beat) {
     this.send({ type: 'beat', id: this.id, beat });
+  }
+
+  /** @internal How the stage looks (see setStageLook). */
+  setLook(look: StageLook) {
+    this.send({ type: 'look', id: this.id, look });
+  }
+
+  /** @internal A frame of the video on the stage's screens (see sendScreenFrame). */
+  screenFrame(frame: ImageBitmap | null) {
+    if (this.disposed) return frame?.close();
+    this.send({ type: 'screen', id: this.id, frame }, frame ? [frame] : []);
   }
 
   setRate(rate: StageRate) {

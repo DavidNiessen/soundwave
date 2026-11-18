@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { setDiscordEnabled, showScene } from '../app/discord';
+import { findStage } from '../game/stages';
+import { setActiveStage } from '../render/stage/showStage';
 import { analysisManager, canPlay } from '../analysis/manager';
 import { stemModel } from '../analysis/separation/model';
 import { analysisDevice, type AnalysisDevice } from '../analysis/separation/support';
@@ -66,6 +68,7 @@ import { checkForUpdates, updates } from '../app/updates';
 import { PlayScreen } from './PlayScreen';
 import { ResultsScreen, SummaryScreen, type SetResult } from './ResultsScreen';
 import { SettingsScreen } from './SettingsScreen';
+import { StageBackdrop } from './StageBackdrop';
 import type { SongActions } from './SongMenu';
 import { SongSheet } from './SongSheet';
 import { MetadataSheet } from './MetadataSheet';
@@ -107,7 +110,16 @@ function Busy() {
   return null;
 }
 
-const DEPTH: Record<View['name'], number> = { home: 0, library: 1, settings: 1, lobby: 2, editor: 2, play: 3, results: 4, summary: 5 };
+const DEPTH: Record<View['name'], number> = {
+  home: 0,
+  library: 1,
+  settings: 1,
+  lobby: 2,
+  editor: 2,
+  play: 3,
+  results: 4,
+  summary: 5,
+};
 
 export function App() {
   const [view, setView] = useState<View>({ name: 'home' });
@@ -791,6 +803,10 @@ export function App() {
     }
   };
 
+  // Every stage (the menus' and the song's) is the player's stage; the stage browser shows the ones
+  // it tries out over it (see showStage).
+  useEffect(() => setActiveStage(findStage(settings.stage, settings.stage.active)), [settings.stage]);
+
   // The player's Discord profile shows where they are and what they play (desktop app; src/app/discord.ts).
   useEffect(() => setDiscordEnabled(settings.discordStatus), [settings.discordStatus]);
   useEffect(() => {
@@ -955,6 +971,7 @@ export function App() {
             toast,
           }}
           onSettings={() => setView({ name: 'settings', back: view })}
+          onStages={(stage) => updateSettings({ ...settings, stage })}
           onExit={canExit() ? () => setExitAsk(true) : undefined}
           update={update.state === 'available' ? update.version : undefined}
           onUpdate={() => setAppCard('update')}
@@ -966,6 +983,7 @@ export function App() {
     content = (
       <div className={`menu on-${view.name}`}>
         <MenuBackground graphics={settings.graphics} onReady={onStage} />
+        <StageBackdrop />
         <div className="veil" aria-hidden />
         {/* One entrance per screen change; the stage behind it stays. */}
         {booted && (

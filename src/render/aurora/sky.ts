@@ -82,7 +82,7 @@ export function buildSky(): THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMateria
         col = mix(uHazeFar * 0.75, col, smoothstep(mid - 0.002, mid + 0.002, d.y));
         float near = 0.006 + 0.02 * fbm(vec2(az * 9.0, 5.1)) + 0.006 * vnoise(vec2(az * 90.0, 4.0));
         col = mix(uHazeFar * 0.42, col, smoothstep(near - 0.0015, near + 0.0015, d.y));
-        gl_FragColor = vec4(col, 1.0);
+        gl_FragColor = vec4(col * uSkyLevel, 1.0);
         ${OUTPUT}
       }`,
   });

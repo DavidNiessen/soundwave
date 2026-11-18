@@ -2,6 +2,7 @@ import { detectGpu } from '../../game/graphics';
 import { AuroraStage } from '../aurora/AuroraStage';
 import { loadVenue, watchVenue } from '../aurora/assets';
 import type { Beat, FromStage, StageInput, StageRate, ToStage } from './protocol';
+import type { StageLook } from './look';
 
 /** How often a frozen stage still draws, ms (so a resized window is not left blank). */
 const FROZEN_MS = 500;
@@ -18,6 +19,8 @@ interface Slot {
   rate: StageRate;
   lastFrozen: number;
   size: { width: number; height: number; dpr: number };
+  /** A look that came while the stage was still being built. */
+  look: StageLook | null;
   disposed: boolean;
 }
 
@@ -75,6 +78,7 @@ export function createStageHost(post: (m: FromStage) => void) {
       rate: 'full',
       lastFrozen: 0,
       size: { width: m.width, height: m.height, dpr: m.dpr },
+      look: null,
       disposed: false,
     };
     slots.set(m.id, slot);
@@ -88,6 +92,7 @@ export function createStageHost(post: (m: FromStage) => void) {
       return;
     }
     if (slot.disposed) return stage.dispose();
+    if (slot.look) stage.setLookOptions(slot.look);
     stage.setSize(slot.size.width, slot.size.height, slot.size.dpr);
     await stage.prepare();
     if (slot.disposed) return stage.dispose();
@@ -131,6 +136,16 @@ export function createStageHost(post: (m: FromStage) => void) {
         break;
       case 'rate':
         slot.rate = m.rate;
+        break;
+      case 'look':
+        slot.look = m.look;
+        slot.stage?.setLookOptions(m.look);
+        // Seen at once on a stage that only draws now and then (under a screen).
+        if (slot.rate === 'frozen' && slot.stage) draw(slot);
+        break;
+      case 'screen':
+        if (slot.stage) slot.stage.setScreenFrame(m.frame);
+        else m.frame?.close();
         break;
       case 'overdrive':
         slot.stage?.overdriveStart();

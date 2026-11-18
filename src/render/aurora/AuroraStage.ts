@@ -8,6 +8,7 @@ import type { Part } from '../../chart/types';
 import { LEVEL_SHARE, type GraphicsSettings, type Level } from '../../game/graphics';
 import { Director, buildShots } from '../stage/Director';
 import { LightShow, PALETTES, type Rgb, type ShowState } from '../stage/LightShow';
+import { DEFAULT_LOOK, showIntensity, type StageLook } from '../stage/look';
 import { Particles } from '../stage/Particles';
 import { loadVenue, type VenueAssets, type VenueData } from './assets';
 import { Beams } from './beams';
@@ -23,6 +24,8 @@ export interface StageOptions {
   mode: 'play' | 'menu';
   /** The part being played: that band member gets the close-ups. */
   part?: Part;
+  /** How the player's stage looks (colours, brightness, show): see setLookOptions. */
+  look?: StageLook;
 }
 
 export interface StageFrame {
@@ -152,6 +155,12 @@ export class AuroraStage {
   private beatDrift = 0;
   private pendingBeat: StageFrame['beat'] = 'none';
   private disposed = false;
+  /** The player's stage: colours, brightness, haze, beams, show, crowd and pyro. */
+  private look: StageLook = DEFAULT_LOOK;
+  /** The newest frame of the player's video on the screens. */
+  private screenTex: THREE.Texture | null = null;
+  /** The lights along the shore as the venue has them, before the look dims them. */
+  private readonly shoreColors = shared.uShoreCol.value.map(() => new THREE.Color(0, 0, 0));
 
   private constructor(
     private readonly canvas: HTMLCanvasElement | OffscreenCanvas,
@@ -214,6 +223,7 @@ export class AuroraStage {
       land.data.shore.slice(0, 8).forEach((s, i) => {
         shared.uShore.value[i].set(...s.pos);
         shared.uShoreCol.value[i].set(s.color);
+        this.shoreColors[i].set(s.color);
       });
     }
     const ground = (x: number, z: number) => terrainHeight(land?.data.terrain, x, z);
@@ -279,6 +289,7 @@ export class AuroraStage {
     this.owned.push(this.sparks, this.smoke);
 
     this.setLook(LOOKS[0], 1);
+    this.setLookOptions(opts.look ?? DEFAULT_LOOK);
     if (g.glow) this.buildComposer();
     this.applySize();
   }
@@ -332,6 +343,64 @@ export class AuroraStage {
     this.bandsIn.low = b.low;
     this.bandsIn.mid = b.mid;
     this.bandsIn.high = b.high;
+  }
+
+  /** The player's stage: takes effect at once, the colours easing over. */
+  setLookOptions(look: StageLook) {
+    this.look = look;
+    this.crowd.group.visible = look.crowd;
+    this.renderer.toneMappingExposure = EXPOSURE * look.brightness;
+    this.applyVenueLight();
+    if (!look.pyro) this.flames?.hold(this.show.state.time, false);
+  }
+
+  /**
+   * The venue's own light (the sky, its haze, the moon and the lights along the shore), dimmed by the
+   * look. The uniforms are shared by every stage in this thread, so each sets them before it draws.
+   */
+  private applyVenueLight() {
+    const v = this.look.venue;
+    shared.uSkyLevel.value = 0.12 + 0.88 * Math.min(1, v);
+    shared.uHazeFar.value.copy(BASE_HAZE_FAR).multiplyScalar(0.15 + 0.85 * Math.min(1, v));
+    shared.uMoonCol.value.copy(BASE_MOON).multiplyScalar(0.1 + 0.9 * v);
+    this.shoreColors.forEach((c, i) => shared.uShoreCol.value[i].copy(c).multiplyScalar(0.1 + 0.9 * v));
+    shared.uHazeDensity.value = BASE_HAZE_DENSITY * this.look.haze;
+    shared.uVenueLevel.value = v;
+    shared.uScreenVideoTurn.value = this.look.screenTurn;
+    shared.uScreenVideoMirror.value = this.look.screenMirror ? 1 : 0;
+    // The arches take the player's own colours (they keep their own with the show's).
+    const own = this.look.colors;
+    shared.uPaintMix.value = own ? 0.85 : 0;
+    if (own) {
+      shared.uPaintA.value.setRGB(...own.wash);
+      shared.uPaintB.value.setRGB(...own.accent);
+      shared.uPaintC.value.setRGB(...own.key);
+    }
+  }
+
+  /** A video on the screens: its newest frame, or null to show the show's own pictures again. */
+  setScreenFrame(frame: ImageBitmap | null) {
+    if (!frame) {
+      shared.uScreenVideoOn.value = 0;
+      shared.uScreenVideo.value = null;
+      this.screenTex?.dispose();
+      (this.screenTex?.image as ImageBitmap | undefined)?.close();
+      this.screenTex = null;
+      return;
+    }
+    if (!this.screenTex) {
+      this.screenTex = new THREE.Texture(frame);
+      this.screenTex.colorSpace = THREE.SRGBColorSpace;
+      this.screenTex.generateMipmaps = false;
+      this.screenTex.minFilter = THREE.LinearFilter;
+    } else {
+      (this.screenTex.image as ImageBitmap).close();
+      this.screenTex.image = frame;
+    }
+    this.screenTex.needsUpdate = true;
+    shared.uScreenVideo.value = this.screenTex;
+    shared.uScreenVideoAspect.value = frame.width / Math.max(1, frame.height);
+    shared.uScreenVideoOn.value = 1;
   }
 
   overdriveStart() {
@@ -405,12 +474,15 @@ export class AuroraStage {
     this.beatClock += advance;
     this.beats = Math.floor(this.beatClock);
     const bands = this.bandsIn;
-    for (const e of this.show.update({ dt, beat, intensity: f.intensity, bands, overdrive: f.overdrive })) {
+    const look = this.look;
+    const intensity = showIntensity(look, f.intensity);
+    for (const e of this.show.update({ dt, beat, intensity, bands, overdrive: f.overdrive })) {
+      if (!look.pyro) continue;
       if (e.type === 'fireworks') this.fireworks(e.which);
       else this.co2(e.strength);
     }
     // In overdrive the jets keep time: all of them on the bar, every other one on the beats between.
-    if (this.flames && this.finaleLeft <= 0 && this.show.state.overdrive > 0.5 && beat !== 'none') {
+    if (this.flames && look.pyro && this.finaleLeft <= 0 && this.show.state.overdrive > 0.5 && beat !== 'none') {
       const turn = this.beats;
       if (beat === 'downbeat') this.flames.fire(this.show.state.time, undefined, 0.9);
       else this.flames.fire(this.show.state.time, (i) => (i + turn) % 2 === 0, 0.55);
@@ -419,7 +491,7 @@ export class AuroraStage {
     if (this.finaleLeft > 0) {
       this.finaleLeft -= dt;
       this.finaleNext -= dt;
-      if (this.finaleNext <= 0) {
+      if (this.finaleNext <= 0 && look.pyro) {
         this.finaleNext = 0.42;
         this.fireworks((['center', 'sides', 'all'] as const)[this.finaleShot % 3]);
         if (this.finaleShot % 3 === 2) this.co2(0.8);
@@ -428,14 +500,14 @@ export class AuroraStage {
     }
     this.crowd.clap.value = this.finaleLeft > 0 ? 1 : 0;
     // Through the finale the jets burn without a break, and are let go as it ends.
-    this.flames?.hold(this.show.state.time, this.finaleLeft > 0);
+    this.flames?.hold(this.show.state.time, this.finaleLeft > 0 && look.pyro);
     shared.uFire.value = this.flames?.glow(this.show.state.time) ?? 0;
     this.sparks.update(dt, -9);
     this.smoke.update(dt, 0.4);
     if (this.wheel) this.wheel.rotation.z += dt * 0.045;
     shared.uBurst.value.w *= Math.exp(-dt * 1.6);
     this.director.update(dt, beat === 'downbeat', this.show.state.level, f.barSeconds);
-    this.energy += (f.intensity - this.energy) * Math.min(1, dt * 1.2);
+    this.energy += (intensity - this.energy) * Math.min(1, dt * 1.2);
     this.beatAge += dt;
     this.barAge += dt;
     if (beat !== 'none') {
@@ -527,6 +599,7 @@ export class AuroraStage {
     this.canvas.removeEventListener('webglcontextlost', this.onContextLost);
     this.canvas.removeEventListener('webglcontextrestored', this.onContextRestored as EventListener);
     for (const o of this.owned) o.dispose();
+    this.setScreenFrame(null);
     this.composer?.dispose();
     this.renderer.dispose();
     this.renderer.forceContextLoss();
@@ -542,19 +615,33 @@ export class AuroraStage {
   private applyShow(s: ShowState, bands: Readonly<BandLevels>, dt: number) {
     const t = s.time;
     const index = PALETTES.indexOf(s.palette);
-    // Overdrive hands over a rainbow palette of its own: take its colours as they are.
     const ease = (rate: number) => Math.min(1, dt * rate);
-    this.setLook(index >= 0 ? LOOKS[index] : { key: s.palette.key, accent: LOOKS[0].accent, wash: s.palette.wash }, ease(1.1));
+    const look = this.look;
+    const own = look.colors;
+    // The player's own colours stay, the key and accent trading places as the show moves on; else
+    // the show's looks. Overdrive hands over a rainbow palette of its own: take its colours as they are.
+    const next =
+      index < 0
+        ? { key: s.palette.key, accent: own?.accent ?? LOOKS[0].accent, wash: own?.wash ?? s.palette.wash }
+        : own
+          ? index % 2
+            ? { key: own.accent, accent: own.key, wash: own.wash }
+            : own
+          : LOOKS[index];
+    this.setLook(next, ease(1.1));
     // Everything reaches the scene at full strength but never as a step: a beat swells to its peak
     // over a few frames and rings out, picking up from whatever was left of the one before; the
     // bass, middle and treble are followed closely on the way up and let go more slowly; and
     // (below) every beam eases to its level, colour and angle.
-    this.pulse = Math.max(this.pulseTail * Math.exp(-this.beatAge * 9), swell(this.beatAge, 0.07, 4.5));
-    this.barPulse = Math.max(this.barTail * Math.exp(-this.barAge * 5), swell(this.barAge, 0.09, 1.7));
+    // Without flashes the beat still moves the lights, at a third of the strength.
+    const flash = look.flashes ? 1 : 0.35;
+    this.pulse = Math.max(this.pulseTail * Math.exp(-this.beatAge * 9), swell(this.beatAge, 0.07, 4.5) * flash);
+    this.barPulse = Math.max(this.barTail * Math.exp(-this.barAge * 5), swell(this.barAge, 0.09, 1.7) * flash);
     this.low += (bands.low - this.low) * ease(bands.low > this.low ? 20 : 5);
     this.mid += (bands.mid - this.mid) * ease(bands.mid > this.mid ? 20 : 5);
     this.high += (bands.high - this.high) * ease(bands.high > this.high ? 20 : 6);
     const washLevel = 0.55 + 0.25 * this.low + 0.2 * this.barPulse + 0.2 * s.overdrive;
+    this.applyVenueLight();
     shared.uTime.value = t;
     shared.uCrowdMap.value = this.crowdMap;
     shared.uBeat.value = this.beatClock;
@@ -566,12 +653,14 @@ export class AuroraStage {
     shared.uHigh.value = this.high;
     shared.uKey.value.copy(this.key);
     shared.uAccent.value.copy(this.accent);
-    shared.uWash.value.copy(this.wash);
-    shared.uScreenLevel.value = 0.62 + 0.16 * washLevel + 0.18 * this.barPulse;
+    // The venue's washes and screens dim with the look's venue light; the beams do not.
+    shared.uWash.value.copy(this.wash).multiplyScalar(look.venue);
+    shared.uScreenLevel.value = (0.62 + 0.16 * washLevel + 0.18 * this.barPulse) * (0.08 + 0.92 * Math.min(1.2, look.venue));
     shared.uHazeNear.value
       .setRGB(0.03, 0.035, 0.15)
+      .multiplyScalar(0.2 + 0.8 * Math.min(1, look.venue))
       .lerp(this.wash, 0.14)
-      .multiplyScalar(0.6 + 0.35 * s.beamLevel);
+      .multiplyScalar((0.6 + 0.35 * s.beamLevel) * Math.min(1.3, 0.3 + 0.7 * look.haze));
 
     for (let i = 0; i < this.beams.states.length; i++) {
       const b = this.beams.states[i];
@@ -621,7 +710,7 @@ export class AuroraStage {
           }
           level *= 0.7 + 0.3 * this.pulse;
       }
-      level *= i % 2 ? 1 : 0.55;
+      level *= (i % 2 ? 1 : 0.55) * look.beams;
       b.pan += (pan - b.pan) * ease(4);
       b.tilt += (tilt - b.tilt) * ease(4);
       b.level += (level - b.level) * ease(level > b.level ? 16 : 5);
@@ -739,6 +828,10 @@ function passMaterials(pass: object): THREE.Material[] {
   );
 }
 
+/** The venue's own light as it was made (the look dims it from these). */
+const BASE_HAZE_FAR = shared.uHazeFar.value.clone();
+const BASE_MOON = shared.uMoonCol.value.clone();
+const BASE_HAZE_DENSITY = shared.uHazeDensity.value;
 const TMP_C = new THREE.Color();
 const TMP_V = new THREE.Vector3();
 const ZERO = new THREE.Vector3();

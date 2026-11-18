@@ -21,6 +21,15 @@ interface Held {
 /** How long an unused stage is kept before its GPU memory is freed, ms. */
 const LINGER = 1500;
 let held: Held | null = null;
+/** Until when (performance.now ms) the menu stage plays a drop: overdrive, at full tilt. */
+let boostUntil = 0;
+
+/** Plays a drop on the menu stage for `seconds`: the stage browser's Test the drop. */
+export function boostMenuStage(seconds = 5) {
+  boostUntil = performance.now() + seconds * 1000;
+}
+
+export const menuStageBoosted = (now = performance.now()) => now < boostUntil;
 
 function drop(h: Held) {
   if (h.timer) clearTimeout(h.timer);
