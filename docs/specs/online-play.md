@@ -1,0 +1,313 @@
+# Spec: playing together
+
+Status: **draft, for discussion**. Nothing here is built yet. The open questions at the end need answers before
+work starts.
+
+Soundwave is single-player today. This spec adds playing together in three levels. Each level works without
+the ones after it:
+
+| Level                | What it is                                                                                                                                     | Needs                                           |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| **1. Local session** | One player's desktop app hosts a session; friends on the same network join, pick a set together and play it at the same time with live scores. | Nothing: no accounts, no server.                |
+| **2. Server**        | A self-hosted Soundwave server: accounts, leaderboards, song sharing, parties across the internet, public or private.                          | Someone runs the server (one Docker container). |
+| **3. On a server**   | The Showdown battle mode, avatars, the connected main menu, cover art in the Discord status.                                                   | A server (level 2).                             |
+
+The game stays fully playable offline. Nothing is sent anywhere unless the player chooses a session or a server.
+
+---
+
+## 1. Choosing how to play
+
+On the **first start**, after the loading screen, a one-time card asks how the player wants to play. It can be
+changed at any time in **Settings → Online**.
+
+| Choice                  | What happens                                                                           |
+| ----------------------- | -------------------------------------------------------------------------------------- |
+| **Just me** (default)   | Offline, exactly as today.                                                             |
+| **With friends nearby** | Shows the **Play together** entry on the main menu (level 1).                          |
+| **On a server**         | Asks for a server address or a key file, then to sign in or make an account (level 2). |
+
+A server the player connected to once is remembered, and the game reconnects on start. If the server can't be
+reached, the game starts offline and says so in a quiet toast, never a blocking dialog.
+
+---
+
+## 2. Level 1: local session (no server)
+
+The smallest version: one desktop app hosts, the others join, and everyone plays the same set at the same moment.
+There's no leaderboard, no accounts and no avatars.
+
+### 2.1 Hosting and joining
+
+- **Hosting:** on the Play tab, **Play together → Host** starts a small server inside the desktop app. It
+  listens on the local network only, on a free port.
+- **Session code:** the host sees a short code, like `KITE-42`, plus the address.
+- **Finding the host:** joining players see hosts on the same network automatically (mDNS, `_soundwave._tcp`). If
+  their network blocks that, they type the code or the address.
+- **Names:** each player is shown by a display name, set the first time and stored locally. There are no accounts.
+- **Size:** up to **8 players** per session. That's an open question; see the end.
+- **Browser version:** it can **join** but not host, because a browser tab can't run a server. Hosting is
+  desktop only.
+
+### 2.2 The session lobby
+
+The lobby is the existing set lobby, with everyone in it:
+
+- **Shared set:** the host picks the set; everyone sees it.
+- **Own choices:** each player picks their own part and difficulty, shown next to their name with a ready tick.
+- **Starting:** the host starts once everyone is ready, or anytime with a hold-to-start.
+
+### 2.3 Having the songs
+
+Everyone needs the same audio, so songs are matched by their **song id**, the SHA-256 hash of the audio that
+the game already uses.
+
+- **Missing songs:** a player who doesn't have a song in the set sees **Missing** next to it.
+- **Getting it from the host:** the host's app can send it to them as a `.soundwave` file, which already carries the
+  audio, cover, analysis and hand-made charts. This only happens if the host allows it (a **Share my songs with
+  the session** switch, off by default) and the player accepts each song.
+- **Without the song:** a player who doesn't get it sits that song out and watches the others' scores.
+
+### 2.4 Playing in sync
+
+Everyone should hear the first note at the same moment, give or take a few milliseconds:
+
+1. **Clock sync:** on joining, each client measures its clock against the host's with a few ping/pong rounds,
+   NTP-style. It keeps the offset with the lowest round trip and re-measures every 30 s.
+2. **Shared start:** the host announces a start at host time `T`, about 3 s ahead. Each client converts that to its
+   own clock and starts the song at that moment, using the audio engine's existing scheduled `play(from, delay)`.
+3. **Local judging:** each player's own hits are judged on their own machine as today, and network delay never
+   affects timing. Only **scores** travel: each client sends `{ score, streak, stars, overdrive }` 10 times a
+   second.
+4. **Live scoreboard:** a compact board at the side of the highway lists every player, their score and their
+   streak.
+5. **Results:** a shared results screen comes after each song, and the set summary at the end has a winner.
+
+### 2.5 Leaving and dropping
+
+- **A player leaves:** they leave the scoreboard; their last score stays on the results as **left**.
+- **The host leaves:** the session ends for everyone, with a "The host ended the session" card. There's no host
+  migration in level 1.
+- **Pausing:** a player can pause their own run, but the song doesn't pause for anyone else.
+
+### 2.6 How it's built
+
+- **Session server:** it lives in the desktop app's Rust side (`src-tauri/src/session/`), using `tokio` and a
+  WebSocket library. JSON messages are spelled out in [section 6](#6-protocol-sketch).
+- **Browser clients:** joiners use the same protocol from the page with a plain `WebSocket`.
+- **Network reach:** only the local network by default. Playing over the internet without a server would need the
+  host to forward a port. The game can explain that, but doesn't do it itself (no UPnP in level 1).
+
+---
+
+## 3. Level 2: a Soundwave server
+
+A separate program, **`soundwave-server`**, that anyone can run: on a home PC, a small VPS, or a NAS. It's
+shipped as a Docker image and as a single binary.
+
+### 3.1 What a server offers
+
+| Feature          | Description                                                                                                           |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------- |
+| **Accounts**     | A username and password. Sign in once per device; the game keeps a token.                                             |
+| **Parties**      | Level 1's sessions over the internet: invite friends on the server, play sets together.                               |
+| **Leaderboards** | Per song, chart, part and difficulty; per server; all time and this week.                                             |
+| **Song sharing** | A server library of songs that players add (see [3.4](#34-song-sharing-and-copyright)).                               |
+| **Cover art**    | Covers served over HTTPS, so the Discord status can show the song's cover ([5.3](#53-discord-status-with-cover-art)). |
+| **Presence**     | Who's online, in the menus or playing what.                                                                           |
+
+### 3.2 Public or private
+
+The server owner sets one of these in the server's config file:
+
+| Mode            | Who can join                                                                                                                                                     |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Public**      | Anyone with the address can make an account.                                                                                                                     |
+| **Password**    | Making an account needs the server's password.                                                                                                                   |
+| **Invite only** | Making an account needs an invite link that a member or the owner made. Links can be single-use or time-limited.                                                 |
+| **Key file**    | The owner hands out `.soundwave-key` files. A key file holds the server's address and a signed token. Opening one in the game connects and signs up in one step. |
+
+Private servers can combine invites and key files. The owner and the moderators they name can remove accounts,
+scores and shared songs.
+
+### 3.3 Leaderboards
+
+- **Identity:** a score belongs to `(song id, chart id, part, difficulty)`.
+  - The **song id** is the hash of the audio.
+  - The **chart id** is a hash of the chart itself (its notes), so an analysis update or a hand-edited chart gets
+    a board of its own instead of mixing incomparable scores.
+- **Submission:** at the end of a song the game sends the score plus a compact **input log** (hit times per lane,
+  about 10–40 KB per song).
+- **Checking:** the server re-judges the log against the chart, using the same judging code as the game (shared
+  TypeScript), and rejects scores that don't match. That stops casual cheating, though not a determined bot.
+- **Modifiers:** runs with modifiers (if the modifiers idea is built) get their own boards.
+
+### 3.4 Song sharing and copyright
+
+Sharing someone else's music file with strangers is very likely copyright infringement, and the server owner
+would be the one responsible. The proposal:
+
+- **Default: charts only.** The server shares everything in a `.soundwave` file except the audio: title, artist,
+  cover, analysis and hand-made charts. Players who own the song (the same audio, so the same song id) get the
+  charts instantly. Others see the song listed as **You don't have this song**.
+- **Opt-in: with audio.** The server owner can turn on audio sharing for a private server among friends. The config
+  option and the first-start text make it clear that the owner is responsible for what's shared.
+- **Limits:** a size limit per song and per account, and a report button.
+
+### 3.5 How it's built
+
+- **Language:** proposal: **TypeScript on Node**, in this repository under `server/`. It shares the protocol types,
+  the chart code and the judging code with the game. (Rust is the alternative; see the open questions.)
+- **Storage:** SQLite by default (one file, easy to back up) and Postgres optionally. Shared songs and covers live
+  in a folder or S3-compatible storage.
+- **Security:**
+  - **Passwords:** hashed with Argon2id.
+  - **Tokens:** short-lived access tokens plus a refresh token.
+  - **Limits:** rate limits on sign-in and uploads.
+  - **TLS:** HTTPS/WSS is required for anything but `localhost`. The docs show it behind Caddy, which gets certificates
+    automatically.
+- **Privacy:** no telemetry. The server stores only what the features above need. Players can delete their account
+  and everything with it.
+- **Versioning:** the client and the server announce a protocol version. A client too old or too new for the
+  server is told so and plays offline.
+
+---
+
+## 4. Level 3: on a server
+
+### 4.1 Showdown (battle mode)
+
+An original competitive mode for 2–8 players on a server, played over a set.
+
+- **Same song, own chart:** everyone plays the same song, each on their own part and difficulty. Scores are
+  normalised to the chart's par, the same par the stars use, so a hard part doesn't win just by having more notes.
+- **Rounds:** each song is a round. After each round the **lowest** player is out, and the set continues until
+  one is left. With fewer songs than players, the bottom half goes out each round.
+- **Charge and hits:** streaks build **charge**. A full charge can be spent on a **hit** against the player just
+  above you on the board. A hit is a short, fair disturbance lasting about 4 s:
+  - **Fog:** the far half of their highway is hazed.
+  - **Shuffle:** their next notes show in different colours, with lanes unchanged.
+  - **Rush:** their highway runs 1.25× faster.
+- **No hits option:** a lobby setting turns hits off for a pure score race.
+- **Accessibility:** a player can opt out of receiving visual effects, for example because of photosensitivity.
+  Hits on them turn into a small score penalty instead.
+- **Spectating:** players who are out watch the rest with the scoreboard.
+
+The names and balancing numbers are placeholders to tune in play.
+
+### 4.2 Accounts and avatars
+
+- **Profile:** a display name, an avatar, and a short line of text.
+- **Avatar:** built from the game's own band characters (`public/stage/aurora/band.glb`). You pick a character,
+  outfit colours and an instrument finish, and see a preview turning on the stage.
+- **On stage:** when you play a part, **your** avatar stands at that part's place on the stage. In a party, every
+  player's avatar stands at their part, sharing the stage as one band.
+- **Storage:** avatars are a small JSON description stored on the server, not images, so they cost almost nothing.
+
+### 4.3 The connected main menu
+
+While connected to a server, the main menu gets a clean sidebar on the right. The Play/Edit/Stage tabs stay as
+they are:
+
+- **You:** your avatar, name, and the server's name with a status dot.
+- **Party:** who's in it, their ready state, and an invite button. **Play together** starts a party set.
+- **Leaderboard:** the top 5 on the server this week, and your rank. Pressing it opens the full boards.
+- **Friends online:** a short list with what each is doing.
+
+Offline, the sidebar is gone and the menu looks exactly as today.
+
+---
+
+## 5. Smaller pieces
+
+### 5.1 Settings → Online
+
+- **How to play:** Just me / With friends nearby / On a server.
+- **Display name:** the name used in local sessions.
+- **Server:** its address, signed-in account, and **Sign out** / **Forget this server**.
+- **Sharing:** **Share my songs with the session** (level 1, off by default).
+
+### 5.2 Key files
+
+- **Format:** a `.soundwave-key` file is a small JSON file: `{ server, name, token, expires? }`, with the token
+  signed by the server.
+- **Opening one:** double-clicking it opens the game the same way `.soundwave` files do today (`song_files.rs`
+  gains the extension).
+
+### 5.3 Discord status with cover art
+
+When connected to a server, the Discord status's large picture becomes the song's cover, from
+`https://<server>/covers/<song id>.jpg`, with the game icon as the small badge. This is the "later, with a
+backend" note in `src-tauri/src/discord.rs`. The server only serves covers of songs shared with it, and only on
+public servers or if the owner allows it, because the cover link becomes visible to Discord friends.
+
+---
+
+## 6. Protocol sketch
+
+**WebSocket messages:** JSON `{ type, ... }`, the same for a local session (level 1) and a server party (level 2).
+
+```
+client → host/server
+  hello        { protocol, name, token? }
+  ping         { t }                         // clock sync
+  ready        { part, difficulty, ready }
+  progress     { songIndex, score, streak, stars, overdrive }
+  hit          { target }                    // Showdown: spend a full charge
+  finish       { songIndex, results, inputLog? }
+  request-song { songId }
+
+host/server → client
+  welcome      { session, you, players, protocol }
+  pong         { t, hostT }
+  lobby        { set, players: [{ id, name, part, difficulty, ready, avatar? }] }
+  start        { songIndex, at }             // host time to start
+  board        { players: [{ id, score, streak, stars, out? }] }   // 10/s
+  hit          { from, effect, ms }           // Showdown
+  results      { songIndex, players: [...] }
+  song         { songId, chunk, of }          // a .soundwave file, in pieces
+  bye          { reason }
+```
+
+**Server HTTP (level 2):**
+
+- **Accounts:** `POST /auth/signup | signin | refresh`, `DELETE /me`.
+- **Leaderboards:** `GET /boards/:songId/:chartId/:part/:difficulty`, `POST /scores`.
+- **Shared songs:** `GET /songs?query=`, `POST /songs`, `GET /songs/:id`.
+- **Covers:** `GET /covers/:songId.jpg`.
+- **Profiles:** `GET /profiles/:id`, `PUT /me/profile`.
+- **Invites:** `POST /invites`, `POST /keys` (owner/moderators).
+
+---
+
+## 7. Milestones
+
+| #   | Milestone                 | Done when                                                                                |
+| --- | ------------------------- | ---------------------------------------------------------------------------------------- |
+| 1   | **Local session MVP**     | Two desktop apps on one network play a set together with live scores and shared results. |
+| 2   | Song transfer in sessions | A missing song can be fetched from the host with consent.                                |
+| 3   | **Server MVP**            | Accounts, public/password/invite/key-file joining, parties over the internet.            |
+| 4   | Leaderboards              | Scores submitted, checked from input logs, and shown in the game.                        |
+| 5   | Shared charts and covers  | Charts-only sharing, covers over HTTPS, cover art in the Discord status.                 |
+| 6   | Connected main menu       | Sidebar with you, party, leaderboard and friends.                                        |
+| 7   | Avatars                   | Avatar editor, and avatars on stage at their parts.                                      |
+| 8   | **Showdown**              | The battle mode, playable and tuned.                                                     |
+
+Each milestone is its own PR, and the game ships after every one.
+
+---
+
+## 8. Open questions
+
+1. **Session size:** is 8 players right for a local session, and for Showdown?
+2. **Local over the internet:** should level 1 try to reach friends over the internet without a server (UPnP, or a
+   free relay), or stay LAN-only and leave the internet to servers?
+3. **Server language:** TypeScript (shares code with the game) or Rust (shares code with the desktop app)?
+4. **Song sharing:** charts-only by default with opt-in audio, as proposed? Or something else?
+5. **Server list:** should public servers be findable in the game (a server list), or only by address and invite?
+6. **Sign-in:** username and password only, or also "Sign in with Discord", given the Discord app id that already
+   exists?
+7. **Showdown:** elimination per song, or one long score race with hits? Which hits feel fair?
+8. **Avatars:** the game's own band characters with colours and outfits, or something simpler (2D badges)?
+9. **Browser version:** should it be able to host local sessions through a server, or only join?
+10. **Moderation:** what does a server owner need on day one (kick, ban, delete scores/songs)?
