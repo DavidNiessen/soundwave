@@ -13,6 +13,7 @@ import type { Chart, Part } from '../chart/types';
 import { detectGrid } from '../editor/detect';
 import { emptyEdits } from '../editor/edits';
 import type { Results } from '../game/GameSession';
+import type { ReplayInputs } from '../game/replay';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { applyDisplayMode, canExit, exitApp, inDesktopApp, isFullscreenToggle, toggledMode } from '../game/displayMode';
 import {
@@ -39,12 +40,15 @@ import {
   deleteSong,
   getSong,
   listAllScores,
+  listReplays,
   listSongs,
+  putReplay,
   StorageBlockedError,
   submitScore,
   type BestScore,
   type SongMeta,
 } from '../storage/db';
+import { newReplayId, type ReplayMeta } from '../storage/replays';
 import { soundwaveFileName, isSoundwaveFile } from '../storage/soundwaveFile';
 import { saveSongFile, watchOpenedFiles } from '../storage/share';
 import { readSongPackage, songFile, storeNewSong, storeSongPackage, updateSongMeta } from '../storage/songFile';
@@ -113,6 +117,8 @@ export function App() {
   const [view, setView] = useState<View>({ name: 'home' });
   const [songs, setSongs] = useState<SongMeta[]>([]);
   const [scores, setScores] = useState<BestScore[]>([]);
+  /** The saved replays, newest first. */
+  const [, setReplays] = useState<ReplayMeta[]>([]);
   /** What has come back from storage since the game opened. */
   const [loaded, setLoaded] = useState({ songs: false, scores: false });
   /** The first screen waits for the library, so it arrives whole instead of filling in piece by piece. */
@@ -284,10 +290,19 @@ export function App() {
     setLoaded((l) => (l.scores ? l : { ...l, scores: true }));
   }, []);
 
+  const refreshReplays = useCallback(async () => {
+    try {
+      setReplays(await listReplays());
+    } catch {
+      /* replays are best-effort */
+    }
+  }, []);
+
   useEffect(() => {
     void refresh();
     void refreshScores();
-  }, [refresh, refreshScores]);
+    void refreshReplays();
+  }, [refresh, refreshScores, refreshReplays]);
 
   // Every song is separated into stems before it is charted. The model for that is fetched once,
   // the first time the game opens on a device that can run it.
@@ -646,7 +661,37 @@ export function App() {
     return { ...run, results };
   };
 
-  const finish = async (run: Run, results: Results) => {
+  /** Saves a finished song's run as a replay, with every note of the chart it was played on. */
+  const saveReplay = async (song: SongMeta, chart: Chart, results: Results, inputs: ReplayInputs, best: number | undefined) => {
+    const date = Date.now();
+    const id = newReplayId(date);
+    try {
+      await putReplay(
+        {
+          meta: {
+            id,
+            date,
+            songId: song.id,
+            title: song.title,
+            artist: song.artist,
+            part: chart.part,
+            difficulty: chart.difficulty,
+            results,
+            best: results.score > 0 && (best === undefined || results.score > best),
+            kept: false,
+            duration: song.duration || chart.duration,
+          },
+          data: { id, chart, inputs },
+        },
+        settingsRef.current.replayLimit,
+      );
+      await refreshReplays();
+    } catch {
+      toast('This replay could not be saved: the library is out of room or unavailable.');
+    }
+  };
+
+  const finish = async (run: Run, results: Results, inputs?: ReplayInputs) => {
     const song = run.songs[run.index];
     let best: number | undefined;
     try {
@@ -663,6 +708,7 @@ export function App() {
     } catch {
       /* scores are best-effort */
     }
+    if (inputs && settingsRef.current.replays) void saveReplay(song, run.charts[run.index], results, inputs, best);
     setView({ name: 'results', run: withResult(run, { song, results, best }) });
   };
 
@@ -850,7 +896,7 @@ export function App() {
         }}
         onSkip={more ? () => void playAt(withResult(run, { song, results: null }), run.index + 1) : undefined}
         // A test play keeps no score: it goes back to the editor with how it went.
-        onFinish={(r) => (run.test ? setView({ ...run.test.back, tested: r }) : void finish(run, r))}
+        onFinish={(r, inputs) => (run.test ? setView({ ...run.test.back, tested: r }) : void finish(run, r, inputs))}
       />
     );
   } else {
