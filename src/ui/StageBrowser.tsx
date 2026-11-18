@@ -1,5 +1,4 @@
 import {
-  ArrowLeft,
   Box,
   Check,
   ChevronDown,
@@ -280,38 +279,38 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
     setAll(false);
     setFocusId(latest.current.active);
   };
+  /** The stage editor drawer's own actions (its Done is the drawer's close). */
+  const editorActions: Action[] = !editing
+    ? []
+    : [
+        ...(editing.backdrop.kind === 'venue'
+          ? [
+              {
+                id: 'random',
+                label: 'Random colours',
+                icon: Dices,
+                ...keysOf('stages.random'),
+                run: () => save({ ...editing, colors: randomColors() }),
+              },
+            ]
+          : []),
+        ...dropAction(editing),
+        { id: 'undo', label: 'Undo', icon: Undo2, ...keysOf('stages.undo'), bar: false, run: undo },
+      ];
   const actions: Action[] =
-    !on || dialog
+    !on || dialog || editing || all
       ? []
-      : editing
-        ? [
-            { id: 'done', label: 'Done', icon: Check, kbd: 'Escape', sfx: 'back', run: close },
-            ...(editing.backdrop.kind === 'venue'
-              ? [
-                  {
-                    id: 'random',
-                    label: 'Random colours',
-                    icon: Dices,
-                    ...keysOf('stages.random'),
-                    run: () => save({ ...editing, colors: randomColors() }),
-                  },
-                ]
-              : []),
-            ...dropAction(editing),
-            { id: 'undo', label: 'Undo', icon: Undo2, ...keysOf('stages.undo'), bar: false, run: undo },
-          ]
-        : [
-            ...(all ? [{ id: 'templates-back', label: 'Close', icon: ArrowLeft, kbd: 'Escape', sfx: 'back', run: leaveAll }] : []),
-            { id: 'new', label: 'New stage', icon: Plus, ...keysOf('stages.new'), primary: !all, run: () => setDialog('new') },
-            {
-              id: 'edit',
-              label: isBuiltIn(shown.id) ? 'Copy and customize' : 'Customize',
-              icon: Paintbrush,
-              ...keysOf('stages.edit'),
-              run: () => customize(shown),
-            },
-            ...dropAction(shown),
-          ];
+      : [
+          { id: 'new', label: 'New stage', icon: Plus, ...keysOf('stages.new'), primary: true, run: () => setDialog('new') },
+          {
+            id: 'edit',
+            label: isBuiltIn(shown.id) ? 'Copy and customize' : 'Customize',
+            icon: Paintbrush,
+            ...keysOf('stages.edit'),
+            run: () => customize(shown),
+          },
+          ...dropAction(shown),
+        ];
 
   // The templates in view: the featured ones, and the one in use when it is another.
   const templates = BUILT_IN.filter((d) => FEATURED.includes(d.id) || d.id === stages.active);
@@ -330,15 +329,15 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
   const view = (
     <div className={`stages ${editing ? 'is-editing' : ''}`}>
       <div className="edit-head">
-        <h2 className="page-title">{editing ? 'Customize' : panel === 'start' ? 'New 3D stage' : all ? 'Templates' : 'Pick a stage'}</h2>
-        <p className="head-count">
-          {editing ? editing.name : all ? 'Point at one to see it on the stage' : `${inUse.name} in use · press a stage to use it`}
-        </p>
+        <h2 className="page-title">Pick a stage</h2>
+        <p className="head-count">{`${inUse.name} in use · press a stage to use it`}</p>
       </div>
       <div className="stages-body">
         {editing ? (
           <Editor
             def={editing}
+            actions={editorActions}
+            onClose={close}
             touch={touch}
             activeRow={activeRow}
             setActiveRow={setActiveRow}
@@ -360,6 +359,7 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
               setFocusId(id);
             }}
             onCopy={(d) => create(d)}
+            onClose={leaveAll}
           />
         ) : (
           <div className="stage-cards" ref={wheelSideways} data-nav-group="stage-cards">
@@ -513,6 +513,9 @@ function StageCard({
 
 interface EditorProps {
   def: StageDef;
+  /** The drawer's actions for the bar, and what closing it does. */
+  actions: Action[];
+  onClose(): void;
   touch: boolean;
   activeRow: string | null;
   setActiveRow(id: string): void;
@@ -522,7 +525,7 @@ interface EditorProps {
   onDelete(): void;
 }
 
-function Editor({ def, touch, activeRow, setActiveRow, onSave, onUndo, canUndo, onDelete }: EditorProps) {
+function Editor({ def, actions, onClose, touch, activeRow, setActiveRow, onSave, onUndo, canUndo, onDelete }: EditorProps) {
   const [more, setMore] = useState(false);
   const set = (patch: Partial<StageDef>) => onSave({ ...def, ...patch });
   const b = def.backdrop;
@@ -731,67 +734,78 @@ function Editor({ def, touch, activeRow, setActiveRow, onSave, onUndo, canUndo, 
   }
   const first = sections[0].rows[0];
   return (
-    <aside className="stage-editor set-list" data-nav-group="stage-editor" aria-label={`Customize ${def.name}`}>
-      {sections.map((sec) => (
-        <section key={sec.title} className="set-section">
-          <h2 className="set-heading">{sec.title}</h2>
-          {sec.rows.map((row) => (
-            <RowView
-              key={row.id}
-              row={row}
-              active={activeRow === row.id}
-              first={row === first}
-              touch={touch}
-              onActive={() => setActiveRow(row.id)}
-            />
-          ))}
-          {sec.gradient && b.kind === 'gradient' && (
-            <>
-              <ColorRow label="Top" value={b.from} onPick={(hex) => set({ backdrop: { ...b, from: hex } })} />
-              <ColorRow label="Bottom" value={b.to} onPick={(hex) => set({ backdrop: { ...b, to: hex } })} />
-            </>
-          )}
-          {sec.colors && def.colors && (
-            <>
-              {(['key', 'accent', 'wash'] as const).map((k) => (
-                <ColorRow
-                  key={k}
-                  label={{ key: 'Beams', accent: 'Second beams', wash: 'Stage' }[k]}
-                  value={def.colors![k]}
-                  onPick={(hex) => set({ colors: { ...def.colors!, [k]: hex } })}
+    <Dialog title={`Customize ${def.name}`} className="see-through stage-drawer" closeLabel="Done" onClose={onClose} actions={actions}>
+      {(closeDrawer) => (
+        <div className="sheet-body stage-sheet" data-nav-group="stage-editor">
+          <div>
+            <h2 className="display meta-heading">Customize</h2>
+            <p className="hint">Every change shows on the stage behind and is kept as you make it.</p>
+          </div>
+          {sections.map((sec) => (
+            <section key={sec.title} className="set-section">
+              <h2 className="set-heading">{sec.title}</h2>
+              {sec.rows.map((row) => (
+                <RowView
+                  key={row.id}
+                  row={row}
+                  active={activeRow === row.id}
+                  first={row === first}
+                  touch={touch}
+                  onActive={() => setActiveRow(row.id)}
                 />
               ))}
-              <div className="stage-tools">
-                <button type="button" className="btn small" onClick={() => set({ colors: randomColors() })}>
-                  <Dices strokeWidth={ICON_STROKE} aria-hidden /> Random colours
-                </button>
-              </div>
-            </>
+              {sec.gradient && b.kind === 'gradient' && (
+                <>
+                  <ColorRow label="Top" value={b.from} onPick={(hex) => set({ backdrop: { ...b, from: hex } })} />
+                  <ColorRow label="Bottom" value={b.to} onPick={(hex) => set({ backdrop: { ...b, to: hex } })} />
+                </>
+              )}
+              {sec.colors && def.colors && (
+                <>
+                  {(['key', 'accent', 'wash'] as const).map((k) => (
+                    <ColorRow
+                      key={k}
+                      label={{ key: 'Beams', accent: 'Second beams', wash: 'Stage' }[k]}
+                      value={def.colors![k]}
+                      onPick={(hex) => set({ colors: { ...def.colors!, [k]: hex } })}
+                    />
+                  ))}
+                  <div className="stage-tools">
+                    <button type="button" className="btn small" onClick={() => set({ colors: randomColors() })}>
+                      <Dices strokeWidth={ICON_STROKE} aria-hidden /> Random colours
+                    </button>
+                  </div>
+                </>
+              )}
+            </section>
+          ))}
+          {venue && (
+            <button
+              type="button"
+              className={`btn small more-toggle ${more ? 'open' : ''}`}
+              aria-expanded={more}
+              onClick={() => setMore((m) => !m)}
+            >
+              <ChevronDown strokeWidth={ICON_STROKE} aria-hidden /> {more ? 'Fewer options' : 'More options'}
+            </button>
           )}
-        </section>
-      ))}
-      {venue && (
-        <button
-          type="button"
-          className={`btn small more-toggle ${more ? 'open' : ''}`}
-          aria-expanded={more}
-          onClick={() => setMore((m) => !m)}
-        >
-          <ChevronDown strokeWidth={ICON_STROKE} aria-hidden /> {more ? 'Fewer options' : 'More options'}
-        </button>
+          {!venue && b.kind !== 'gradient' && !fileId && (
+            <p className="stage-note">
+              <ImageIcon strokeWidth={ICON_STROKE} aria-hidden /> Choose a file above: until then the background stays dark.
+            </p>
+          )}
+          <div className="sheet-actions">
+            <DeleteButton onDelete={onDelete} />
+            <button type="button" className="btn" disabled={!canUndo} onClick={onUndo}>
+              <Undo2 strokeWidth={ICON_STROKE} aria-hidden /> Undo
+            </button>
+            <button type="button" className="btn primary" data-sfx="back" onClick={closeDrawer}>
+              Done
+            </button>
+          </div>
+        </div>
       )}
-      {!venue && b.kind !== 'gradient' && !fileId && (
-        <p className="stage-note">
-          <ImageIcon strokeWidth={ICON_STROKE} aria-hidden /> Choose a file above: until then the background stays dark.
-        </p>
-      )}
-      <section className="set-section stage-tools">
-        <button type="button" className="btn small" disabled={!canUndo} onClick={onUndo}>
-          <Undo2 strokeWidth={ICON_STROKE} aria-hidden /> Undo
-        </button>
-        <DeleteButton onDelete={onDelete} />
-      </section>
-    </aside>
+    </Dialog>
   );
 }
 
@@ -830,7 +844,7 @@ function DeleteButton({ onDelete }: { onDelete(): void }) {
   return (
     <button
       type="button"
-      className={`btn small ${asking ? 'danger' : 'quiet-danger'}`}
+      className={`btn ${asking ? 'danger' : 'quiet-danger'}`}
       onClick={() => (asking ? onDelete() : setAsking(true))}
       onBlur={() => setAsking(false)}
     >
@@ -851,6 +865,7 @@ function TemplatePanel({
   onFocus,
   onUse,
   onCopy,
+  onClose,
 }: {
   /** `browse`: use a template or copy it; `start`: pick the 3D stage a new one starts from. */
   mode: 'browse' | 'start';
@@ -859,53 +874,56 @@ function TemplatePanel({
   onFocus(id: string): void;
   onUse(id: string): void;
   onCopy(d: StageDef): void;
+  onClose(): void;
 }) {
   const start = mode === 'start';
   return (
-    <aside className="stage-editor template-panel" data-nav-group="templates" aria-label={start ? 'Pick a 3D stage' : 'Templates'}>
-      <div className="template-head">
-        <h2 className="set-heading">{start ? 'Pick a 3D stage' : 'Templates'}</h2>
-        <p className="template-sub">
-          {start
-            ? `In the ${findVenue(undefined).name} venue. Point at one to see it, then press it to make it yours.`
-            : 'Use one as it is, or copy it to make it your own.'}
-        </p>
-      </div>
-      <ul className="template-list">
-        {BUILT_IN.map((d) => (
-          <li key={d.id} className={`template-row ${d.id === active ? 'active' : ''} ${d.id === shown ? 'shown' : ''}`}>
-            <button
-              type="button"
-              className="template-use"
-              data-autofocus={(start ? d.id === BUILT_IN[0].id : d.id === active) ? '' : undefined}
-              onFocus={() => onFocus(d.id)}
-              onPointerEnter={(e) => e.pointerType === 'mouse' && onFocus(d.id)}
-              onClick={() => onUse(d.id)}
-            >
-              <Swatch def={d} />
-              <span className="template-text">
-                <span className="stage-name">
-                  {d.name}
-                  {!start && d.id === active && <span className="pill ready">In use</span>}
-                </span>
-                <span className="stage-tags">{TEMPLATE_INFO[d.id]}</span>
-              </span>
-            </button>
-            {!start && (
+    <Dialog title={start ? 'Pick a 3D stage' : 'Templates'} className="see-through stage-drawer" onClose={onClose}>
+      <div className="sheet-body template-panel" data-nav-group="templates">
+        <div>
+          <h2 className="display meta-heading">{start ? 'Pick a 3D stage' : 'Templates'}</h2>
+          <p className="hint">
+            {start
+              ? `In the ${findVenue(undefined).name} venue. Point at one to see it, then press it to make it yours.`
+              : 'Use one as it is, or copy it to make it your own.'}
+          </p>
+        </div>
+        <ul className="template-list">
+          {BUILT_IN.map((d) => (
+            <li key={d.id} className={`template-row ${d.id === active ? 'active' : ''} ${d.id === shown ? 'shown' : ''}`}>
               <button
                 type="button"
-                className="template-copy"
-                aria-label={`Copy ${d.name} and customize it`}
-                title="Copy and customize"
+                className="template-use"
+                data-autofocus={(start ? d.id === BUILT_IN[0].id : d.id === active) ? '' : undefined}
                 onFocus={() => onFocus(d.id)}
-                onClick={() => onCopy(d)}
+                onPointerEnter={(e) => e.pointerType === 'mouse' && onFocus(d.id)}
+                onClick={() => onUse(d.id)}
               >
-                <Copy strokeWidth={ICON_STROKE} aria-hidden />
+                <Swatch def={d} />
+                <span className="template-text">
+                  <span className="stage-name">
+                    {d.name}
+                    {!start && d.id === active && <span className="pill ready">In use</span>}
+                  </span>
+                  <span className="stage-tags">{TEMPLATE_INFO[d.id]}</span>
+                </span>
               </button>
-            )}
-          </li>
-        ))}
-      </ul>
-    </aside>
+              {!start && (
+                <button
+                  type="button"
+                  className="template-copy"
+                  aria-label={`Copy ${d.name} and customize it`}
+                  title="Copy and customize"
+                  onFocus={() => onFocus(d.id)}
+                  onClick={() => onCopy(d)}
+                >
+                  <Copy strokeWidth={ICON_STROKE} aria-hidden />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Dialog>
   );
 }

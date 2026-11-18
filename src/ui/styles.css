@@ -6141,13 +6141,13 @@ a.btn {
     transform: translateX(1.5rem);
   }
 }
-.stage-editor .set-row {
+.stage-sheet .set-row {
   grid-template-columns: minmax(7rem, 0.8fr) 1.2fr;
 }
-.stage-editor .set-help {
+.stage-sheet .set-help {
   display: none;
 }
-.stage-editor .set-row.active .set-help {
+.stage-sheet .set-row.active .set-help {
   display: block;
 }
 .color-row {
@@ -6565,4 +6565,25 @@ a.btn {
 }
 .card-group-label {
   padding-left: 0.2rem;
+}
+
+/* The stage's drawers (its editor, the templates) are the same drawer as a song's details: only the
+   shade over the stage is lighter, so the stage they change stays in view. */
+.stage-drawer .set-section {
+  display: flex;
+  flex-direction: column;
+}
+.stage-drawer .set-heading {
+  margin-bottom: 0.2rem;
+}
+.stage-drawer .color-row,
+.stage-drawer .stage-tools {
+  padding-left: 0.9rem;
+  padding-right: 0.5rem;
+}
+.stage-drawer .more-toggle {
+  margin: 0;
+}
+.stage-drawer .template-list {
+  margin-top: -0.4rem;
 }
