@@ -46,8 +46,8 @@ There's no leaderboard, no accounts and no avatars.
   friends open the invite link or type the code.
 - **Names:** each player is shown by a display name, set the first time and stored locally. There are no accounts.
 - **Size:** up to **8 players** per session. That's an open question; see the end.
-- **Browser version:** it can **join** but not host, because a browser tab can't run a server. Hosting is
-  desktop only.
+- **Browser version:** it can **join** a local session, but can't host one, because a browser tab can't run a server.
+  Signed in to a server, a browser player **can** host a party there (see [3.1](#31-what-a-server-offers)).
 
 ### 2.2 The session lobby
 
@@ -128,14 +128,14 @@ shipped as a Docker image and as a single binary.
 
 ### 3.1 What a server offers
 
-| Feature          | Description                                                                                                           |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------- |
-| **Accounts**     | A username and password. Sign in once per device; the game keeps a token.                                             |
-| **Parties**      | Level 1's sessions over the internet: invite friends on the server, play sets together.                               |
-| **Leaderboards** | Per song, chart, part and difficulty; per server; all time and this week.                                             |
-| **Song sharing** | A server library of songs that players add (see [3.4](#34-song-sharing-and-copyright)).                               |
-| **Cover art**    | Covers served over HTTPS, so the Discord status can show the song's cover ([5.3](#53-discord-status-with-cover-art)). |
-| **Presence**     | Who's online, in the menus or playing what.                                                                           |
+| Feature          | Description                                                                                                                                              |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Accounts**     | A username and password. Sign in once per device; the game keeps a token.                                                                                |
+| **Parties**      | Level 1's sessions over the internet: invite friends on the server, play sets together. Any signed-in player can host one, the browser version included. |
+| **Leaderboards** | Per song, chart, part and difficulty; per server; all time and this week.                                                                                |
+| **Song sharing** | A server library of songs that players add (see [3.4](#34-song-sharing-and-copyright)).                                                                  |
+| **Cover art**    | Covers served over HTTPS, so the Discord status can show the song's cover ([5.3](#53-discord-status-with-cover-art)).                                    |
+| **Presence**     | Who's online, in the menus or playing what.                                                                                                              |
 
 ### 3.2 Public or private
 
@@ -148,8 +148,32 @@ The server owner sets one of these in the server's config file:
 | **Invite only** | Making an account needs an invite link that a member or the owner made. Links can be single-use or time-limited.                                                 |
 | **Key file**    | The owner hands out `.soundwave-key` files. A key file holds the server's address and a signed token. Opening one in the game connects and signs up in one step. |
 
-Private servers can combine invites and key files. The owner and the moderators they name can remove accounts,
-scores and shared songs.
+Private servers can combine invites and key files.
+
+**Moderation (decided, day one):**
+
+- **Roles:** the owner names **moderators**, who can do everything below except naming moderators.
+- **Kick and ban:** remove a player from a party or from the server, with an optional reason. A ban can be
+  permanent or time-limited.
+- **Delete:** remove a cheated score, or a reported song, everywhere on the server at once.
+- **Audit log:** every moderation action is recorded with who did it, to whom or what, when and why. Owners and
+  moderators can read it in the game.
+
+### 3.2b Finding servers
+
+Players join a server by its **address**, an **invite link** or a **key file**. Public servers can also be listed in
+an **in-game server list**:
+
+- **Where the list lives:** a JSON file in a GitHub repository (proposed: `servers/servers.json` in this repository,
+  or a repository of its own). Each entry is `{ name, address, description, region, mode, owner, added }`.
+- **Getting listed:** a server owner opens a pull request that adds their entry. CI checks the entry against a
+  schema and checks that the server answers `GET /info` with the same name. A maintainer merges it, and removes
+  servers that disappear or break the rules.
+- **In the game:** the list is fetched from GitHub's raw file URL when the player opens it (nothing in the
+  background). Each server's `/info` is then asked for its live player count and protocol version, so dead or
+  incompatible servers are shown greyed out.
+- **Nothing to run:** the project hosts no directory service; GitHub holds the list and its history.
+- **Privacy:** opening the list makes requests to GitHub and to each listed server. The list says so once.
 
 ### 3.3 Leaderboards
 
@@ -228,7 +252,7 @@ An original competitive mode for 2–8 players on a server, played over a set. D
 
 The names and balancing numbers are placeholders to tune in play.
 
-### 4.2 Accounts and avatars
+### 4.2 Accounts and avatars (decided: the band's 3D characters)
 
 - **Profile:** a display name, an avatar, and a short line of text.
 - **Avatar:** built from the game's own band characters (`public/stage/aurora/band.glb`). You pick a character,
@@ -333,10 +357,6 @@ Each milestone is its own PR, and the game ships after every one.
 ## 8. Open questions
 
 1. **Session size:** is 8 players right for a local session, and for Showdown?
-2. **Server list:** should public servers be findable in the game (a server list), or only by address and invite?
-3. **Showdown hits:** are fog, colour shuffle and rush fair, and is 4 s right? Which others?
-4. **Avatars:** the game's own band characters with colours and outfits, or something simpler (2D badges)?
-5. **Browser version:** should it be able to host local sessions through a server, or only join?
-6. **Moderation:** what does a server owner need on day one (kick, ban, delete scores/songs)?
-7. **Signalling for direct connections:** should a tiny public signalling service exist (run by the project) to
+2. **Showdown hits:** are fog, colour shuffle and rush fair, and is 4 s right? Which others?
+3. **Signalling for direct connections:** should a tiny public signalling service exist (run by the project) to
    make Friends anywhere smoother, or do invite links carry the connection offers so nothing central is needed?
