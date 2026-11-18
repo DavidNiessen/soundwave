@@ -94,3 +94,20 @@ describe('the fullscreen toggle', () => {
     expect(isFullscreenToggle(key('Enter', { altKey: true, ctrlKey: true }), true)).toBe(false);
   });
 });
+
+describe('replay settings', () => {
+  it('record replays and keep thirty by default, also for settings stored before the options existed', () => {
+    expect(DEFAULT_SETTINGS.replays).toBe(true);
+    expect(DEFAULT_SETTINGS.replayLimit).toBe(30);
+    const { replays: _, replayLimit: __, ...stored } = DEFAULT_SETTINGS;
+    expect(normalizeSettings(stored)).toMatchObject({ replays: true, replayLimit: 30 });
+  });
+
+  it('keep a stored choice and bring the number kept onto the slider', () => {
+    expect(normalizeSettings({ replays: false }).replays).toBe(false);
+    expect(normalizeSettings({ replayLimit: 52 }).replayLimit).toBe(50);
+    expect(normalizeSettings({ replayLimit: 1 }).replayLimit).toBe(5);
+    expect(normalizeSettings({ replayLimit: 1000 }).replayLimit).toBe(100);
+    expect(normalizeSettings({ replayLimit: 'many' } as unknown as Partial<Settings>).replayLimit).toBe(30);
+  });
+});
