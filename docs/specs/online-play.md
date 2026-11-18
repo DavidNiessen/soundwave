@@ -39,11 +39,11 @@ There's no leaderboard, no accounts and no avatars.
 
 ### 2.1 Hosting and joining
 
-- **Hosting:** on the Play tab, **Play together → Host** starts a small server inside the desktop app. It
-  listens on the local network only, on a free port.
-- **Session code:** the host sees a short code, like `KITE-42`, plus the address.
-- **Finding the host:** joining players see hosts on the same network automatically (mDNS, `_soundwave._tcp`). If
-  their network blocks that, they type the code or the address.
+- **Hosting:** on the Play tab, **Play together → Host** starts a small server inside the desktop app, on a free
+  port. The host chooses **This network** or **Friends anywhere** (see [2.6](#26-reaching-friends-over-the-internet)).
+- **Session code:** the host sees a short code, like `KITE-42`, plus an invite link to send to friends.
+- **Finding the host:** on the same network, hosts show up automatically (mDNS, `_soundwave._tcp`). Elsewhere,
+  friends open the invite link or type the code.
 - **Names:** each player is shown by a display name, set the first time and stored locally. There are no accounts.
 - **Size:** up to **8 players** per session. That's an open question; see the end.
 - **Browser version:** it can **join** but not host, because a browser tab can't run a server. Hosting is
@@ -65,7 +65,7 @@ the game already uses.
 - **Missing songs:** a player who doesn't have a song in the set sees **Missing** next to it.
 - **Getting it from the host:** the host's app can send it to them as a `.soundwave` file, which already carries the
   audio, cover, analysis and hand-made charts. This only happens if the host allows it (a **Share my songs with
-  the session** switch, off by default) and the player accepts each song.
+  the session** switch, on by default, to match whole-song sharing on servers) and the player accepts each song.
 - **Without the song:** a player who doesn't get it sits that song out and watches the others' scores.
 
 ### 2.4 Playing in sync
@@ -90,13 +90,34 @@ Everyone should hear the first note at the same moment, give or take a few milli
   migration in level 1.
 - **Pausing:** a player can pause their own run, but the song doesn't pause for anyone else.
 
-### 2.6 How it's built
+### 2.6 Reaching friends over the internet
 
-- **Session server:** it lives in the desktop app's Rust side (`src-tauri/src/session/`), using `tokio` and a
-  WebSocket library. JSON messages are spelled out in [section 6](#6-protocol-sketch).
-- **Browser clients:** joiners use the same protocol from the page with a plain `WebSocket`.
-- **Network reach:** only the local network by default. Playing over the internet without a server would need the
-  host to forward a port. The game can explain that, but doesn't do it itself (no UPnP in level 1).
+With **Friends anywhere**, the host's app tries these in order and uses the first that works:
+
+1. **Open a port on the router:** it asks the router to forward the session's port, using UPnP or NAT-PMP, which
+   most home routers offer. The invite code then carries the host's public address. The forward is removed when
+   the session ends.
+2. **Direct connection (WebRTC):** it connects peer to peer through the routers using WebRTC data channels, with
+   public STUN servers to find each side's address. The two apps exchange their connection offers through the
+   invite link, or through a small signalling service (see the open questions).
+3. **Manual forward:** if neither works (strict carrier networks, some company or school networks), the game says
+   so and explains how to forward the port by hand. Otherwise it suggests a server.
+
+Notes:
+
+- **Privacy:** friends who join learn the host's public IP address, as in any peer-to-peer game. The host sees this
+  in one line before starting.
+- **Session password:** a session reachable from the internet always has the code as its password, so strangers
+  scanning ports can't walk in.
+- **Distance:** sync (2.4) works the same; only scores travel, so a 100 ms connection is fine for play.
+
+### 2.7 How it's built
+
+- **Session server:** it lives in the desktop app's Rust side (`src-tauri/src/session/`), using `tokio`, a
+  WebSocket library, a UPnP/NAT-PMP crate and a WebRTC crate. JSON messages are spelled out in
+  [section 6](#6-protocol-sketch).
+- **Browser clients:** joiners use the same protocol from the page, with a plain `WebSocket` or a WebRTC data
+  channel.
 
 ---
 
@@ -142,17 +163,23 @@ scores and shared songs.
   TypeScript), and rejects scores that don't match. That stops casual cheating, though not a determined bot.
 - **Modifiers:** runs with modifiers (if the modifiers idea is built) get their own boards.
 
-### 3.4 Song sharing and copyright
+### 3.4 Song sharing (decided: whole songs)
 
-Sharing someone else's music file with strangers is very likely copyright infringement, and the server owner
-would be the one responsible. The proposal:
+Players share **whole songs**: the `.soundwave` file with its audio, cover, analysis and hand-made charts. A player
+who downloads one can play it at once, with no analysis needed.
 
-- **Default: charts only.** The server shares everything in a `.soundwave` file except the audio: title, artist,
-  cover, analysis and hand-made charts. Players who own the song (the same audio, so the same song id) get the
-  charts instantly. Others see the song listed as **You don't have this song**.
-- **Opt-in: with audio.** The server owner can turn on audio sharing for a private server among friends. The config
-  option and the first-start text make it clear that the owner is responsible for what's shared.
-- **Limits:** a size limit per song and per account, and a report button.
+Sharing music files with others can infringe copyright, and the person running the server is responsible for
+what it hands out. So the server gives its owner the tools to run it responsibly:
+
+- **Setup notice:** the first start of a server shows the owner a short notice about this, which they confirm
+  once. The config file has the same note.
+- **Charts-only mode:** a config switch makes the server keep everything but the audio. Players with the same audio
+  (the same song id) still get the charts instantly. This is meant for public servers.
+- **Uploader on record:** every shared song records who shared it and when.
+- **Takedown:** a report button on every song, and an owner/moderator view of the reports. One action removes a song
+  everywhere on the server.
+- **Limits:** a size limit per song and a storage quota per account, both set by the owner.
+- **Not on the cover service:** covers of shared songs are served for the Discord status (5.3), the audio never.
 
 ### 3.5 How it's built
 
@@ -164,6 +191,8 @@ would be the one responsible. The proposal:
   would need a second copy of the judging code and a heavier setup.
 - **Storage:** SQLite by default (one file, easy to back up) and Postgres optionally. Shared songs and covers live
   in a folder or S3-compatible storage.
+- **Sign-in (decided):** username and password only. Nothing external, no third-party accounts. The owner can reset
+  a forgotten password from the admin view, since there are no emails.
 - **Security:**
   - **Passwords:** hashed with Argon2id.
   - **Tokens:** short-lived access tokens plus a refresh token.
@@ -181,7 +210,7 @@ would be the one responsible. The proposal:
 
 ### 4.1 Showdown (battle mode)
 
-An original competitive mode for 2–8 players on a server, played over a set.
+An original competitive mode for 2–8 players on a server, played over a set. Decided: **elimination, with hits**.
 
 - **Same song, own chart:** everyone plays the same song, each on their own part and difficulty. Scores are
   normalised to the chart's par, the same par the stars use, so a hard part doesn't win just by having more notes.
@@ -229,7 +258,7 @@ Offline, the sidebar is gone and the menu looks exactly as today.
 - **How to play:** Just me / With friends nearby / On a server.
 - **Display name:** the name used in local sessions.
 - **Server:** its address, signed-in account, and **Sign out** / **Forget this server**.
-- **Sharing:** **Share my songs with the session** (level 1, off by default).
+- **Sharing:** **Share my songs with the session** (level 1, on by default; friends still accept each song).
 
 ### 5.2 Key files
 
@@ -304,13 +333,10 @@ Each milestone is its own PR, and the game ships after every one.
 ## 8. Open questions
 
 1. **Session size:** is 8 players right for a local session, and for Showdown?
-2. **Local over the internet:** should level 1 try to reach friends over the internet without a server (UPnP, or a
-   free relay), or stay LAN-only and leave the internet to servers?
-3. **Song sharing:** charts-only by default with opt-in audio, as proposed? Or something else?
-4. **Server list:** should public servers be findable in the game (a server list), or only by address and invite?
-5. **Sign-in:** username and password only, or also "Sign in with Discord", given the Discord app id that already
-   exists?
-6. **Showdown:** elimination per song, or one long score race with hits? Which hits feel fair?
-7. **Avatars:** the game's own band characters with colours and outfits, or something simpler (2D badges)?
-8. **Browser version:** should it be able to host local sessions through a server, or only join?
-9. **Moderation:** what does a server owner need on day one (kick, ban, delete scores/songs)?
+2. **Server list:** should public servers be findable in the game (a server list), or only by address and invite?
+3. **Showdown hits:** are fog, colour shuffle and rush fair, and is 4 s right? Which others?
+4. **Avatars:** the game's own band characters with colours and outfits, or something simpler (2D badges)?
+5. **Browser version:** should it be able to host local sessions through a server, or only join?
+6. **Moderation:** what does a server owner need on day one (kick, ban, delete scores/songs)?
+7. **Signalling for direct connections:** should a tiny public signalling service exist (run by the project) to
+   make Friends anywhere smoother, or do invite links carry the connection offers so nothing central is needed?
