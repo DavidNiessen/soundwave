@@ -341,6 +341,7 @@ Offline, the sidebar is gone and the menu looks exactly as today.
 - **How to play:** Just me / With friends nearby / On a server.
 - **Display name:** the name used in local sessions.
 - **Server:** its address, signed-in account, and **Sign out** / **Forget this server**.
+- **Showdown hits reach me as:** **Fog** (default) or **Drain** (calm hits, nothing on the highway moves or flashes).
 - **Sharing:** **Share my songs with the session** (level 1, on by default; friends still accept each song).
 
 ### 5.2 Key files
