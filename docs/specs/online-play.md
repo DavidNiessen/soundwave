@@ -156,8 +156,12 @@ would be the one responsible. The proposal:
 
 ### 3.5 How it's built
 
-- **Language:** proposal: **TypeScript on Node**, in this repository under `server/`. It shares the protocol types,
-  the chart code and the judging code with the game. (Rust is the alternative; see the open questions.)
+- **Language (decided): TypeScript on Node**, in this repository under `server/`, as a pnpm workspace package. It
+  shares the protocol types, the chart code and the judging code with the game, so a leaderboard score is checked
+  by exactly the rules the game played it by. It's small to host (tens of MB of memory, quick to start) and needs
+  no toolchain beyond the one the game already uses. Rust and Kotlin were considered: Rust would share code with
+  the desktop app's session server, and Kotlin (Spring Boot or Ktor) is strong for accounts and data. But both
+  would need a second copy of the judging code and a heavier setup.
 - **Storage:** SQLite by default (one file, easy to back up) and Postgres optionally. Shared songs and covers live
   in a folder or S3-compatible storage.
 - **Security:**
@@ -302,12 +306,11 @@ Each milestone is its own PR, and the game ships after every one.
 1. **Session size:** is 8 players right for a local session, and for Showdown?
 2. **Local over the internet:** should level 1 try to reach friends over the internet without a server (UPnP, or a
    free relay), or stay LAN-only and leave the internet to servers?
-3. **Server language:** TypeScript (shares code with the game) or Rust (shares code with the desktop app)?
-4. **Song sharing:** charts-only by default with opt-in audio, as proposed? Or something else?
-5. **Server list:** should public servers be findable in the game (a server list), or only by address and invite?
-6. **Sign-in:** username and password only, or also "Sign in with Discord", given the Discord app id that already
+3. **Song sharing:** charts-only by default with opt-in audio, as proposed? Or something else?
+4. **Server list:** should public servers be findable in the game (a server list), or only by address and invite?
+5. **Sign-in:** username and password only, or also "Sign in with Discord", given the Discord app id that already
    exists?
-7. **Showdown:** elimination per song, or one long score race with hits? Which hits feel fair?
-8. **Avatars:** the game's own band characters with colours and outfits, or something simpler (2D badges)?
-9. **Browser version:** should it be able to host local sessions through a server, or only join?
-10. **Moderation:** what does a server owner need on day one (kick, ban, delete scores/songs)?
+6. **Showdown:** elimination per song, or one long score race with hits? Which hits feel fair?
+7. **Avatars:** the game's own band characters with colours and outfits, or something simpler (2D badges)?
+8. **Browser version:** should it be able to host local sessions through a server, or only join?
+9. **Moderation:** what does a server owner need on day one (kick, ban, delete scores/songs)?
