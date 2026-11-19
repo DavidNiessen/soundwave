@@ -101,6 +101,17 @@ describe('band mode', () => {
   });
 });
 
+describe('private parties', () => {
+  it('are made private by the host only', () => {
+    const { say, state, last } = band(['lead', 'bass']);
+    expect(state().private).toBe(false);
+    say(1, { type: 'private', on: true });
+    expect(last(1, 'error')?.message).toMatch(/host/);
+    say(0, { type: 'private', on: true });
+    expect(state().private).toBe(true);
+  });
+});
+
 describe('band boards', () => {
   /** A run that hits the chart's first `hits` notes, as the game records it. */
   const run = (c: WireChart, hits: number) => {

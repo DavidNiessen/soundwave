@@ -18,7 +18,7 @@ Object.assign(globalThis, {
     removeItem: (k: string) => void storage.delete(k),
   },
 });
-const { online, parseInvite, serverAddress } = await import('../../src/net/client.ts');
+const { joinSecret, online, parseInvite, parseJoinSecret, serverAddress } = await import('../../src/net/client.ts');
 
 const SONG = 'c'.repeat(64);
 const chart: WireChart = {
@@ -76,6 +76,15 @@ describe('server addresses', () => {
     // A plain address, or a link to a server outside the network over plain HTTP, is no invite.
     expect(parseInvite('play.example.com')).toBeNull();
     expect(parseInvite('http://play.example.com/join?invite=AbC123')).toBeNull();
+  });
+
+  it('carry a party on Discord as its code and server, and read nothing else as one', () => {
+    const secret = joinSecret('https://play.example.com', 'WAVE-60');
+    expect(secret.length).toBeLessThanOrEqual(128);
+    expect(parseJoinSecret(secret)).toEqual({ server: 'https://play.example.com', code: 'WAVE-60' });
+    expect(parseJoinSecret('WAVE-60 http://play.example.com')).toBeNull();
+    expect(parseJoinSecret('not a party')).toBeNull();
+    expect(parseJoinSecret('WAVE-60')).toBeNull();
   });
 });
 

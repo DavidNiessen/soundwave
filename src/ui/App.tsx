@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { setDiscordEnabled, showScene } from '../app/discord';
+import { onDiscordJoin, setDiscordEnabled, setDiscordJoin, showScene } from '../app/discord';
 import { analysisManager, canPlay } from '../analysis/manager';
 import { stemModel } from '../analysis/separation/model';
 import { analysisDevice, type AnalysisDevice } from '../analysis/separation/support';
@@ -92,8 +92,8 @@ import { hashBytes } from '../storage/hash';
 import { writeSoundwave } from '../storage/soundwaveFile';
 import { decodeRun, encodeRun } from '../net/runs';
 import { replayResults } from '../game/replay';
-import { online, parseInvite, type PartyStart, type SongEvent } from '../net/client';
-import type { SharedSong, WireChart } from '../net/protocol';
+import { joinSecret, online, parseInvite, parseJoinSecret, type PartyStart, type SongEvent } from '../net/client';
+import { PARTY_MAX, type SharedSong, type WireChart } from '../net/protocol';
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { installUiSounds } from './uiSounds';
 
@@ -1300,6 +1300,26 @@ export function App() {
 
   // The player's Discord profile shows where they are and what they play (desktop app; src/app/discord.ts).
   useEffect(() => setDiscordEnabled(settings.discordStatus), [settings.discordStatus]);
+  // Friends can join the party from Discord: only when the player lets them and it is not private.
+  const joinable = settings.discordJoin && !!onlineState.party && !onlineState.party.private && !!onlineState.server;
+  const partyCode = onlineState.party?.code;
+  const partySize = onlineState.party?.members.length ?? 0;
+  useEffect(() => {
+    if (!joinable || !partyCode || !onlineState.server) return setDiscordJoin(undefined);
+    const secret = joinSecret(onlineState.server, partyCode);
+    setDiscordJoin({ secret, id: secret, size: partySize, max: PARTY_MAX });
+  }, [joinable, partyCode, partySize, onlineState.server]);
+  // A friend's party, joined from their Discord status: Play together opens, signed in or to sign in.
+  useEffect(
+    () =>
+      onDiscordJoin((secret) => {
+        const party = parseJoinSecret(secret);
+        if (!party) return;
+        online.joinFrom(party.server, party.code);
+        if (!['play', 'replay', 'export', 'editor'].includes(viewRef.current.name)) setView({ name: 'party' });
+      }),
+    [],
+  );
   // The server's other players see the same line in their menus (only while signed in).
   useEffect(() => {
     const what =

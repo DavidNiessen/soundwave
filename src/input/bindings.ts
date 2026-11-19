@@ -118,6 +118,7 @@ export const COMMANDS: Command[] = [
     { id: 'party.rotation', label: 'Showdown on the server’s rotation, or my set', key: 'KeyW' },
     { id: 'party.cheer', label: 'Cheer the players on', key: 'KeyY' },
     { id: 'party.band', label: 'A band, or a plain party', key: 'KeyX' },
+    { id: 'party.private', label: 'Private party, or open to friends on Discord', key: 'KeyT' },
     { id: 'party.avatar', label: 'Your look on the stage', key: 'KeyV' },
     { id: 'party.avatarSave', label: 'Keep this look', key: 'KeyK' },
     { id: 'party.avatarReset', label: 'Use the band member’s own look', key: 'KeyZ' },

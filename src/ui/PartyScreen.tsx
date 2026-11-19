@@ -17,6 +17,7 @@ import {
   Music,
   Gauge,
   ListMusic,
+  Lock,
   LogIn,
   LogOut,
   Megaphone,
@@ -565,6 +566,7 @@ function PartyLobby({
   const toggleOnePart = () => sd && setShowdown({ part: sd.part ? null : me.part });
   const toggleRotation = () => sd && setShowdown({ rotation: !sd.rotation });
   const toggleBand = () => online.setBand(!party.band);
+  const togglePrivate = () => online.setPrivate(!party.private);
   const watching = party.phase === 'playing';
   const nextDifficulty = () => choose(me.part, DIFFICULTIES[(DIFFICULTIES.indexOf(me.difficulty) + 1) % DIFFICULTIES.length]);
   const everyoneReady = party.members.every((m) => m.ready || !m.connected);
@@ -581,6 +583,7 @@ function PartyLobby({
           { id: 'party-setlist', label: 'Play my setlist', icon: ListMusic, ...keysOf('party.setlist'), bar: false, run: useSetlist },
           { id: 'party-showdown', label: 'Showdown', icon: Swords, ...keysOf('party.showdown'), bar: false, run: toggleShowdown },
           { id: 'party-band', label: 'Band', icon: Users, ...keysOf('party.band'), bar: false, run: toggleBand },
+          { id: 'party-private', label: 'Private', icon: Lock, ...keysOf('party.private'), bar: false, run: togglePrivate },
           ...(sd
             ? [
                 { id: 'party-hits', label: 'Hits', icon: Crosshair, ...keysOf('party.hits'), bar: false, run: toggleHits },
@@ -609,7 +612,21 @@ function PartyLobby({
         <section className="party-code" aria-label="Party code">
           <span className="label">Party code</span>
           <span className="display party-code-text">{party.code}</span>
-          <span className="dim">Friends on this server join with it.</span>
+          <span className="dim">
+            Friends on this server join with it.
+            {party.private
+              ? ' Private: never offered on Discord.'
+              : settings.discordJoin
+                ? ' Your Discord friends can join from your status.'
+                : ''}
+          </span>
+          {host && (
+            <button type="button" className="btn small party-private" data-action="party-private" onClick={togglePrivate}>
+              <Hint {...keysOf('party.private')} {...hints} />
+              <Lock strokeWidth={ICON_STROKE} aria-hidden />
+              {party.private ? 'Private · make it open' : 'Make it private'}
+            </button>
+          )}
         </section>
 
         <h2 className="label party-set-head">

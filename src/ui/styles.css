@@ -6737,6 +6737,10 @@ a.btn {
   border-radius: var(--r-l);
   background: var(--panel);
 }
+.party-code .party-private {
+  align-self: flex-start;
+  margin-top: 0.4rem;
+}
 .party-code-text {
   font-size: clamp(2rem, 4.5vw, 3.4rem);
   letter-spacing: 0.04em;

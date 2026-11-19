@@ -117,6 +117,23 @@ export function serverAddress(typed: string): string {
 }
 
 /**
+ * A party's join secret on Discord (spec 5.4): its code and its server, which a friend's game is
+ * handed when they press Join. Discord takes up to 128 characters.
+ */
+export const joinSecret = (server: string, code: string) => `${code} ${server}`;
+
+/** The party a join secret names, or null when it names none. */
+export function parseJoinSecret(secret: string): { server: string; code: string } | null {
+  const [code, server, ...rest] = secret.trim().split(' ');
+  if (!code || !server || rest.length || !/^[A-Z]{4}-\d{2}$/.test(code)) return null;
+  try {
+    return { server: serverAddress(server), code };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * An invite in any of the shapes it reaches the game: a server's join page
  * (https://play.example.com/join?invite=…), a soundwave://join?server=…&invite=… link, or the
  * web game's own address with ?server=…&invite=…. Null when the text is none of them.
@@ -542,6 +559,10 @@ class OnlineClient {
       case 'welcome':
         this.retry = 0;
         this.set({ status: 'online', account: msg.you, error: null });
+        if (this.waitingParty) {
+          this.pending.push({ type: 'party-join', code: this.waitingParty });
+          this.waitingParty = null;
+        }
         void this.request<{ avatar: Avatar | null }>('/me/profile', { auth: true }).then(
           (r) => this.set({ avatar: r.avatar }),
           () => {},
@@ -651,6 +672,21 @@ class OnlineClient {
   setBand(on: boolean) {
     this.send({ type: 'band', on });
   }
+  /** The host makes the party private (never offered on Discord), or not. */
+  setPrivate(on: boolean) {
+    this.send({ type: 'private', on });
+  }
+  /**
+   * A friend's party, joined from Discord: at once when signed in to its server, else once signed
+   * in there (the server is chosen, and its sign-in shown).
+   */
+  joinFrom(server: string, code: string) {
+    if (this.state.server === server && this.state.account) return this.joinParty(code);
+    this.waitingParty = code;
+    void this.choose(server);
+  }
+  /** A party to join once signed in (from Discord). */
+  private waitingParty: string | null = null;
   /** Band mode: this player started overdrive (two in one bar make band overdrive). */
   overdriveStarted(songIndex: number, bar: number, seconds: number) {
     this.send({ type: 'overdrive', songIndex, bar, seconds });

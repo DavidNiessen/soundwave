@@ -157,7 +157,8 @@ export function clientMessage(raw: unknown): ClientMessage | undefined {
     case 'cheer':
       return { type: 'cheer' };
     case 'band':
-      return typeof raw.on === 'boolean' ? { type: 'band', on: raw.on } : undefined;
+    case 'private':
+      return typeof raw.on === 'boolean' ? { type: raw.type, on: raw.on } : undefined;
     case 'overdrive':
       return Number.isInteger(raw.songIndex) && Number.isInteger(raw.bar) && num(raw.seconds)
         ? { type: 'overdrive', songIndex: raw.songIndex as number, bar: raw.bar as number, seconds: Math.max(0, Math.min(60, raw.seconds)) }

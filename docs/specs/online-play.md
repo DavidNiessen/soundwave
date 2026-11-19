@@ -1,6 +1,6 @@
 # Spec: playing together
 
-Status: **being built** (#16). Built: judging by time (milestone 0), the server, parties, leaderboards, Showdown, avatars, band mode,
+Status: **being built** (#16). Built: judging by time (milestone 0), the server, parties, leaderboards, Showdown, avatars, band mode, join from Discord,
 shared songs and the connected main menu. Still to do: Showdown, avatars, band mode, join from Discord.
 
 Decisions made while building, which override what follows:
@@ -26,6 +26,10 @@ Decisions made while building, which override what follows:
   completes an overdrive phrase; when every player is out the song still plays to its end. Band boards are per song,
   one per line-up (the set of charts), and take a band only when every member's run, judged again, gives its score.
   Band and Showdown runs are not posted to the song boards. Only in parties on a server (level 1 is not built).
+- **Join from Discord, as built:** for parties on a server (level 1 sessions are not built). The join secret is the
+  party's code and server; Discord greys the button when the party is full. A set under way keeps the button: a
+  friend who joins mid-set sits the current song out and plays from the next. Discord starts the game through the
+  `discord-<application id>` scheme, registered at start on Windows and Linux (on macOS the game must be running).
 - **Later, not now:** the in-game server list (3.2b), local sessions hosted by the desktop app (level 1), and its
   STUN fallback.
 

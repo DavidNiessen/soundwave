@@ -102,6 +102,12 @@ pub fn run() {
                 if let Err(e) = app.deep_link().register_all() {
                     log::warn!("soundwave:// links could not be registered: {e}");
                 }
+                // Discord starts the game for a friend's Join through its own scheme.
+                if let Some(scheme) = discord::launch_scheme()
+                    && let Err(e) = app.deep_link().register(&scheme)
+                {
+                    log::warn!("{scheme}:// could not be registered: {e}");
+                }
             }
             if cfg!(debug_assertions) {
                 app.handle().plugin(

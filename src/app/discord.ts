@@ -5,6 +5,7 @@
  * while without any input outside a song the status says the player is idle. Only changes are sent.
  */
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import type { Part } from '../chart/types';
 import { inDesktopApp } from '../game/displayMode';
 import { onPadInput } from '../input/inputMode';
@@ -22,6 +23,8 @@ export interface Presence {
   partText?: string;
   /** The song's cover, by a public https address (a server's), shown as the large picture. */
   cover?: string;
+  /** The party friends can join from Discord: its secret, an id, how many are in it and how many fit. */
+  join?: { secret: string; id: string; size: number; max: number };
 }
 
 /** Where the song being played stands, and how many seconds of it are left. */
@@ -36,6 +39,7 @@ const OPENED = Date.now();
 const IDLE_AFTER = 10 * 60_000;
 
 let enabled = true;
+let join: Presence['join'];
 let scene: Presence | null = null;
 let song: SongState | null = null;
 let sent: string | undefined;
@@ -64,7 +68,7 @@ function update() {
   idle = !song && Date.now() - lastInput >= IDLE_AFTER;
   let p: Presence | null = null;
   if (enabled && scene) {
-    p = { ...scene };
+    p = { ...scene, ...(join ? { join } : {}) };
     if (idle) {
       p = { details: 'Idle', state: scene.details, start: lastInput };
     } else if (song?.phase === 'paused' || song?.phase === 'finished') {
@@ -87,6 +91,24 @@ function update() {
 export function setDiscordEnabled(on: boolean) {
   enabled = on;
   update();
+}
+
+/** The party friends can join from Discord, on every status from now on; undefined for none. */
+export function setDiscordJoin(j: Presence['join']) {
+  join = j;
+  update();
+}
+
+/** Calls `fn` with the secret when a friend presses Join on this player's Discord status (desktop app only). */
+export function onDiscordJoin(fn: (secret: string) => void): () => void {
+  if (!inDesktopApp()) return () => {};
+  let stop = () => {};
+  let gone = false;
+  void listen<string>('discord-join', (e) => fn(e.payload)).then((un) => (gone ? un() : (stop = un)));
+  return () => {
+    gone = true;
+    stop();
+  };
 }
 
 /** Where the player is: a screen, or the song being played. */

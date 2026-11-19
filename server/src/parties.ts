@@ -138,7 +138,18 @@ class Party {
   cheered = new Map<string, number>();
 
   constructor(code: string, host: Player) {
-    this.state = { code, host: host.id, members: [], set: [], phase: 'lobby', songIndex: -1, results: [], showdown: null, band: false };
+    this.state = {
+      code,
+      host: host.id,
+      members: [],
+      set: [],
+      phase: 'lobby',
+      songIndex: -1,
+      results: [],
+      showdown: null,
+      band: false,
+      private: false,
+    };
   }
 
   member(id: string): Member | undefined {
@@ -274,6 +285,10 @@ export class Parties {
         s.band = msg.on;
         if (msg.on) s.showdown = null;
         for (const m of s.members) m.ready = false;
+        return this.share(party);
+      case 'private':
+        if (!host) return fail('Only the host makes the party private.');
+        s.private = msg.on;
         return this.share(party);
       case 'overdrive':
         return this.bandOverdrive(party, player, msg.songIndex, msg.bar, msg.seconds);

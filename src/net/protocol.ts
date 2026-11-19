@@ -225,6 +225,8 @@ export interface PartyState {
   showdown: ShowdownOptions | null;
   /** The party plays as a band (spec 4.5): up to four, one per part, for one band score. */
   band: boolean;
+  /** Private: never offered to friends on Discord (spec 5.4). */
+  private: boolean;
 }
 
 /** A chart as it is sent: the same shape as the game's own (src/chart/types.ts). */
@@ -300,6 +302,8 @@ export type ClientMessage =
   | { type: 'cheer' }
   /** The host makes the party a band, or not. */
   | { type: 'band'; on: boolean }
+  /** The host makes the party private (never offered on Discord), or not. */
+  | { type: 'private'; on: boolean }
   /** Band mode: this player started overdrive in bar `bar` of the song, for `seconds`. */
   | { type: 'overdrive'; songIndex: number; bar: number; seconds: number }
   /** Band mode: this player dropped out (or is back in). */
