@@ -1277,7 +1277,7 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
           disabled: lib.busy,
           run: lib.exportLibrary,
           note: lib.exportNote,
-          help: 'Saves every song with its charts, the charts you edited by hand, your best scores and your settings in one file, to move the game to another computer or keep a copy safe. Separated stems are left out: a song makes them again when it is analyzed again.',
+          help: 'Saves every song with its charts, the charts you edited by hand, your best scores, your replays and your settings in one file, to move the game to another computer or keep a copy safe. Separated stems are left out: a song makes them again when it is analyzed again.',
         },
         {
           kind: 'action',
@@ -1289,7 +1289,7 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
           note: lib.importNote,
           help: c.inSong
             ? 'Leave the song first: importing restarts the game.'
-            : 'Adds the songs from a library backup with their charts, keeps the better of each best score, and takes over the backup’s settings. Songs you already have stay as they are. The game restarts afterwards.',
+            : 'Adds the songs from a library backup with their charts and its replays, keeps the better of each best score, and takes over the backup’s settings. Songs you already have stay as they are. The game restarts afterwards.',
         },
         {
           kind: 'action',

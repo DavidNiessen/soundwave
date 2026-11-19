@@ -1,6 +1,6 @@
 /**
- * The library backup: every song, best score and setting in one file, to move the game to another
- * computer or keep it safe.
+ * The library backup: every song, best score, replay and setting in one file, to move the game to
+ * another computer or keep it safe.
  *
  * The file is laid out like a song file (src/storage/soundwaveFile.ts): a 12-byte header, then
  * chunks of type, length, payload and CRC-32. Only the magic differs, so the two cannot be mixed
@@ -14,9 +14,13 @@
  *
  * Chunk types:
  *
- *     INFO  required, first. UTF-8 JSON: { createdAt, songs } (the number of SONG chunks).
+ *     INFO  required, first. UTF-8 JSON: { createdAt, songs, replays } (the number of SONG and RPLY
+ *           chunks).
  *     PREF  UTF-8 JSON: the game's stored preferences, { [storage key]: stored string }.
  *     SCOR  UTF-8 JSON: the best scores, as the database keeps them.
+ *     RPLY  repeated. A saved replay's file (src/storage/replays.ts): its result, the chart it was
+ *           played on and the run. Backups from before replays have none; readers that do not know
+ *           the chunk pass it by.
  *     SONG  repeated, last. A whole song file, exactly as it would be exported on its own: details,
  *           cover, analysis, hand-edited charts and the audio.
  *
@@ -25,7 +29,8 @@
  */
 import { DIFFICULTIES, PARTS, type Difficulty, type Part } from '../chart/types';
 import { GOLD_STARS } from '../game/scoring';
-import { getSong, listAllScores, listSongs, submitScore, type BestScore } from './db';
+import { getReplay, getSong, listAllScores, listReplays, listSongs, putReplay, submitScore, type BestScore } from './db';
+import { readReplay, writeReplay } from './replays';
 import { readSongPackage, songFile, storeSongPackage } from './songFile';
 
 export const BACKUP_EXT = '.soundwave-backup';
@@ -122,7 +127,7 @@ export function clearPreferences() {
 }
 
 export interface BackupProgress {
-  /** Songs packed (export) or added (import) so far, of `total`. */
+  /** Songs packed (export) or added (import) so far, of `total` (the replays are not counted: they are small). */
   done: number;
   total: number;
 }
@@ -134,6 +139,8 @@ export interface BackupInput {
   scores: unknown[];
   /** Each song's .soundwave file, or how to get it (fetched only when its turn comes). */
   songs: (Blob | (() => Promise<Blob>))[];
+  /** Each saved replay's file, or how to get it (absent: none). */
+  replays?: (Blob | (() => Promise<Blob | null>))[];
 }
 
 /** Lays a backup out. The song files are referenced, not copied. */
@@ -142,9 +149,15 @@ export async function packBackup(b: BackupInput, onSong?: (done: number) => void
   header.set(ascii(MAGIC), 0);
   new DataView(header.buffer).setUint16(8, BACKUP_VERSION, true);
   const parts: BlobPart[] = [header];
-  parts.push(...(await chunk('INFO', json({ createdAt: b.createdAt, songs: b.songs.length }))));
+  const replays: Blob[] = [];
+  for (const r of b.replays ?? []) {
+    const file = typeof r === 'function' ? await r() : r;
+    if (file) replays.push(file);
+  }
+  parts.push(...(await chunk('INFO', json({ createdAt: b.createdAt, songs: b.songs.length, replays: replays.length }))));
   parts.push(...(await chunk('PREF', json(b.preferences))));
   parts.push(...(await chunk('SCOR', json(b.scores))));
+  for (const r of replays) parts.push(...(await chunk('RPLY', r)));
   for (let i = 0; i < b.songs.length; i++) {
     const s = b.songs[i];
     parts.push(...(await chunk('SONG', typeof s === 'function' ? await s() : s)));
@@ -160,8 +173,12 @@ export async function writeBackup(onProgress?: (p: BackupProgress) => void): Pro
   onProgress?.({ done: 0, total });
   // Each song's own file, brought up to date with its analysis and edits as it is packed.
   const songs = list.map((s) => () => songFile(s.id));
+  const replays = (await listReplays().catch(() => [])).map((r) => async () => {
+    const whole = await getReplay(r.id);
+    return whole ? writeReplay(whole) : null;
+  });
   const file = await packBackup(
-    { createdAt: Date.now(), preferences: readPreferences(), scores: await listAllScores().catch(() => []), songs },
+    { createdAt: Date.now(), preferences: readPreferences(), scores: await listAllScores().catch(() => []), songs, replays },
     (done) => onProgress?.({ done, total }),
   );
   return { file, songs: total };
@@ -270,6 +287,8 @@ export interface BackupContents {
   createdAt?: number;
   /** Each song's file, a slice of the backup. */
   songs: Blob[];
+  /** Each saved replay's file, a slice of the backup. */
+  replays: Blob[];
   scores: Omit<BestScore, 'key' | 'date'>[];
   preferences: Record<string, string>;
 }
@@ -285,6 +304,10 @@ export async function readBackup(file: Blob): Promise<BackupContents> {
     createdAt: finite(info.createdAt) ? info.createdAt : undefined,
     // Each song is checked by its own file's checksums as it is restored, one at a time.
     songs: refs.filter((r) => r.type === 'SONG').map((r) => file.slice(r.offset, r.offset + r.length)),
+    // Replays are small: each is checked against its checksum here, and a damaged one is left out.
+    replays: (await Promise.all(refs.filter((r) => r.type === 'RPLY').map((r) => payload(file, r).catch(() => null)))).filter(
+      (r): r is Blob => r !== null,
+    ),
     scores: cleanScores(
       await smallJson(
         file,
@@ -305,6 +328,8 @@ export interface RestoreResult {
   /** Already in the library: left as they are. */
   kept: number;
   failed: number;
+  /** Replays added (ones already here are left as they are). */
+  replays: number;
 }
 
 /**
@@ -313,7 +338,7 @@ export interface RestoreResult {
  * backup's preferences replace this device's. The caller reloads the game afterwards.
  */
 export async function restoreBackup(b: BackupContents, onProgress?: (p: BackupProgress) => void): Promise<RestoreResult> {
-  const result: RestoreResult = { added: 0, kept: 0, failed: 0 };
+  const result: RestoreResult = { added: 0, kept: 0, failed: 0, replays: 0 };
   onProgress?.({ done: 0, total: b.songs.length });
   for (let i = 0; i < b.songs.length; i++) {
     try {
@@ -328,6 +353,15 @@ export async function restoreBackup(b: BackupContents, onProgress?: (p: BackupPr
       result.failed++;
     }
     onProgress?.({ done: i + 1, total: b.songs.length });
+  }
+  // Replays carry their own chart, so they are kept whether or not their song came along. A
+  // damaged one is passed by.
+  for (const r of b.replays) {
+    try {
+      if (await putReplay(await readReplay(r))) result.replays++;
+    } catch (e) {
+      console.warn('could not restore a replay from the backup', e);
+    }
   }
   // Scores only for songs the library now has.
   const here = new Map<string, boolean>();

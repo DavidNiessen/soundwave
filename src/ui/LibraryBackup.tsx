@@ -184,11 +184,12 @@ export function useLibraryBackup(settings: Settings): LibraryBackup {
                 <p className="hint">
                   {made ? `Backed up ${made}: ` : 'This backup holds '}
                   {songs(b.songs.length)}, {count(b.scores.length, 'best score')}
+                  {b.replays.length ? `, ${count(b.replays.length, 'replay')}` : ''}
                   {Object.keys(b.preferences).length ? ' and settings' : ''}.
                 </p>
                 <p className="hint">
-                  Songs you already have stay as they are; the others are added with their charts. Better scores are kept, and your settings
-                  are replaced by the backup’s. The game restarts afterwards.
+                  Songs you already have stay as they are; the others are added with their charts. Better scores are kept, replays are
+                  added, and your settings are replaced by the backup’s. The game restarts afterwards.
                 </p>
                 <button type="button" className="btn wide" data-autofocus data-sfx="back" onClick={close}>
                   Cancel
@@ -220,7 +221,8 @@ export function useLibraryBackup(settings: Settings): LibraryBackup {
             <p className="hint" role="status">
               {done.added ? `${capital(songs(done.added))} added` : 'No new songs'}
               {done.kept ? `, ${songs(done.kept)} already here` : ''}
-              {done.failed ? `, ${songs(done.failed)} could not be read` : ''}. The game restarts to load them and the backup’s settings.
+              {done.failed ? `, ${songs(done.failed)} could not be read` : ''}
+              {done.replays ? `, ${count(done.replays, 'replay')} added` : ''}. The game restarts to load them and the backup’s settings.
             </p>
             <button type="button" className="btn primary wide" data-autofocus onClick={() => location.reload()}>
               Restart

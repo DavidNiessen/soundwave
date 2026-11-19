@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BackupError, packBackup, preferenceKeys, readBackup } from '../src/storage/backup';
 import { readSoundwave, writeSoundwave } from '../src/storage/soundwaveFile';
+import { readReplay, writeReplay, type Replay } from '../src/storage/replays';
 
 const song = (title: string, n: number) =>
   writeSoundwave({
@@ -71,5 +72,80 @@ describe('library backups', () => {
     const newer = good.slice();
     newer[8] = 9;
     await expect(readBackup(new Blob([newer]))).rejects.toThrow(/newer version/);
+  });
+});
+
+const replay = (id: string, date: number): Replay => {
+  const chart = {
+    part: 'drums' as const,
+    difficulty: 'hard' as const,
+    lanes: 4 as const,
+    notes: [{ t: 1, lane: 2, dur: 0, phrase: -1 }],
+    beats: [0, 0.5, 1],
+    downbeats: [0],
+    secondsPerBeat: 0.5,
+    duration: 3,
+  };
+  const results = {
+    score: 50,
+    stars: 1,
+    accuracy: 1,
+    counts: { perfect: 1, great: 0, good: 0, miss: 0 },
+    bestStreak: 1,
+    totalNotes: 1,
+    fullCombo: true,
+    overdriveActivations: 0,
+    releases: { hit: 0, total: 0 },
+  };
+  return {
+    meta: {
+      id,
+      date,
+      songId: 'abc',
+      title: 'One',
+      artist: 'Test',
+      part: 'drums',
+      difficulty: 'hard',
+      results,
+      best: true,
+      kept: false,
+      duration: 3,
+    },
+    data: { id, chart, inputs: { ops: Uint8Array.of(1 | (2 << 3), 0), times: Float32Array.of(1, 2) } },
+  };
+};
+
+describe('library backups with replays', () => {
+  it('carry every replay whole, before the songs', async () => {
+    const file = await packBackup({
+      createdAt: 1,
+      preferences: {},
+      scores: [],
+      songs: [await song('One', 2000)],
+      replays: [writeReplay(replay('a-1', 10)), async () => writeReplay(replay('b-2', 20)), async () => null],
+    });
+    const b = await readBackup(file);
+    expect(b.songs).toHaveLength(1);
+    expect(b.replays).toHaveLength(2);
+    const back = await readReplay(b.replays[1]);
+    expect(back.meta).toEqual(replay('b-2', 20).meta);
+    expect(back.data.inputs.ops).toEqual(Uint8Array.of(1 | (2 << 3), 0));
+  });
+
+  it('leave out a damaged replay and keep the rest', async () => {
+    const good = new Uint8Array(
+      await (
+        await packBackup({ createdAt: 1, preferences: {}, scores: [], songs: [], replays: [writeReplay(replay('a-1', 10))] })
+      ).arrayBuffer(),
+    );
+    // Flip a byte inside the replay's payload: its checksum no longer matches.
+    const at = new TextDecoder().decode(good).indexOf('SWREPLAY') + 20;
+    good[at] ^= 0xff;
+    expect((await readBackup(new Blob([good]))).replays).toHaveLength(0);
+  });
+
+  it('from before replays read as having none', async () => {
+    const b = await readBackup(await packBackup({ createdAt: 1, preferences: {}, scores: [], songs: [] }));
+    expect(b.replays).toEqual([]);
   });
 });
