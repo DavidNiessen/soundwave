@@ -8,6 +8,7 @@ import {
   videoFileName,
   videoSize,
 } from '../src/game/videoExport';
+import { PatchedFile } from '../src/game/videoRender';
 
 describe('video export settings', () => {
   it('show the HUD, the stage and the music at 1080p60 wide by default, also for settings stored before them', () => {
@@ -58,5 +59,28 @@ describe('video file format', () => {
     const date = new Date(2026, 10, 18, 21, 4).getTime();
     expect(videoFileName('Song', 'Band', 'Lead Hard', date, 'mp4')).toBe('Song - Band (Lead Hard) 2026-11-18.mp4');
     expect(videoFileName('AC/DC: "Live"?', '', 'Drums Expert', date, 'webm')).toBe('AC DC Live (Drums Expert) 2026-11-18.webm');
+  });
+});
+
+describe('a video file written at positions', () => {
+  const bytes = async (f: PatchedFile) => Array.from(new Uint8Array(await f.blob('video/mp4').arrayBuffer()));
+
+  it('appends in order and fills a gap with zeros', async () => {
+    const f = new PatchedFile();
+    f.write(0, Uint8Array.of(1, 2, 3));
+    f.write(3, Uint8Array.of(4));
+    f.write(6, Uint8Array.of(7));
+    expect(await bytes(f)).toEqual([1, 2, 3, 4, 0, 0, 7]);
+    expect(f.size).toBe(7);
+  });
+
+  it('writes over what is there, as a header is filled in at the end', async () => {
+    const f = new PatchedFile();
+    f.write(0, Uint8Array.of(0, 0, 0, 0, 9, 9));
+    f.write(6, Uint8Array.of(5, 5, 5));
+    f.write(2, Uint8Array.of(1, 2, 3, 4, 6));
+    expect(await bytes(f)).toEqual([0, 0, 1, 2, 3, 4, 6, 5, 5]);
+    f.write(7, Uint8Array.of(8, 8, 8, 8));
+    expect(await bytes(f)).toEqual([0, 0, 1, 2, 3, 4, 6, 8, 8, 8, 8]);
   });
 });
