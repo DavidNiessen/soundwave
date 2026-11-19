@@ -6,15 +6,9 @@ import { PlayController, REPLAY_START } from '../game/PlayController';
 import type { ReplayInputs } from '../game/replay';
 import { multiplierFor, MAX_MULTIPLIER, STREAK_PER_MULTIPLIER } from '../game/scoring';
 import type { Settings } from '../game/settings';
-import {
-  browserVideoFormat,
-  videoBitrate,
-  VideoRecorder,
-  videoSize,
-  type VideoExportSettings,
-  type VideoFormat,
-} from '../game/videoExport';
+import { videoBitrate, VideoRecorder, videoSize, type VideoExportSettings } from '../game/videoExport';
 import { drawVideoHud } from '../render/videoHud';
+import { planVideo, startFrameEncoder, type FrameEncoder, type VideoPlan } from '../game/videoRender';
 import type { SaveTarget } from '../storage/share';
 import type { ReplayMeta } from '../storage/replays';
 import { backInput } from '../input/pads';
@@ -64,7 +58,7 @@ interface DialogProps {
   settings: VideoExportSettings;
   onChange(s: VideoExportSettings): void;
   /** Starts the export; called straight from the press, so the save dialog may open. */
-  onStart(s: VideoExportSettings, format: VideoFormat): void;
+  onStart(s: VideoExportSettings, plan: VideoPlan): void;
   onClose(): void;
 }
 
@@ -74,7 +68,19 @@ interface DialogProps {
  */
 export function ExportVideoDialog({ replay, silent, settings: s, onChange, onStart, onClose }: DialogProps) {
   const music = s.music && !silent;
-  const format = browserVideoFormat(music);
+  // How this browser can make it: frame by frame where it can encode, else recorded as it plays.
+  const [plan, setPlan] = useState<VideoPlan | null | undefined>(undefined);
+  const key = `${music}|${s.quality}|${s.fps}|${s.layout}`;
+  useEffect(() => {
+    let live = true;
+    setPlan(undefined);
+    void planVideo(s, music).then((p) => live && setPlan(p));
+    return () => {
+      live = false;
+    };
+    // oxlint-disable-next-line react/exhaustive-deps -- `key` holds what the plan depends on
+  }, [key]);
+  const format = plan ? (plan.kind === 'live' ? plan.format : null) : null;
   const size = videoSize(s);
   const set = (patch: Partial<VideoExportSettings>) => onChange({ ...s, ...patch });
   const onOff = (on: string, off: string) => [
@@ -137,25 +143,30 @@ export function ExportVideoDialog({ replay, silent, settings: s, onChange, onSta
               <ChoiceRow key={c.id} choice={c} />
             ))}
           </div>
-          {format ? (
+          {plan === undefined ? (
+            <p className="hint export-summary">Checking what this device can encode…</p>
+          ) : plan ? (
             <p className="hint export-summary">
-              {format.ext.toUpperCase()} · {size.width}×{size.height} · {s.fps} fps{music ? '' : ' · no sound'}. Recorded as the replay
-              plays, so it takes {clock(replay.duration + 4)}. Keep the game in front until it is done.
-              {format.ext === 'webm' && ' This browser cannot write MP4: the video is saved as WebM. The desktop app and Chrome write MP4.'}
+              {plan.ext.toUpperCase()} · {size.width}×{size.height} · {s.fps} fps{music ? '' : ' · no sound'}.{' '}
+              {plan.kind === 'frames'
+                ? 'Made frame by frame, as fast as this device can draw them: usually well under the song’s length.'
+                : `Recorded as the replay plays, so it takes ${clock(replay.duration + 4)}. Keep the game in front until it is done.`}
+              {format?.ext === 'webm' &&
+                ' This browser cannot write MP4: the video is saved as WebM. The desktop app and Chrome write MP4.'}
               {silent && ' The song is no longer in your library, so the video has no music.'}
             </p>
           ) : (
-            <p className="error">This browser cannot record video. The desktop app, Chrome, Edge and Safari can.</p>
+            <p className="error">This browser cannot make video. The desktop app, Chrome, Edge and Safari can.</p>
           )}
           <button
             type="button"
             className="btn primary wide"
             data-autofocus
-            disabled={!format}
-            onClick={() => format && onStart({ ...s, music }, format)}
+            disabled={!plan}
+            onClick={() => plan && onStart({ ...s, music }, plan)}
           >
             <Film strokeWidth={ICON_STROKE} aria-hidden />
-            Record video
+            {plan?.kind === 'live' ? 'Record video' : 'Make video'}
           </button>
           <button type="button" className="btn quiet wide" data-sfx="back" onClick={close}>
             Cancel
@@ -173,7 +184,8 @@ interface ScreenProps {
   buffer: AudioBuffer;
   settings: Settings;
   video: VideoExportSettings;
-  format: VideoFormat;
+  /** How it is made: frame by frame where the browser can encode, else recorded as it plays. */
+  plan: VideoPlan;
   /** Where the file goes (chosen before the recording started). */
   target: SaveTarget;
   fileName: string;
@@ -190,7 +202,7 @@ const TAIL = 3;
  * every frame of it is laid onto the canvas shown here, which is what is recorded. The song plays
  * along as it is recorded. A hidden window pauses the recording and the replay together.
  */
-export function VideoExportScreen({ replay, chart, inputs, buffer, settings, video, format, target, fileName, onDone }: ScreenProps) {
+export function VideoExportScreen({ replay, chart, inputs, buffer, settings, video, plan, target, fileName, onDone }: ScreenProps) {
   const { width, height } = videoSize(video);
   // The frame is laid out at the video's size in device pixels, so the highway draws at that size.
   const [dpr] = useState(() => Math.min(2, window.devicePixelRatio || 1));
@@ -202,6 +214,8 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
   const timeRef = useRef<HTMLSpanElement>(null);
   const [stage, setStage] = useState<Stage>('preparing');
   const [error, setError] = useState('');
+  /** How many seconds of video are made per second, while frames are made one by one. */
+  const [speed, setSpeed] = useState<number | null>(null);
   const cancelRef = useRef<() => void>(() => {});
   // The settings the recording starts with: later changes do not restart it.
   const settingsRef = useRef(settings);
@@ -212,6 +226,7 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
   useEffect(() => {
     let live = true;
     const engine = getEngine();
+    const frames = plan.kind === 'frames';
     const ctrl = new PlayController(
       engine,
       buffer,
@@ -226,24 +241,15 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
     );
     const out = outRef.current!;
     const g = out.getContext('2d', { alpha: false })!;
-    let stageFrame: ImageBitmap | null = null;
-    if (video.stage)
-      ctrl.captureStage((f) => {
-        stageFrame?.close();
-        stageFrame = f;
-      });
-    // The song, at full level, for the recording (the player still hears it at their own volume).
-    const sound = video.music ? engine.ctx.createMediaStreamDestination() : null;
-    if (sound) engine.tap.connect(sound);
-    const recorder = new VideoRecorder(out, format, video.fps, videoBitrate(video), sound?.stream);
     const night = g.createLinearGradient(0, 0, 0, height);
     night.addColorStop(0, '#1a0f4c');
     night.addColorStop(1, '#05030f');
     const scoreLabel = `${PART_LABEL[chart.part]} score`;
-    let endAt = 0;
+    const length = Math.max(chart.duration, buffer.duration);
     let shownSecond = -1;
 
-    ctrl.onFrame = (t) => {
+    /** Lays one frame of the video: the stage, the highway, the HUD. `now`: the clock it was drawn on, ms. */
+    const compose = (t: number, stageFrame: ImageBitmap | null, now: number) => {
       g.fillStyle = video.stage ? '#05030f' : night;
       g.fillRect(0, 0, width, height);
       if (stageFrame) g.drawImage(stageFrame, 0, 0, width, height);
@@ -270,32 +276,26 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
           overdriveActive: s.overdriveActive,
           stars: s.progressStars,
           starP: s.nextStarProgress,
-          feedback: fb ? { ...fb, age: (performance.now() - fb.at) / 1000 } : null,
+          feedback: fb ? { ...fb, age: (now - fb.at) / 1000 } : null,
           deck: layout ? { x: layout.x * k, y: layout.y * k, foot: layout.foot * k, width: layout.width * k } : null,
         });
       }
-      const p = Math.max(0, Math.min(1, (t - REPLAY_START) / (chart.duration - REPLAY_START)));
+      const p = Math.max(0, Math.min(1, (t - REPLAY_START) / (length + TAIL - REPLAY_START)));
       barRef.current?.style.setProperty('width', `${(p * 100).toFixed(2)}%`);
       const sec = Math.floor(Math.max(0, Math.min(t, chart.duration)));
       if (sec !== shownSecond && timeRef.current) {
         shownSecond = sec;
         timeRef.current.textContent = `${clock(Math.min(t, chart.duration))} / ${clock(chart.duration)}`;
       }
-      if (endAt && performance.now() >= endAt) void finish();
-    };
-    ctrl.onPhase = (p) => {
-      if (p === 'finished' && !endAt) endAt = performance.now() + TAIL * 1000;
     };
 
     let finished = false;
-    const finish = async () => {
-      if (finished) return;
-      finished = true;
-      ctrl.onFrame = null;
+    /** Writes the finished file where the player chose. */
+    const save = async (file: () => Promise<Blob>) => {
       setStage('saving');
       try {
-        const file = await recorder.stop();
-        await target.write(file);
+        const blob = await file();
+        await target.write(blob);
         await target.close();
         if (live) setStage('saved');
       } catch (e) {
@@ -305,56 +305,136 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
         setStage('failed');
       }
     };
+    const failed = (e: unknown) => {
+      if (!live || finished) return;
+      finished = true;
+      void target.abort().catch(() => {});
+      setError((e as Error).message);
+      setStage('failed');
+    };
+
+    let stopLive = () => {};
+    let cancelWork: () => void = () => {};
     cancelRef.current = () => {
       if (finished) return doneRef.current();
       finished = true;
-      recorder.cancel();
+      cancelWork();
       void target.abort().catch(() => {});
       doneRef.current();
     };
 
-    // A hidden window draws nothing: the replay and the recording wait for it together.
-    const hidden = () => {
-      if (finished || !recorder) return;
-      if (document.hidden) {
-        ctrl.pause();
-        recorder.pause();
-        setStage((s) => (s === 'recording' ? 'paused' : s));
-      } else if (ctrl.currentPhase === 'paused') {
-        recorder.resume();
-        void ctrl.resume();
-        setStage((s) => (s === 'paused' ? 'recording' : s));
-      }
-    };
-    document.addEventListener('visibilitychange', hidden);
-
-    void (async () => {
-      // The HUD's face must be loaded before the first frame is drawn with it.
-      await document.fonts?.load(`italic 900 32px "Archivo Variable"`).catch(() => undefined);
-      await ctrl.ready;
-      if (!live) return;
-      recorder.start();
-      setStage('recording');
-      await ctrl.start();
-    })().catch((e) => {
-      if (!live) return;
-      setError((e as Error).message);
-      setStage('failed');
-    });
+    if (frames) {
+      // Frame by frame: nothing plays; every frame is drawn on the video's clock and encoded as
+      // soon as it is drawn, as fast as this device can.
+      let encoder: FrameEncoder | null = null;
+      cancelWork = () => void encoder?.cancel().catch(() => {});
+      void (async () => {
+        await document.fonts?.load(`italic 900 32px "Archivo Variable"`).catch(() => undefined);
+        await ctrl.ready;
+        if (!live || finished) return;
+        encoder = await startFrameEncoder(out, plan, video, video.music ? { buffer, leadIn: -REPLAY_START } : null);
+        if (!live || finished) return void encoder.cancel();
+        const clock0 = performance.now();
+        const step = 1000 / video.fps;
+        ctrl.beginFrames(clock0);
+        setStage('recording');
+        const began = performance.now();
+        let over = false;
+        let endAt = Number.POSITIVE_INFINITY;
+        ctrl.onPhase = (p) => {
+          if (p === 'finished') over = true;
+        };
+        const total = Math.ceil((length + 0.5 + TAIL - REPLAY_START) * video.fps);
+        for (let i = 0; i < total && !finished; i++) {
+          const t = REPLAY_START + i / video.fps;
+          const now = clock0 + i * step;
+          await ctrl.renderFrame(t, now, (picture) => {
+            compose(t, picture, now);
+            picture?.close();
+          });
+          if (finished || !live) return;
+          await encoder.frame(i);
+          if (i % 15 === 0) {
+            const made = (i + 1) / video.fps;
+            const spent = (performance.now() - began) / 1000;
+            setSpeed(spent > 0.5 ? made / spent : null);
+          }
+          // Once the finale has had its seconds, the video ends.
+          if (over && endAt === Number.POSITIVE_INFINITY) endAt = t;
+          if (t - endAt >= TAIL) break;
+        }
+        if (finished || !live) return;
+        finished = true;
+        await save(() => encoder!.finish());
+      })().catch(failed);
+    } else {
+      // Live: the replay plays at its own speed with the song, and the canvas is recorded as it is drawn.
+      const format = plan.format;
+      let stageFrame: ImageBitmap | null = null;
+      if (video.stage)
+        ctrl.captureStage((f) => {
+          stageFrame?.close();
+          stageFrame = f;
+        });
+      // The song, at full level, for the recording (the player still hears it at their own volume).
+      const sound = video.music ? engine.ctx.createMediaStreamDestination() : null;
+      if (sound) engine.tap.connect(sound);
+      const recorder = new VideoRecorder(out, format, video.fps, videoBitrate(video), sound?.stream);
+      let endAt = 0;
+      ctrl.onFrame = (t) => {
+        compose(t, stageFrame, performance.now());
+        if (endAt && performance.now() >= endAt && !finished) {
+          finished = true;
+          ctrl.onFrame = null;
+          void save(() => recorder.stop());
+        }
+      };
+      ctrl.onPhase = (p) => {
+        if (p === 'finished' && !endAt) endAt = performance.now() + TAIL * 1000;
+      };
+      cancelWork = () => recorder.cancel();
+      // A hidden window draws nothing: the replay and the recording wait for it together.
+      const hidden = () => {
+        if (finished) return;
+        if (document.hidden) {
+          ctrl.pause();
+          recorder.pause();
+          setStage((s) => (s === 'recording' ? 'paused' : s));
+        } else if (ctrl.currentPhase === 'paused') {
+          recorder.resume();
+          void ctrl.resume();
+          setStage((s) => (s === 'paused' ? 'recording' : s));
+        }
+      };
+      document.addEventListener('visibilitychange', hidden);
+      stopLive = () => {
+        document.removeEventListener('visibilitychange', hidden);
+        if (sound) engine.tap.disconnect(sound);
+        ctrl.captureStage(null);
+        stageFrame?.close();
+      };
+      void (async () => {
+        // The HUD's face must be loaded before the first frame is drawn with it.
+        await document.fonts?.load(`italic 900 32px "Archivo Variable"`).catch(() => undefined);
+        await ctrl.ready;
+        if (!live || finished) return;
+        recorder.start();
+        setStage('recording');
+        await ctrl.start();
+      })().catch(failed);
+    }
 
     return () => {
       live = false;
-      document.removeEventListener('visibilitychange', hidden);
       if (!finished) {
-        recorder.cancel();
+        finished = true;
+        cancelWork();
         void target.abort().catch(() => {});
       }
-      if (sound) engine.tap.disconnect(sound);
-      ctrl.captureStage(null);
-      stageFrame?.close();
+      stopLive();
       ctrl.dispose();
     };
-  }, [buffer, chart, inputs, video, format, target, replay, width, height]);
+  }, [buffer, chart, inputs, video, plan, target, replay, width, height]);
 
   const working = stage === 'preparing' || stage === 'recording' || stage === 'paused' || stage === 'saving';
   useActions(
@@ -365,7 +445,7 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
 
   const status = {
     preparing: 'Getting the stage ready…',
-    recording: 'Recording',
+    recording: plan.kind === 'frames' ? (speed ? `Rendering · ${speed.toFixed(1)}× the song’s speed` : 'Rendering') : 'Recording',
     paused: 'Paused while the game is in the background',
     saving: 'Saving the video…',
     saved: 'Saved',
@@ -413,7 +493,9 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
           {stage === 'failed' && <p className="error">The video could not be made: {error}</p>}
           {working && stage !== 'saving' && (
             <p className="hint">
-              The video is recorded as the replay plays. Keep the game in front until it is done; the song plays along.
+              {plan.kind === 'frames'
+                ? 'Each frame is drawn and encoded as fast as this device can; the song does not play meanwhile.'
+                : 'The video is recorded as the replay plays. Keep the game in front until it is done; the song plays along.'}
             </p>
           )}
           {working ? (

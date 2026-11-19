@@ -55,7 +55,8 @@ import {
 import { newReplayId, type ReplayData, type ReplayMeta } from '../storage/replays';
 import { soundwaveFileName, isSoundwaveFile } from '../storage/soundwaveFile';
 import { chooseSaveTarget, saveSongFile, watchOpenedFiles, type SaveTarget } from '../storage/share';
-import { videoFileName, type VideoExportSettings, type VideoFormat } from '../game/videoExport';
+import { videoFileName, type VideoExportSettings } from '../game/videoExport';
+import type { VideoPlan } from '../game/videoRender';
 import { ExportVideoDialog, VideoExportScreen } from './VideoExport';
 import { readSongPackage, songFile, storeNewSong, storeSongPackage, updateSongMeta } from '../storage/songFile';
 import { ActionBar, useActions } from './actions';
@@ -118,7 +119,7 @@ type View =
       data: ReplayData;
       buffer: AudioBuffer;
       video: VideoExportSettings;
-      format: VideoFormat;
+      plan: VideoPlan;
       target: SaveTarget;
       fileName: string;
       back: View;
@@ -662,24 +663,24 @@ export function App() {
    * Records a replay's video. The save dialog comes first (a browser shows it only straight after
    * a press); the replay is then loaded and recorded behind the wipe.
    */
-  const recordVideo = (meta: ReplayMeta, video: VideoExportSettings, format: VideoFormat) => {
+  const recordVideo = (meta: ReplayMeta, video: VideoExportSettings, plan: VideoPlan) => {
     const fileName = videoFileName(
       meta.title,
       meta.artist,
       `${PART_LABEL[meta.part]} ${DIFFICULTY_LABEL[meta.difficulty]}`,
       meta.date,
-      format.ext,
+      plan.ext,
     );
     // Back to where the export was asked for: a replay starts over, the list stays as it was.
     const back: View = view.name === 'replay' ? { ...view, key: Date.now() } : view;
-    void chooseSaveTarget(fileName, format.ext === 'mp4' ? 'video-mp4' : 'video-webm')
+    void chooseSaveTarget(fileName, plan.ext === 'mp4' ? 'video-mp4' : 'video-webm')
       .then((target) => {
         if (!target) return;
         setExportAsk(null);
         menuPulse('launch');
         void wipeTo(async () => {
           const { data, buffer } = await loadReplay(meta);
-          return { name: 'export', meta, data, buffer, video, format, target, fileName, back, key: Date.now() };
+          return { name: 'export', meta, data, buffer, video, plan, target, fileName, back, key: Date.now() };
         });
       })
       .catch((e) => toast(`The video could not be saved: ${(e as Error).message}`));
@@ -1018,7 +1019,7 @@ export function App() {
         buffer={view.buffer}
         settings={settings}
         video={view.video}
-        format={view.format}
+        plan={view.plan}
         target={view.target}
         fileName={view.fileName}
         onDone={() => setView(view.back)}
@@ -1248,7 +1249,7 @@ export function App() {
           silent={!byId.has(exportAsk.songId)}
           settings={settings.videoExport}
           onChange={(v) => updateSettings({ ...settings, videoExport: v })}
-          onStart={(v, format) => recordVideo(exportAsk, v, format)}
+          onStart={(v, plan) => recordVideo(exportAsk, v, plan)}
           onClose={() => setExportAsk(null)}
         />
       )}
