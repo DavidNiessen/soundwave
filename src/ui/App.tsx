@@ -123,7 +123,8 @@ type View =
   /** Playing together on a server: signing in, the party's lobby and its results. */
   | { name: 'party' }
   /** The server's leaderboards, challenges and shared replays. */
-  | { name: 'boards' }
+  /** `from`: where Back returns to (Play together, unless opened from the main menu). */
+  | { name: 'boards'; from?: 'home' }
   /** The server's library of shared songs. */
   | { name: 'songs' }
   | { name: 'settings'; back: View }
@@ -491,6 +492,8 @@ export function App() {
   inviteRef.current = (text) => {
     const invite = parseInvite(text);
     if (!invite) return;
+    // Following an invite is the choice to play on a server: the first-start card need not ask.
+    if (!settingsRef.current.playModeAsked) updateSettings({ ...settingsRef.current, playMode: 'server', playModeAsked: true });
     void online.useInvite(invite).then(
       () => {
         if (!['play', 'replay', 'export', 'editor'].includes(viewRef.current.name)) setView({ name: 'party' });
@@ -1519,11 +1522,12 @@ export function App() {
           playable={(id) => canPlay(analysisStatus[id])}
           setlist={setSongs_}
           pick={pick}
+          thin={thin}
           settings={settings}
           onWatch={watchRun}
           onPlayChallenge={playChallenge}
           onPlaySet={(ids) => setView({ name: 'lobby', ids, from: 'home' })}
-          onBack={() => setView({ name: 'party' })}
+          onBack={() => setView(view.from === 'home' ? { name: 'home' } : { name: 'party' })}
         />
       );
     } else if (view.name === 'results') {
@@ -1565,7 +1569,7 @@ export function App() {
           onLibrary={() => setView({ name: 'library' })}
           onSet={(ids) => setView({ name: 'lobby', ids, from: 'home' })}
           onTogether={() => setView({ name: 'party' })}
-          onBoards={() => setView({ name: 'boards' })}
+          onBoards={() => setView({ name: 'boards', from: 'home' })}
           together={
             onlineState.party
               ? `In party ${onlineState.party.code}`

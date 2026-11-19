@@ -9,7 +9,8 @@ import { analysisManager } from '../analysis/manager';
 import type { Chart } from '../chart/types';
 import { ReplayPlayback, type ReplayInputs } from '../game/replay';
 import type { Settings } from '../game/settings';
-import type { Pick } from '../game/setlist';
+import { partAmong, songParts, type Pick, type ThinParts } from '../game/setlist';
+import { DIFFICULTIES, PARTS } from '../chart/types';
 import { online } from '../net/client';
 import type { Board, Challenge, RankLine, Weekly } from '../net/protocol';
 import { chartId } from '../net/runs';
@@ -23,6 +24,8 @@ interface Props {
   playable: (id: string) => boolean;
   setlist: SongMeta[];
   pick: Pick;
+  /** Per song, the parts it hardly has: a board opens on a part the song has. */
+  thin: ThinParts;
   settings: Settings;
   onWatch(scoreId: string): void;
   onPlayChallenge(c: Challenge): void;
@@ -33,7 +36,7 @@ interface Props {
 
 type Shared = Awaited<ReturnType<typeof online.sharedRuns>>[number];
 
-export function BoardsScreen({ library, playable, setlist, pick, settings, onWatch, onPlayChallenge, onPlaySet, onBack }: Props) {
+export function BoardsScreen({ library, playable, setlist, pick, thin, settings, onWatch, onPlayChallenge, onPlaySet, onBack }: Props) {
   const s = useSyncExternalStore(online.subscribe, online.snapshot);
   useHints(settings);
   const mod = s.account?.role === 'owner' || s.account?.role === 'moderator';
@@ -47,6 +50,11 @@ export function BoardsScreen({ library, playable, setlist, pick, settings, onWat
   const songs = useMemo(() => library.filter((x) => playable(x.id)), [library, playable]);
   const [songId, setSongId] = useState<string>(() => setlist[0]?.id ?? songs[0]?.id ?? '');
   const song = songs.find((x) => x.id === songId);
+  // The board of the part and difficulty the player plays, or of whichever they choose to look at.
+  const [part, setPart] = useState(pick.part);
+  const [difficulty, setDifficulty] = useState(pick.difficulty);
+  const own = song ? songParts(song.id, thin) : PARTS;
+  const shown: Pick = { part: partAmong(part, own) ?? part, difficulty };
 
   const guard = async <T,>(p: Promise<T>): Promise<T | undefined> => {
     try {
@@ -101,23 +109,49 @@ export function BoardsScreen({ library, playable, setlist, pick, settings, onWat
               <Trophy strokeWidth={ICON_STROKE} aria-hidden /> A song’s board
             </h2>
             {songs.length ? (
-              <label className="meta-field">
-                <span className="dim">
-                  Song · {PART_LABEL[pick.part]} · {DIFFICULTY_LABEL[pick.difficulty]} (your part and difficulty)
-                </span>
-                <select className="boards-select" value={songId} onChange={(e) => setSongId(e.target.value)}>
-                  {songs.map((x) => (
-                    <option key={x.id} value={x.id}>
-                      {x.title}
-                      {x.artist ? ` · ${x.artist}` : ''}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <>
+                <label className="meta-field">
+                  <span className="dim">Song</span>
+                  <select className="boards-select" value={songId} onChange={(e) => setSongId(e.target.value)}>
+                    {songs.map((x) => (
+                      <option key={x.id} value={x.id}>
+                        {x.title}
+                        {x.artist ? ` · ${x.artist}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="boards-pick">
+                  <label className="meta-field">
+                    <span className="dim">Part</span>
+                    <select className="boards-select" value={shown.part} onChange={(e) => setPart(e.target.value as Pick['part'])}>
+                      {own.map((p) => (
+                        <option key={p} value={p}>
+                          {PART_LABEL[p]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="meta-field">
+                    <span className="dim">Difficulty</span>
+                    <select
+                      className="boards-select"
+                      value={difficulty}
+                      onChange={(e) => setDifficulty(e.target.value as Pick['difficulty'])}
+                    >
+                      {DIFFICULTIES.map((d) => (
+                        <option key={d} value={d}>
+                          {DIFFICULTY_LABEL[d]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </>
             ) : (
               <p className="hint">Songs with charts in your library show their boards here.</p>
             )}
-            {song && <SongBoard song={song} pick={pick} mod={mod} onWatch={onWatch} onProblem={setProblem} onChange={refresh} />}
+            {song && <SongBoard song={song} pick={shown} mod={mod} onWatch={onWatch} onProblem={setProblem} onChange={refresh} />}
           </section>
 
           {shared.length > 0 && (

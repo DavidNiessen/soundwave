@@ -36,7 +36,7 @@ import { confirmInput } from '../input/pads';
 import { online, parseInvite, type OnlineState } from '../net/client';
 import type { BoardLine, Member, PartyState, ResultLine, SetSong, SongResults } from '../net/protocol';
 import type { SongMeta } from '../storage/db';
-import { Hint, useActions, useHints } from './actions';
+import { Hint, useActions, useHints, type Action } from './actions';
 import { Cover } from './Cover';
 import { AdminPanel, download, InvitePanel } from './ServerAdmin';
 import { HoldButton } from './HoldButton';
@@ -67,6 +67,13 @@ interface Props {
 
 const useOnline = () => useSyncExternalStore(online.subscribe, online.snapshot);
 
+/**
+ * Back leaves the screen; the party (and the sign-in) stay until left on purpose. Each part of the
+ * screen declares its own actions, Back included: a second declaration from the screen around it
+ * would cover the part's, or be covered by it, depending on which mounted last.
+ */
+const backAction = (run: () => void): Action => ({ id: 'back', label: 'Back', icon: ArrowLeft, kbd: 'Escape', sfx: 'back', run });
+
 export function PartyScreen(props: Props) {
   const s = useOnline();
   const { settings, onBack } = props;
@@ -76,13 +83,15 @@ export function PartyScreen(props: Props) {
   let body: React.ReactNode;
   if (s.status === 'off' || s.status === 'signed-out' || !s.account) {
     body =
-      s.status === 'connecting' || (s.status === 'reconnecting' && !s.account) ? <Waiting s={s} /> : <Connect s={s} settings={settings} />;
-  } else if (!s.party) body = <NoParty s={s} settings={settings} onBoards={props.onBoards} onSongs={props.onSongs} />;
-  else if (s.party.phase === 'results') body = <PartyResults party={s.party} s={s} settings={settings} onStartSong={props.onStartSong} />;
+      s.status === 'connecting' || (s.status === 'reconnecting' && !s.account) ? (
+        <Waiting s={s} onBack={onBack} />
+      ) : (
+        <Connect s={s} settings={settings} onBack={onBack} />
+      );
+  } else if (!s.party) body = <NoParty s={s} settings={settings} onBack={onBack} onBoards={props.onBoards} onSongs={props.onSongs} />;
+  else if (s.party.phase === 'results')
+    body = <PartyResults party={s.party} s={s} settings={settings} onBack={onBack} onStartSong={props.onStartSong} />;
   else body = <Lobby {...props} s={s} party={s.party} />;
-
-  // Back leaves the screen; the party (and the sign-in) stay until left on purpose.
-  useActions([{ id: 'back', label: 'Back', icon: ArrowLeft, kbd: 'Escape', sfx: 'back', run: onBack }]);
 
   return (
     <div className="page party">
@@ -112,7 +121,8 @@ export function PartyScreen(props: Props) {
   );
 }
 
-function Waiting({ s }: { s: OnlineState }) {
+function Waiting({ s, onBack }: { s: OnlineState; onBack(): void }) {
+  useActions([backAction(onBack)]);
   return (
     <div className="party-center">
       <p className="hint">Connecting to {s.server?.replace(/^https?:\/\//, '')}…</p>
@@ -125,7 +135,8 @@ function Waiting({ s }: { s: OnlineState }) {
 
 /* Connecting and signing in --------------------------------------------------------------- */
 
-function Connect({ s }: { s: OnlineState; settings: Settings }) {
+function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): void }) {
+  useActions([backAction(onBack)]);
   const [address, setAddress] = useState(s.server?.replace(/^https?:\/\//, '') ?? '');
   const [how, setHow] = useState<'in' | 'up'>(s.invite ? 'up' : 'in');
   const [name, setName] = useState('');
@@ -298,7 +309,19 @@ function Connect({ s }: { s: OnlineState; settings: Settings }) {
 
 /* Signed in, in no party ------------------------------------------------------------------- */
 
-function NoParty({ s, settings, onBoards, onSongs }: { s: OnlineState; settings: Settings; onBoards(): void; onSongs(): void }) {
+function NoParty({
+  s,
+  settings,
+  onBack,
+  onBoards,
+  onSongs,
+}: {
+  s: OnlineState;
+  settings: Settings;
+  onBack(): void;
+  onBoards(): void;
+  onSongs(): void;
+}) {
   const hints = useHints(settings);
   const [admin, setAdmin] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -316,6 +339,7 @@ function NoParty({ s, settings, onBoards, onSongs }: { s: OnlineState; settings:
   const join = () => code.trim() && online.joinParty(code);
 
   useActions([
+    backAction(onBack),
     {
       id: 'party-create',
       label: 'Start a party',
@@ -458,6 +482,7 @@ function PartyLobby({
   onStartSong,
   onGetSong,
   settings,
+  onBack,
   onSettings,
   s,
   party,
@@ -499,6 +524,7 @@ function PartyLobby({
   const canStart = host && party.phase !== 'playing' && !!nextSong && playable(nextSong.id);
 
   useActions([
+    backAction(onBack),
     { id: 'party-ready', label: me.ready ? 'Not ready' : 'Ready', icon: Check, ...keysOf('party.ready'), primary: !host, run: toggleReady },
     { id: 'party-part', label: 'Next part', icon: PART_ICON[me.part], ...keysOf('party.part'), bar: false, run: nextPart },
     { id: 'party-difficulty', label: 'Next difficulty', icon: Gauge, ...keysOf('party.difficulty'), bar: false, run: nextDifficulty },
@@ -768,11 +794,13 @@ function PartyResults({
   party,
   s,
   settings,
+  onBack,
   onStartSong,
 }: {
   party: PartyState;
   s: OnlineState;
   settings: Settings;
+  onBack(): void;
   onStartSong(i: number): void;
 }) {
   const hints = useHints(settings);
@@ -784,6 +812,7 @@ function PartyResults({
   const lobby = () => online.backToLobby();
 
   useActions([
+    backAction(onBack),
     ...(host && !last
       ? [{ id: 'party-next', label: 'Next song', icon: SkipForward, ...keysOf('party.next'), primary: true, run: next }]
       : []),

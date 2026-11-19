@@ -6619,6 +6619,66 @@ a.btn {
   flex-wrap: wrap;
   gap: 0.6rem;
 }
+/* Leaderboards and shared songs: lists of lines with a rank or a title, a number and buttons. */
+.boards-pick {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+.boards-select {
+  min-height: var(--target);
+  padding: 0 0.7rem;
+  border: 0;
+  border-radius: var(--r-m);
+  background: var(--well);
+  color: var(--ink);
+  color-scheme: dark;
+  font-weight: 700;
+}
+.boards-select:focus-visible {
+  outline: 2px solid var(--mint);
+  outline-offset: 2px;
+}
+.boards-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.boards-line {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  min-height: var(--target);
+  padding: 0.35rem 0.5rem 0.35rem 0.9rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+}
+.boards-line .party-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.boards-line .num {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+.boards-line .rank {
+  min-width: 1.4rem;
+  color: var(--ink-3);
+}
+.boards-line.me {
+  outline: 2px solid var(--pink);
+  outline-offset: -2px;
+}
+.won {
+  color: var(--mint);
+  font-weight: 700;
+}
 .party-note {
   grid-column: 1 / -1;
   max-width: 60ch;
