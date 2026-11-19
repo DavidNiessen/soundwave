@@ -1,0 +1,25 @@
+{
+  "name": "soundwave-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Soundwave server: accounts and parties for playing together",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "soundwave-server": "src/main.ts"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/ws": "^8.18.1"
+  },
+  "engines": {
+    "node": ">=24.7"
+  }
+}

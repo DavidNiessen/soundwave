@@ -1,0 +1,5 @@
+# The server's image (server/Dockerfile) needs only the server and the protocol it shares with the game.
+*
+!server/package.json
+!server/src
+!src/net/protocol.ts

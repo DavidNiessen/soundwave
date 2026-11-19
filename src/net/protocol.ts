@@ -1,0 +1,202 @@
+/**
+ * What the game and a Soundwave server say to each other (docs/specs/online-play.md, section 6).
+ * Shared by both: the server (server/) imports this file as it is, so it holds only types and
+ * plain constants, nothing that needs the game's code or a bundler.
+ *
+ * Over HTTP, the server answers JSON (accounts, invites, moderation). Over one WebSocket per
+ * player, the messages below, each a JSON object with a `type`.
+ */
+
+/** Raised whenever a message changes in a way an older game or server would misread. */
+export const PROTOCOL_VERSION = 1;
+/** The most players in one party. */
+export const PARTY_MAX = 16;
+/** How long a dropped player keeps their place in a party, ms. */
+export const RECONNECT_GRACE_MS = 30_000;
+/** How far ahead of now a song is started, so every player has it loaded and scheduled, ms. */
+export const START_LEAD_MS = 5_000;
+/** How often a player sends their score during a song, and the server the board, ms. */
+export const BOARD_INTERVAL_MS = 100;
+/** The longest a message may be, in bytes (a set's charts are the biggest). */
+export const MESSAGE_MAX = 4 * 1024 * 1024;
+/** Song ids are SHA-256 hashes of the audio, as hex. */
+export const SONG_ID = /^[0-9a-f]{64}$/;
+
+export type Part = 'vocals' | 'lead' | 'bass' | 'drums';
+export type Difficulty = 'easy' | 'medium' | 'hard' | 'expert';
+export type Role = 'owner' | 'moderator' | 'player';
+/** Who may make an account on a server. */
+export type JoinMode = 'public' | 'password' | 'invite' | 'key';
+
+/* HTTP ------------------------------------------------------------------------------------- */
+
+/** `GET /info`: what a server is, for the server list and before signing in. */
+export interface ServerInfo {
+  name: string;
+  description: string;
+  protocol: number;
+  mode: JoinMode;
+  online: number;
+}
+
+export interface Account {
+  id: string;
+  name: string;
+  role: Role;
+}
+
+/** What signing up or in, or refreshing, gives back. */
+export interface Session {
+  user: Account;
+  /** Short-lived: sent with every request and in `hello`. */
+  access: string;
+  /** Long-lived and single-use: trades for a new pair when `access` runs out. */
+  refresh: string;
+}
+
+/** `POST /auth/signup`. Which of the extra fields are needed depends on the server's mode. */
+export interface SignUp {
+  name: string;
+  password: string;
+  /** The server's password (mode `password`). */
+  serverPassword?: string;
+  /** An invite's code (mode `invite`), or the owner's set-up code. */
+  invite?: string;
+  /** A key file's token (mode `key`). */
+  key?: string;
+}
+
+/** A `.soundwave-key` file: opening it connects to the server and signs up in one step. */
+export interface KeyFile {
+  server: string;
+  name: string;
+  token: string;
+  expires?: number;
+}
+
+/** A failed request's body. */
+export interface ApiError {
+  error: string;
+}
+
+/* The party's state ------------------------------------------------------------------------ */
+
+/** A song in a party's set. Players match it to their own library by its id. */
+export interface SetSong {
+  id: string;
+  title: string;
+  artist: string;
+  duration: number;
+}
+
+export interface Member {
+  id: string;
+  name: string;
+  part: Part;
+  difficulty: Difficulty;
+  ready: boolean;
+  /** The set's songs this player has (by id): the others they sit out. */
+  have: string[];
+  /** False while the player's connection is gone (they have RECONNECT_GRACE_MS to come back). */
+  connected: boolean;
+}
+
+/** How one player's song went: the score of record, judged again from their inputs. */
+export interface SongScore {
+  score: number;
+  stars: number;
+  accuracy: number;
+  bestStreak: number;
+  fullCombo: boolean;
+}
+
+/** One player's line in a song's results. */
+export interface ResultLine {
+  id: string;
+  name: string;
+  /** Null: they sat the song out, left it, or never finished. */
+  result: SongScore | null;
+  /** Why there is no result. */
+  missing?: 'sat-out' | 'left';
+}
+
+export interface SongResults {
+  songIndex: number;
+  lines: ResultLine[];
+}
+
+export type PartyPhase = 'lobby' | 'playing' | 'results';
+
+export interface PartyState {
+  code: string;
+  host: string;
+  members: Member[];
+  set: SetSong[];
+  phase: PartyPhase;
+  /** The song being played, or whose results are showing; -1 before the first. */
+  songIndex: number;
+  /** Every finished song's results, by song index. */
+  results: SongResults[];
+}
+
+/** A chart as it is sent: the same shape as the game's own (src/chart/types.ts). */
+export interface WireChart {
+  part: Part;
+  difficulty: Difficulty;
+  lanes: number;
+  notes: { t: number; lane: number; dur: number; phrase: number; release?: boolean }[];
+  beats: number[];
+  downbeats: number[];
+  secondsPerBeat: number;
+  duration: number;
+}
+
+/** A player's line on the board during a song. */
+export interface BoardLine {
+  id: string;
+  score: number;
+  streak: number;
+  stars: number;
+  /** Finished the song (their final score is in). */
+  done?: boolean;
+  /** Not playing this song (no song, or left it). */
+  out?: boolean;
+}
+
+/* WebSocket messages ------------------------------------------------------------------------ */
+
+export type ClientMessage =
+  | { type: 'hello'; protocol: number; token: string }
+  /** Clock sync: `t` is the client's own clock, sent back as it was. */
+  | { type: 'ping'; t: number }
+  | { type: 'party-create' }
+  | { type: 'party-join'; code: string }
+  | { type: 'party-leave' }
+  /** The host picks the set. */
+  | { type: 'set'; songs: SetSong[] }
+  /** A player's own choices, and which of the set's songs they have. */
+  | { type: 'ready'; part: Part; difficulty: Difficulty; ready: boolean; have: string[] }
+  /**
+   * The host starts a song: the charts in play, and which one each player gets (by index into
+   * `charts`; a player missing from `assign` sits the song out). Everyone plays the host's charts.
+   */
+  | { type: 'start'; songIndex: number; charts: WireChart[]; assign: Record<string, number> }
+  | { type: 'progress'; songIndex: number; score: number; streak: number; stars: number }
+  | { type: 'finish'; songIndex: number; result: SongScore }
+  /** The player left the song early. */
+  | { type: 'quit'; songIndex: number }
+  /** The host takes everyone back to the lobby (to pick another set). */
+  | { type: 'lobby' }
+  /** The host removes a player from the party. */
+  | { type: 'kick'; id: string };
+
+export type ServerMessage =
+  | { type: 'welcome'; you: Account; server: string; protocol: number }
+  | { type: 'pong'; t: number; serverT: number }
+  | { type: 'party'; party: PartyState | null }
+  /** `at`: the server's clock (see `pong`) when the song's first moment plays. */
+  | { type: 'start'; songIndex: number; at: number; chart: WireChart | null }
+  | { type: 'board'; songIndex: number; lines: BoardLine[] }
+  | { type: 'error'; message: string }
+  /** The server closes the connection, and says why. */
+  | { type: 'bye'; reason: string };
