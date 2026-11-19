@@ -13,7 +13,7 @@
 import type { PadInput } from './pads';
 
 /** Where a shortcut works. */
-export type Area = 'menus' | 'home' | 'library' | 'lobby' | 'results' | 'settings' | 'song' | 'replay' | 'editor';
+export type Area = 'menus' | 'home' | 'library' | 'lobby' | 'results' | 'party' | 'settings' | 'song' | 'replay' | 'editor';
 
 export const AREAS: { id: Area; label: string }[] = [
   { id: 'menus', label: 'Every menu' },
@@ -21,6 +21,7 @@ export const AREAS: { id: Area; label: string }[] = [
   { id: 'library', label: 'Music library' },
   { id: 'lobby', label: 'Before a song' },
   { id: 'results', label: 'After a song' },
+  { id: 'party', label: 'Playing together' },
   { id: 'settings', label: 'Settings' },
   { id: 'song', label: 'Playing a song' },
   { id: 'replay', label: 'Watching a replay' },
@@ -64,6 +65,7 @@ export const COMMANDS: Command[] = [
     { id: 'home.search', label: 'Search tracks', key: 'Slash' },
     { id: 'home.update', label: 'Update the game', key: 'KeyU' },
     { id: 'home.install', label: 'Get the app', key: 'KeyI' },
+    { id: 'home.together', label: 'Play together', key: 'KeyT', pad: 'b8' },
     { id: 'home.replayOptions', label: 'Replay options', key: 'KeyO', pad: 'b2', mouse: 'm1' },
     { id: 'home.replayKeep', label: 'Keep a replay', key: 'KeyK' },
     { id: 'home.replayDelete', label: 'Delete a replay', key: 'Delete', key2: 'Backspace' },
@@ -93,6 +95,20 @@ export const COMMANDS: Command[] = [
     { id: 'results.part2', label: 'Next song: lead', key: 'Digit2' },
     { id: 'results.part3', label: 'Next song: bass', key: 'Digit3' },
     { id: 'results.part4', label: 'Next song: drums', key: 'Digit4' },
+  ]),
+  ...cmd('party', [
+    { id: 'party.create', label: 'Start a party', key: 'KeyC', pad: 'b3' },
+    { id: 'party.join', label: 'Join a party', key: 'KeyJ', pad: 'b2' },
+    { id: 'party.keyFile', label: 'Open a key file', key: 'KeyK' },
+    { id: 'party.signOut', label: 'Sign out', key: 'KeyO' },
+    { id: 'party.export', label: 'Save my data from the server', key: 'KeyD' },
+    { id: 'party.ready', label: 'Ready, or not', key: 'KeyR', pad: 'b9' },
+    { id: 'party.setlist', label: 'Play my setlist', key: 'KeyU', pad: 'b8' },
+    { id: 'party.part', label: 'Next part', key: 'KeyP', pad: 'b3' },
+    { id: 'party.difficulty', label: 'Next difficulty', key: 'KeyF', pad: 'b2' },
+    { id: 'party.next', label: 'Next song', key: 'KeyN', pad: 'b9' },
+    { id: 'party.lobby', label: 'Back to the party lobby', key: 'KeyB', pad: 'b8' },
+    { id: 'party.leave', label: 'Leave the party', key: 'KeyL' },
   ]),
   ...cmd('settings', [{ id: 'settings.reset', label: 'Restore defaults', key: 'KeyR', pad: 'b3' }]),
   ...cmd('song', [{ id: 'song.pause', label: 'Pause', key: 'KeyP', pad: 'b9' }]),

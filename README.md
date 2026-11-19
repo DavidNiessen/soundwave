@@ -63,6 +63,14 @@ While a replay plays: `Space` (the top face button, or Start) pauses and plays, 
 
 A replay can be kept (`K`, or from its options with `O` or the left face button): kept replays are never removed to make room and do not count towards the number kept. Settings → Gameplay switches recording off, sets how many replays are kept and deletes them all. A library backup carries every saved replay.
 
+## Playing together
+
+**Play together** on the Play tab (`T`, Back/View on a controller) plays a set with friends on a Soundwave server: anyone can run one ([server/README.md](server/README.md)). Connect with the server's address, or open a key file its owner sent, and sign in or make an account. Then start a party, or join one with its code (like `KITE-42`).
+
+In the party's lobby the host plays their setlist (`U`), and everyone picks their own part (`P`) and difficulty (`F`) and says they are ready (`R`). Songs are matched by their audio, so a song you don't have shows as Missing and you sit it out. When the host starts a song (hold Enter), every player gets the host's chart for their part, so everyone plays the same notes, and the song starts at the same moment for all: each game measures its clock against the server's. Your hits are judged on your own machine, so the connection's delay never touches your timing; only scores travel, and a board beside the highway shows everyone's ten times a second. After each song everyone sees the same results, and after the last one, the set's standings with its winner.
+
+Pausing pauses only your own song. A dropped connection is tried again in the background: your place in the party is kept for 30 seconds, and a score you finish meanwhile is sent once you are back. Nothing is sent anywhere until you connect to a server; it keeps your name, a hash of your password and what its features need, and **Save my data** downloads all of it.
+
 ## Track editor
 
 The **Edit** tab of the main menu is the list of your tracks, with the highlighted track's sixteen charts beside it (which are yours, which are the game's). Pick a track to open it in the editor, or bring in a new one with **New track** and choose how it gets its first charts:

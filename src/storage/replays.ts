@@ -174,7 +174,8 @@ function cleanMeta(raw: unknown): ReplayMeta | null {
   };
 }
 
-function cleanChart(raw: unknown): Chart | null {
+/** A chart from outside (a replay file, a party's host), checked note by note; null when it is not one. */
+export function cleanChart(raw: unknown): Chart | null {
   if (!raw || typeof raw !== 'object') return null;
   const c = raw as Record<string, unknown>;
   if (!PARTS.includes(c.part as Part) || !DIFFICULTIES.includes(c.difficulty as Difficulty)) return null;

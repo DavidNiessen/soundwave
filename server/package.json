@@ -10,7 +10,7 @@
   },
   "scripts": {
     "start": "node src/main.ts",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p . && tsc -p tests"
   },
   "dependencies": {
     "ws": "^8.18.3"

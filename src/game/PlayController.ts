@@ -424,6 +424,24 @@ export class PlayController {
     this.loop();
   }
 
+  /**
+   * Starts a party's song so that its countdown begins at `at` (performance.now ms): every player
+   * hears the first note at the same moment. A player whose song loaded late starts as far in as
+   * the others already are.
+   */
+  async startTogether(at: number) {
+    if (this.playback) return this.start();
+    if (this.engine.ctx.state !== 'running') await this.engine.ctx.resume();
+    const wait = (at - performance.now()) / 1000;
+    const from = -LEAD_IN + Math.max(0, -wait);
+    this.startAt = 0;
+    this.lastBeat = -1;
+    while (this.lastBeat + 1 < this.chart.beats.length && this.chart.beats[this.lastBeat + 1] <= from) this.lastBeat++;
+    this.setPhase(from < 0 ? 'countdown' : 'playing');
+    await this.engine.play(from, Math.max(0.02, wait));
+    this.loop();
+  }
+
   pause() {
     if (this.phase !== 'playing' && this.phase !== 'countdown') return;
     this.engine.pause(this.now());

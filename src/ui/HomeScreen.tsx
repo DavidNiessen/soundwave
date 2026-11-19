@@ -13,6 +13,7 @@ import {
   Search,
   Settings as SettingsIcon,
   Upload,
+  Users,
   Download,
   MonitorDown,
   type LucideIcon,
@@ -52,6 +53,10 @@ interface Props {
   onLibrary(): void;
   onSet(ids: string[]): void;
   onAdd(): void;
+  /** Opens playing together (on a server). */
+  onTogether(): void;
+  /** Where the player stands online, for the Play together tile ("In party KITE-42"); absent offline. */
+  together?: string;
   /** What the Edit tab's list of tracks needs to bring songs in and open them in the editor. */
   tracks: Omit<TrackPickerProps, 'songs' | 'status' | 'settings'>;
   /** The saved replays, newest first, and what can be done with them (the Replays tab). */
@@ -98,6 +103,8 @@ export function HomeScreen({
   onLibrary,
   onSet,
   onAdd,
+  onTogether,
+  together,
   tracks,
   replays,
   replayActions,
@@ -211,6 +218,9 @@ export function HomeScreen({
             },
             { id: 'new', label: 'New track', icon: FilePlus2, ...keysOf('home.new'), primary: true, run: () => setPicks((n) => n + 1) },
           ]),
+    ...(tab === 'play'
+      ? [{ id: 'together', label: 'Play together', icon: Users, ...keysOf('home.together'), bar: false, run: onTogether }]
+      : []),
     { id: 'settings', label: 'Settings', icon: SettingsIcon, ...keysOf('home.settings'), run: onSettings },
     ...(update
       ? [{ id: 'update', label: `Update to ${update}`, icon: Download, ...keysOf('home.update'), bar: false, run: onUpdate }]
@@ -330,48 +340,65 @@ export function HomeScreen({
                   </span>
                 </span>
               </button>
-              {(sets.length > 0 || empty) && (
-                <div className="tile-stack">
-                  {sets.map((set, i) => {
-                    const list = set.songs.map((id) => byId.get(id)!).filter(Boolean);
-                    return (
-                      <button
-                        type="button"
-                        key={set.id}
-                        className={`tile ${late(set.id)}`}
-                        style={{ ['--i' as string]: i + 1 }}
-                        onClick={() => onSet(set.songs)}
-                      >
-                        <Mosaic songs={list} />
-                        <span className="tile-text">
-                          <span className="tile-title">{set.title}</span>
-                          <span className="tile-cap">{set.caption}</span>
-                          <span className="tile-meta">{summary(list)}</span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                  {empty && (
+              <div className="tile-stack">
+                {/* Playing together, on a Soundwave server: a set with friends, at the same moment. */}
+                <button
+                  type="button"
+                  className="tile together"
+                  data-action="together"
+                  style={{ ['--i' as string]: 1 }}
+                  onClick={onTogether}
+                >
+                  <span className="mosaic blank" aria-hidden>
+                    <Users strokeWidth={ICON_STROKE} />
+                  </span>
+                  <span className="tile-text">
+                    <span className="tile-title">
+                      Play together
+                      <Hint {...keysOf('home.together')} mode={mode} style={style} />
+                    </span>
+                    <span className="tile-cap">{together ?? 'Play a set with friends on a Soundwave server, all at the same moment.'}</span>
+                  </span>
+                </button>
+                {sets.map((set, i) => {
+                  const list = set.songs.map((id) => byId.get(id)!).filter(Boolean);
+                  return (
                     <button
                       type="button"
-                      className={`tile add ${late('add')}`}
-                      style={{ ['--i' as string]: sets.length + 1 }}
-                      onClick={onAdd}
+                      key={set.id}
+                      className={`tile ${late(set.id)}`}
+                      style={{ ['--i' as string]: i + 2 }}
+                      onClick={() => onSet(set.songs)}
                     >
-                      <span className="mosaic blank dashed" aria-hidden>
-                        <Plus strokeWidth={ICON_STROKE} />
-                      </span>
+                      <Mosaic songs={list} />
                       <span className="tile-text">
-                        <span className="tile-title">Add your music</span>
-                        <span className="tile-cap">
-                          {touch ? 'Pick files from this device.' : 'Drop files anywhere or browse.'} MP3, WAV, FLAC, OGG and M4A. Each song
-                          takes about a minute to turn into charts.
-                        </span>
+                        <span className="tile-title">{set.title}</span>
+                        <span className="tile-cap">{set.caption}</span>
+                        <span className="tile-meta">{summary(list)}</span>
                       </span>
                     </button>
-                  )}
-                </div>
-              )}
+                  );
+                })}
+                {empty && (
+                  <button
+                    type="button"
+                    className={`tile add ${late('add')}`}
+                    style={{ ['--i' as string]: sets.length + 2 }}
+                    onClick={onAdd}
+                  >
+                    <span className="mosaic blank dashed" aria-hidden>
+                      <Plus strokeWidth={ICON_STROKE} />
+                    </span>
+                    <span className="tile-text">
+                      <span className="tile-title">Add your music</span>
+                      <span className="tile-cap">
+                        {touch ? 'Pick files from this device.' : 'Drop files anywhere or browse.'} MP3, WAV, FLAC, OGG and M4A. Each song
+                        takes about a minute to turn into charts.
+                      </span>
+                    </span>
+                  </button>
+                )}
+              </div>
             </div>
           </>
         ) : (

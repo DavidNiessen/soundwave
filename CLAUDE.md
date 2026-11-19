@@ -16,6 +16,7 @@ pnpm exec vitest run tests/chart.test.ts -t "drum chords"   # one test by name
 pnpm build            # tsc + vite build + scripts/check-dist.mjs (fails on any file over 25 MiB)
 pnpm tauri dev        # desktop app
 pnpm dev:analyze      # offline analysis harness (scripts/dev/analyze.dev.ts; needs local-audio/)
+node server/src/main.ts   # a Soundwave server on port 7420 (server/README.md; Node 24.7+)
 ```
 
 Rust (`src-tauri/`): `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test --lib`.
@@ -35,6 +36,8 @@ Tests synthesize their audio; never add real songs or recordings to the reposito
 **The 3D stage** (`src/render/aurora/`, built from Blender assets in `public/stage/aurora/`) draws in a worker of its own through OffscreenCanvas (`render/stage/StageView.ts` on the page, `stage.worker.ts` + `stageHost.ts` in the worker), so a slow stage frame never holds up the menus or the highway. Where a worker cannot draw (and in the macOS app, which serves the game from `tauri://`), the same host runs on the page. Workers there fetch through the page (`src/app/workerFetch.ts`).
 
 **Audio** (`src/audio/`): `AudioEngine` (Web Audio) plays songs; the desktop app can play through its own native output (`audio/native/`, `src-tauri/src/audio_out.rs`). PS5 DualSense haptics are driven natively too (`src-tauri/src/haptics.rs`, cpal; `src/input/rumble.ts`).
+
+**Playing together** (docs/specs/online-play.md): `server/` is the Soundwave server, a pnpm workspace package of TypeScript that Node runs as it is (type stripping: no enums, no parameter properties, imports with `.ts`). It has accounts (`accounts.ts`, SQLite through `node:sqlite`, Argon2id from `node:crypto`), the HTTP API and one WebSocket per player (`app.ts`), and parties (`parties.ts`, pure: it is handed a send function and a clock). `src/net/protocol.ts` holds the messages and is imported by both sides, so it stays types and constants only. In the game, `src/net/client.ts` (`online`) signs in, keeps the socket and syncs the clock; `ui/PartyScreen.tsx` is the lobby and results, and App makes the host's charts and follows a party's `start` into `PlayController.startTogether`. A party's song is judged locally and its score of record is the re-judged one, as for any song.
 
 **UI** (`src/ui/`, React): `App.tsx` holds the views and the set flow. `actions.tsx` provides the action bar and per-screen actions (`useActions`), `input/menuNav.ts` the directional/controller navigation, `input/bindings.ts` every rebindable command (keyboard, controller, mouse). Styles are one stylesheet, `ui/styles.css`, with design tokens at the top.
 

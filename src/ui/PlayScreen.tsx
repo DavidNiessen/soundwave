@@ -15,6 +15,7 @@ import { useActions } from './actions';
 import { Dialog } from './Dialog';
 import { hudRefs, PlayHud } from './PlayHud';
 import { ICON_STROKE } from './icons';
+import { BOARD_INTERVAL_MS } from '../net/protocol';
 
 interface Props {
   title: string;
@@ -35,6 +36,12 @@ interface Props {
   onSettings(): void;
   settingsOpen: boolean;
   onQuit(): void;
+  /**
+   * Played with a party: the song starts at the party's moment `at` (performance.now ms), the
+   * score goes out ten times a second, and the party's board stands beside the highway. Nobody
+   * can restart or skip a song the others are playing.
+   */
+  together?: { at: number; board: React.ReactNode; onProgress(score: number, streak: number, stars: number): void };
 }
 
 /** What the pause menu asks about before it throws the run away. */
@@ -54,7 +61,10 @@ export function PlayScreen({
   onSettings,
   settingsOpen,
   onQuit,
+  together,
 }: Props) {
+  const togetherRef = useRef(together);
+  togetherRef.current = together;
   // The song is set up with the settings it starts with; the ones that can change mid-song are
   // handed over as they change (see applySettings), so opening the settings never restarts it.
   const settingsRef = useRef(settings);
@@ -115,13 +125,22 @@ export function PlayScreen({
       finishTimer = window.setTimeout(() => finishRef.current(r, inputs), FINALE_SECONDS * 1000);
     };
     ctrlRef.current = ctrl;
-    void ctrl.start(startAt);
+    const party = togetherRef.current;
+    void (party ? ctrl.startTogether(party.at) : ctrl.start(startAt));
+    // The party sees this player's score as it goes, ten times a second.
+    const progress = party
+      ? window.setInterval(() => {
+          const s = ctrl.session;
+          togetherRef.current?.onProgress(Math.round(s.score), s.streak, s.progressStars);
+        }, BOARD_INTERVAL_MS)
+      : 0;
     // A song that loses the window (a call, another app) pauses instead of running on unseen.
     const hidden = () => document.hidden && ctrl.pause();
     document.addEventListener('visibilitychange', hidden);
     return () => {
       document.removeEventListener('visibilitychange', hidden);
       clearTimeout(finishTimer);
+      clearInterval(progress);
       ctrl.dispose();
       ctrlRef.current = null;
       showSong(null);
@@ -194,13 +213,19 @@ export function PlayScreen({
       yes: 'Restart song',
     },
     skip: { title: 'Skip this song?', hint: 'It gets no score, and the next song in the set starts.', yes: 'Skip to next song' },
-    leave: set
+    leave: together
       ? {
-          title: 'Leave the set?',
-          hint: 'The set ends here and this song gets no score. The songs you finished keep theirs.',
-          yes: 'Leave the set',
+          title: 'Leave this song?',
+          hint: 'You get no score for it and go back to the party, which plays on. You can join the next song.',
+          yes: 'Leave the song',
         }
-      : { title: 'Leave the song?', hint: 'This run and its score are thrown away.', yes: 'Leave the song' },
+      : set
+        ? {
+            title: 'Leave the set?',
+            hint: 'The set ends here and this song gets no score. The songs you finished keep theirs.',
+            yes: 'Leave the set',
+          }
+        : { title: 'Leave the song?', hint: 'This run and its score are thrown away.', yes: 'Leave the song' },
   }[ask ?? 'restart'];
   const confirm = () => {
     const what = ask;
@@ -231,6 +256,7 @@ export function PlayScreen({
           onPause={() => ctrlRef.current?.pause()}
         />
       </div>
+      {together?.board}
       {phase === 'countdown' && count > 0 && (
         <div className="countdown" key={count}>
           {count}
@@ -245,6 +271,7 @@ export function PlayScreen({
               {title}
               {total > 1 && ` · song ${position} of ${total}`}
             </p>
+            {together && <p className="hint">The song plays on for the rest of the party.</p>}
             <button
               type="button"
               className="btn primary wide"
@@ -255,10 +282,13 @@ export function PlayScreen({
               <Play strokeWidth={ICON_STROKE} aria-hidden />
               Resume
             </button>
-            <button type="button" className="btn wide" onClick={() => setAsk('restart')}>
-              <RotateCcw strokeWidth={ICON_STROKE} aria-hidden />
-              Restart song
-            </button>
+            {/* The party plays on: a song is not restarted for one player. */}
+            {!together && (
+              <button type="button" className="btn wide" onClick={() => setAsk('restart')}>
+                <RotateCcw strokeWidth={ICON_STROKE} aria-hidden />
+                Restart song
+              </button>
+            )}
             <button type="button" className="btn wide" data-opens="settings" onClick={onSettings}>
               <SettingsIcon strokeWidth={ICON_STROKE} aria-hidden />
               Settings
@@ -271,7 +301,7 @@ export function PlayScreen({
             )}
             <button type="button" className="btn wide" data-sfx="back" onClick={() => setAsk('leave')}>
               <LogOut strokeWidth={ICON_STROKE} aria-hidden />
-              {total > 1 ? 'Leave the set' : 'Leave the song'}
+              {total > 1 && !together ? 'Leave the set' : 'Leave the song'}
             </button>
           </div>
         </div>
