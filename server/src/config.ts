@@ -4,7 +4,7 @@
  */
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import type { JoinMode } from '../../src/net/protocol.ts';
+import type { JoinMode, SongSharing } from '../../src/net/protocol.ts';
 
 export interface Config {
   /** Shown in the game and the server list. */
@@ -29,6 +29,18 @@ export interface Config {
   webGameUrl: string;
   /** Where an invite link sends someone who has neither the app nor a browser that can play. */
   downloadUrl: string;
+  /**
+   * Song sharing: off (the default), charts (everything but the audio, for public servers) or songs
+   * (whole songs). Sharing music can infringe copyright, and the owner answers for what the server
+   * hands out: turning it on is the owner's decision (server/README.md).
+   */
+  songSharing: SongSharing;
+  /** The biggest song file a player can share, MB. */
+  songMaxMb: number;
+  /** How much each player can share in all, MB. */
+  quotaMb: number;
+  /** Covers of shared songs are served to anyone, so the Discord status can show them. */
+  publicCovers: boolean;
 }
 
 const MODES: JoinMode[] = ['public', 'password', 'invite'];
@@ -45,6 +57,10 @@ export const DEFAULTS: Config = {
   trustProxy: false,
   webGameUrl: 'https://soundwave.niessen.dev',
   downloadUrl: 'https://github.com/DavidNiessen/soundwave/releases/latest',
+  songSharing: 'off',
+  songMaxMb: 100,
+  quotaMb: 2000,
+  publicCovers: false,
 };
 
 /** Reads the settings: defaults, then the file, then the environment. */
@@ -69,10 +85,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     ...(env.SOUNDWAVE_PASSWORD ? { password: env.SOUNDWAVE_PASSWORD } : {}),
     ...(env.SOUNDWAVE_PUBLIC_URL ? { publicUrl: env.SOUNDWAVE_PUBLIC_URL } : {}),
     ...(env.SOUNDWAVE_WEB_GAME ? { webGameUrl: env.SOUNDWAVE_WEB_GAME } : {}),
+    ...(env.SOUNDWAVE_SONG_SHARING ? { songSharing: env.SOUNDWAVE_SONG_SHARING as SongSharing } : {}),
+    ...(env.SOUNDWAVE_SONG_MAX_MB ? { songMaxMb: Number(env.SOUNDWAVE_SONG_MAX_MB) } : {}),
+    ...(env.SOUNDWAVE_QUOTA_MB ? { quotaMb: Number(env.SOUNDWAVE_QUOTA_MB) } : {}),
+    ...(env.SOUNDWAVE_PUBLIC_COVERS ? { publicCovers: env.SOUNDWAVE_PUBLIC_COVERS === '1' || env.SOUNDWAVE_PUBLIC_COVERS === 'true' } : {}),
     ...(env.SOUNDWAVE_TRUST_PROXY ? { trustProxy: env.SOUNDWAVE_TRUST_PROXY === '1' || env.SOUNDWAVE_TRUST_PROXY === 'true' } : {}),
   };
   const c: Config = { ...DEFAULTS, ...fromFile, ...fromEnv, ...overrides, dataDir };
   if (!MODES.includes(c.mode)) throw new Error(`mode must be one of ${MODES.join(', ')}, not "${c.mode}".`);
+  if (!['off', 'charts', 'songs'].includes(c.songSharing)) throw new Error('songSharing must be off, charts or songs.');
+  if (!(c.songMaxMb > 0) || !(c.quotaMb > 0)) throw new Error('songMaxMb and quotaMb must be more than 0.');
   if (c.mode === 'password' && !c.password) throw new Error('mode "password" needs a password (SOUNDWAVE_PASSWORD).');
   if (!Number.isInteger(c.port) || c.port < 0 || c.port > 65535) throw new Error(`port must be a number from 0 to 65535.`);
   if (!c.publicUrl) c.publicUrl = `http://localhost:${c.port}`;

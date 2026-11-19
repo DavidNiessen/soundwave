@@ -37,6 +37,28 @@ export interface ServerInfo {
   protocol: number;
   mode: JoinMode;
   online: number;
+  /** Whether players can share songs: not at all, everything but the audio, or whole songs. */
+  sharing: SongSharing;
+  /** Song covers are served to anyone (for the Discord status), not only to players signed in. */
+  publicCovers: boolean;
+}
+
+export type SongSharing = 'off' | 'charts' | 'songs';
+
+/** A song in a server's library. */
+export interface SharedSong {
+  id: string;
+  title: string;
+  artist: string;
+  duration: number;
+  /** Bytes the server keeps of it (0 without the audio). */
+  size: number;
+  /** The whole song can be downloaded; without it, only its charts, for a player with the same audio. */
+  audio: boolean;
+  cover: boolean;
+  /** Who shared it (null once their account is gone). */
+  by: string | null;
+  created: number;
 }
 
 export interface Account {
@@ -190,7 +212,11 @@ export type ClientMessage =
   /** The host takes everyone back to the lobby (to pick another set). */
   | { type: 'lobby' }
   /** The host removes a player from the party. */
-  | { type: 'kick'; id: string };
+  | { type: 'kick'; id: string }
+  /** A player without one of the set's songs asks the host for it (they chose to get it). */
+  | { type: 'request-song'; songId: string }
+  /** The host shared the song to the server's library for that player (or `ok: false`: they won't). */
+  | { type: 'song-sent'; songId: string; to: string; ok: boolean };
 
 export type ServerMessage =
   | { type: 'welcome'; you: Account; server: string; protocol: number }
@@ -201,7 +227,11 @@ export type ServerMessage =
   | { type: 'board'; songIndex: number; lines: BoardLine[] }
   | { type: 'error'; message: string }
   /** The server closes the connection, and says why. */
-  | { type: 'bye'; reason: string };
+  | { type: 'bye'; reason: string }
+  /** To the host: a player asks for one of the set's songs. */
+  | { type: 'song-request'; songId: string; from: string; name: string }
+  /** To that player: the song is in the server's library to download (or the host could not send it). */
+  | { type: 'song-ready'; songId: string; ok: boolean };
 
 /* Leaderboards ------------------------------------------------------------------------------ */
 

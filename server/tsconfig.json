@@ -16,5 +16,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src", "../src/net/protocol.ts", "../src/game/replay.ts"]
+  "include": ["src", "../src/net/protocol.ts", "../src/game/replay.ts", "../src/storage/soundwaveFile.ts"]
 }

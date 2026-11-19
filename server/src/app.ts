@@ -15,6 +15,7 @@ import type { Store, UserRow } from './db.ts';
 import { Parties } from './parties.ts';
 import { Scores } from './scores.ts';
 import { joinPage } from './joinPage.ts';
+import { Songs } from './songs.ts';
 import { clientMessage } from './validate.ts';
 
 /** The most bytes an HTTP request's body may have (everything it carries is small). */
@@ -22,7 +23,25 @@ const BODY_MAX = 64 * 1024;
 /** A run's inputs are bigger: a long song at a high frame rate. */
 const RUN_MAX = 8 * 1024 * 1024;
 
-type Handler = (req: IncomingMessage, body: Record<string, unknown>, ip: string, params: string[]) => Promise<unknown> | unknown;
+type Handler = (
+  req: IncomingMessage,
+  body: Record<string, unknown>,
+  ip: string,
+  params: string[],
+  raw: Buffer,
+) => Promise<unknown> | unknown;
+
+/** An answer that is a file, not JSON (a song, a cover). */
+class Binary {
+  readonly type: string;
+  readonly body: Buffer;
+  readonly name: string | undefined;
+  constructor(type: string, body: Buffer, name?: string) {
+    this.type = type;
+    this.body = body;
+    this.name = name;
+  }
+}
 
 /** A bucket of attempts per address: `burst` at once, refilled at `perMinute`. */
 class RateLimit {
@@ -56,6 +75,7 @@ export interface RunningServer {
 export async function startServer(config: Config, store: Store, log: (line: string) => void = console.log): Promise<RunningServer> {
   const accounts = new Accounts(store, config);
   const scores = new Scores(store);
+  const songs = new Songs(store, config);
   /** Each signed-in player's socket (one per player: signing in elsewhere replaces it). */
   const sockets = new Map<string, WebSocket>();
   const clock = () => performance.now();
@@ -93,7 +113,15 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       protocol: PROTOCOL_VERSION,
       mode: config.mode,
       online: sockets.size,
+      sharing: config.songSharing,
+      publicCovers: config.publicCovers,
     }),
+    'POST /songs': async (req, _body, ip, _p, raw) => {
+      if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many songs at once. Wait a minute.');
+      return songs.share(me(req), raw);
+    },
+    'GET /songs': (req) => (me(req), songs.list(new URL(req.url ?? '/', 'http://x').searchParams.get('q') ?? '')),
+    'GET /mod/reports': (req) => songs.reports(me(req)),
     'POST /auth/signup': (_req, body, ip) => {
       if (!authLimit.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
       return accounts.signUp(body);
@@ -115,7 +143,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     },
     'GET /me/export': (req) => {
       const u = me(req);
-      return { ...accounts.export(u), runs: scores.exportOf(u), challenges: scores.challenges(u) };
+      return { ...accounts.export(u), runs: scores.exportOf(u), challenges: scores.challenges(u), songsShared: songs.exportOf(u) };
     },
     'POST /scores': (req, body, ip) => {
       if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many scores at once. Wait a minute.');
@@ -170,6 +198,38 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       /^\/boards\/([0-9a-f]{64})\/([0-9a-f]{64})\/(vocals|lead|bass|drums)\/(easy|medium|hard|expert)$/,
       (req, _b, _ip, [song, chart, part, difficulty]) =>
         scores.board(me(req), song, chart, part, difficulty, new URL(req.url ?? '/', 'http://x').searchParams.get('week') === '1'),
+    ],
+    [
+      'GET',
+      /^\/songs\/([0-9a-f]{64})\/file$/,
+      (req, _b, _ip, [id]) => (me(req), new Binary('application/x-soundwave', songs.file(id), `${id}.soundwave`)),
+    ],
+    ['GET', /^\/songs\/([0-9a-f]{64})\/charts$/, (req, _b, _ip, [id]) => (me(req), songs.charts(id))],
+    [
+      'DELETE',
+      /^\/songs\/([0-9a-f]{64})$/,
+      (req, _b, _ip, [id]) => {
+        songs.remove(me(req), id, new URL(req.url ?? '/', 'http://x').searchParams.get('reason'));
+        return { ok: true };
+      },
+    ],
+    [
+      'POST',
+      /^\/songs\/([0-9a-f]{64})\/report$/,
+      (req, body, _ip, [id]) => {
+        songs.report(me(req), id, body.reason);
+        return { ok: true };
+      },
+    ],
+    [
+      'GET',
+      /^\/covers\/([0-9a-f]{64})(?:\.(?:jpg|jpeg|png|webp))?$/,
+      (req, _b, _ip, [id]) => {
+        // Public where the owner allows it: Discord fetches the picture with no sign-in.
+        if (!config.publicCovers) me(req);
+        const c = songs.cover(id);
+        return new Binary(c.type, c.body);
+      },
     ],
     ['GET', /^\/boards\/([0-9a-f]{64})$/, (req, _b, _ip, [song]) => (me(req), scores.boardsOf(song))],
     ['GET', new RegExp(`^/scores/${ID}/run$`), (req, _b, _ip, [id]) => (me(req), scores.run(id))],
@@ -233,9 +293,11 @@ export async function startServer(config: Config, store: Store, log: (line: stri
         break;
       }
     if (!route) return reply(res, 404, { error: 'There is nothing here.' });
-    const limit = path === '/scores' ? RUN_MAX : BODY_MAX;
+    const upload = req.method === 'POST' && path === '/songs';
+    const limit = path === '/scores' ? RUN_MAX : upload ? config.songMaxMb * 1024 * 1024 + 1 : BODY_MAX;
     try {
       let body: Record<string, unknown> = {};
+      let raw = Buffer.alloc(0);
       if (req.method === 'POST') {
         const chunks: Buffer[] = [];
         let size = 0;
@@ -244,7 +306,8 @@ export async function startServer(config: Config, store: Store, log: (line: stri
           if (size > limit) throw new Refusal(413, 'That request is too big.');
           chunks.push(c as Buffer);
         }
-        if (size) {
+        raw = Buffer.concat(chunks);
+        if (size && !upload) {
           try {
             const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
             if (typeof parsed === 'object' && parsed && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
@@ -253,7 +316,17 @@ export async function startServer(config: Config, store: Store, log: (line: stri
           }
         }
       }
-      reply(res, 200, await route(req, body, addressOf(req), params));
+      const answer = await route(req, body, addressOf(req), params, raw);
+      if (answer instanceof Binary) {
+        res.writeHead(200, {
+          'Content-Type': answer.type,
+          'Content-Length': answer.body.length,
+          'Cache-Control': path.startsWith('/covers/') ? 'public, max-age=86400' : 'no-store',
+          ...(answer.name ? { 'Content-Disposition': `attachment; filename="${answer.name}"` } : {}),
+        });
+        return void res.end(answer.body);
+      }
+      reply(res, 200, answer);
     } catch (e) {
       if (e instanceof Refusal) return reply(res, e.status, { error: e.message });
       log(`Error on ${req.method} ${path}: ${(e as Error).stack ?? e}`);

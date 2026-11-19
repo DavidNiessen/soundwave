@@ -18,6 +18,7 @@ import {
   type RankLine,
   type Run,
   type ScoreSubmission,
+  type SharedSong,
   type Weekly,
   type ClientMessage,
   type Difficulty,
@@ -32,6 +33,7 @@ import {
   type SongScore,
   type WireChart,
 } from './protocol';
+import type { SoundwaveAnalysis, SoundwaveEdits, SoundwaveMeta } from '../storage/soundwaveFile';
 
 const STORE_KEY = 'soundwave.online';
 /** Clock sync: rounds per measurement, and how often it is measured again (ms). */
@@ -60,6 +62,9 @@ export interface OnlineState {
   /** An invite's code, from a link the player opened or pasted, waiting for the sign-up it lets in. */
   invite: string | null;
 }
+
+/** A party's song changing hands (see `onSong`). */
+export type SongEvent = Extract<ServerMessage, { type: 'song-request' | 'song-ready' }>;
 
 /** A song the party starts: when (performance.now ms on this machine) and on which chart (null: sit it out). */
 export interface PartyStart {
@@ -137,6 +142,7 @@ class OnlineClient {
   private boardState: { songIndex: number; lines: BoardLine[] } | null = null;
   private readonly boardListeners = new Set<() => void>();
   private readonly startListeners = new Set<(s: PartyStart) => void>();
+  private readonly songListeners = new Set<(e: SongEvent) => void>();
   private ws: WebSocket | null = null;
   private access: string | null = null;
   private refreshToken: string | null = null;
@@ -186,6 +192,12 @@ class OnlineClient {
     return () => void this.startListeners.delete(fn);
   }
 
+  /** Called when a party's song changes hands: the host is asked for one, or a song asked for is ready. */
+  onSong(fn: (e: SongEvent) => void) {
+    this.songListeners.add(fn);
+    return () => void this.songListeners.delete(fn);
+  }
+
   private set(change: Partial<OnlineState>) {
     this.state = { ...this.state, ...change };
     for (const l of this.listeners) l();
@@ -206,17 +218,22 @@ class OnlineClient {
 
   /* HTTP --------------------------------------------------------------------------------------- */
 
-  private async request<T>(path: string, init: { method?: string; body?: unknown; auth?: boolean } = {}): Promise<T> {
+  /** `raw`: a file sent as it is (a shared song); `file`: the answer is a file, not JSON. */
+  private async request<T>(
+    path: string,
+    init: { method?: string; body?: unknown; auth?: boolean; raw?: Blob; file?: boolean } = {},
+  ): Promise<T> {
     const server = this.state.server;
     if (!server) throw new Error('No server is chosen.');
     const send = () =>
       fetch(server + path, {
-        method: init.method ?? (init.body === undefined ? 'GET' : 'POST'),
+        method: init.method ?? (init.body === undefined && !init.raw ? 'GET' : 'POST'),
         headers: {
           ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+          ...(init.raw ? { 'Content-Type': 'application/octet-stream' } : {}),
           ...(init.auth && this.access ? { Authorization: `Bearer ${this.access}` } : {}),
         },
-        body: init.body === undefined ? undefined : JSON.stringify(init.body),
+        body: init.raw ?? (init.body === undefined ? undefined : JSON.stringify(init.body)),
       });
     let res: Response;
     try {
@@ -230,6 +247,7 @@ class OnlineClient {
       if (e instanceof Error && e.name !== 'TypeError') throw e;
       throw new Error('The server could not be reached. Check the address and your connection.');
     }
+    if (init.file && res.ok) return (await res.blob()) as T;
     const body = (await res.json().catch(() => ({}))) as T | ApiError;
     if (!res.ok) throw new Error((body as ApiError).error ?? `The server answered with an error (${res.status}).`);
     return body as T;
@@ -357,6 +375,64 @@ class OnlineClient {
     return this.request<Weekly>('/weekly', { body: { songs, days }, auth: true });
   }
 
+  /* Shared songs ------------------------------------------------------------------------------- */
+
+  /** Shares a song (its .soundwave file) to the server's library. */
+  shareSong(file: Blob) {
+    return this.request<SharedSong>('/songs', { raw: file, auth: true });
+  }
+  songs(query = '') {
+    return this.request<SharedSong[]>(`/songs${query ? `?q=${encodeURIComponent(query)}` : ''}`, { auth: true });
+  }
+  /** A whole shared song, as its .soundwave file. */
+  downloadSong(id: string) {
+    return this.request<Blob>(`/songs/${id}/file`, { auth: true, file: true });
+  }
+  /** A shared song's details, analysis and hand-made charts (a charts-only server's whole share). */
+  songCharts(id: string) {
+    return this.request<{ meta: SoundwaveMeta; analysis: SoundwaveAnalysis | null; edits: SoundwaveEdits | null }>(`/songs/${id}/charts`, {
+      auth: true,
+    });
+  }
+  removeSong(id: string, reason = '') {
+    return this.request<unknown>(`/songs/${id}?reason=${encodeURIComponent(reason)}`, { method: 'DELETE', auth: true });
+  }
+  reportSong(id: string, reason: string) {
+    return this.request<unknown>(`/songs/${id}/report`, { body: { reason }, auth: true });
+  }
+  songReports() {
+    return this.request<
+      {
+        id: number;
+        songId: string;
+        title: string;
+        artist: string;
+        by: string | null;
+        reason: string;
+        at: number;
+        uploader: string | null;
+      }[]
+    >('/mod/reports', { auth: true });
+  }
+  /**
+   * The address of a shared song's cover anyone can open (for the Discord status), where the server
+   * serves covers publicly over HTTPS; undefined otherwise.
+   */
+  coverUrl(songId: string): string | undefined {
+    const { server, info } = this.state;
+    if (!server?.startsWith('https://') || !info?.publicCovers || info.sharing === 'off') return undefined;
+    return `${server}/covers/${songId}`;
+  }
+
+  /** Asks the party's host for one of the set's songs this player lacks. */
+  requestSong(songId: string) {
+    this.send({ type: 'request-song', songId });
+  }
+  /** The host answers a request: the song is in the server's library now (or not). */
+  songSent(songId: string, to: string, ok: boolean) {
+    this.send({ type: 'song-sent', songId, to, ok });
+  }
+
   /* Moderation (owner and moderators) --------------------------------------------------------- */
 
   moderate(action: 'kick' | 'ban' | 'unban' | 'role' | 'reset-password', body: Record<string, unknown>) {
@@ -475,6 +551,10 @@ class OnlineClient {
         return;
       case 'error':
         this.set({ error: msg.message });
+        return;
+      case 'song-request':
+      case 'song-ready':
+        for (const l of this.songListeners) l(msg);
         return;
       case 'bye':
         this.closing = true;

@@ -188,6 +188,17 @@ export class Parties {
         this.send(msg.id, { type: 'error', message: 'The host removed you from the party.' });
         return;
       }
+      case 'request-song': {
+        // Asked of the host, who has the song: they share it to the server's library for this player.
+        if (!s.set.some((x) => x.id === msg.songId)) return fail('That song is not in the set.');
+        if (host) return;
+        this.send(s.host, { type: 'song-request', songId: msg.songId, from: player.id, name: player.name });
+        return;
+      }
+      case 'song-sent':
+        if (!host || !party.member(msg.to)) return;
+        this.send(msg.to, { type: 'song-ready', songId: msg.songId, ok: msg.ok });
+        return;
     }
   }
 
