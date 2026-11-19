@@ -1011,7 +1011,14 @@ export function App() {
       );
     } else if (view.name === 'settings') {
       screen = (
-        <SettingsScreen settings={settings} model={model} device={device} onChange={updateSettings} onBack={() => setView(view.back)} />
+        <SettingsScreen
+          settings={settings}
+          model={model}
+          device={device}
+          onChange={updateSettings}
+          onBack={() => setView(view.back)}
+          onReplaysDeleted={() => void refreshReplays()}
+        />
       );
     } else if (view.name === 'library') {
       screen = (
@@ -1161,6 +1168,7 @@ export function App() {
               device={device}
               onChange={updateSettings}
               onBack={() => setSongSettings(false)}
+              onReplaysDeleted={() => void refreshReplays()}
               inSong
             />
           </div>

@@ -240,8 +240,8 @@ export function useLibraryBackup(settings: Settings): LibraryBackup {
               <h2 className="display">Delete everything?</h2>
               <p className="hint">
                 {state.kind === 'askDelete' && state.songs !== null ? `${capital(songs(state.songs))} ` : 'Every song '}
-                in your library will be deleted, with their charts, the charts you edited by hand, and all best scores. Every setting goes
-                back to how the game came, key and controller bindings included.
+                in your library will be deleted, with their charts, the charts you edited by hand, all best scores and every replay. Every
+                setting goes back to how the game came, key and controller bindings included.
               </p>
               <p className="hint">This cannot be undone. To keep a copy, export your library first.</p>
               {/* First, so it has the focus: keeping everything is the safe answer. */}
