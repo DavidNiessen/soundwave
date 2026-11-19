@@ -2,6 +2,7 @@
 import * as ort from 'onnxruntime-web/webgpu';
 import { proxyWorkerFetch } from '../../app/workerFetch';
 import { transcribeOnnx } from '../pitch/basicPitchOnnx';
+import { loadRuntime } from '../runtime';
 import type { StemName, StemNotes } from '../types';
 import type { LoadedModel } from './model';
 import { MODEL_STEMS, separate, type SegmentModel } from './separate';
@@ -33,19 +34,6 @@ export type SeparationResponse =
   | { type: 'error'; message: string };
 
 const post = (m: SeparationResponse, transfer: Transferable[] = []) => (self as DedicatedWorkerGlobalScope).postMessage(m, transfer);
-
-/**
- * The runtime's WebAssembly file, unpacked. A server may already have undone the compression on the
- * way (a gzip file sent as gzip-encoded), so the file's first bytes decide.
- */
-async function fetchWasm(url: string): Promise<Uint8Array> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`the analysis runtime could not be loaded (${res.status})`);
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) return bytes;
-  const unpacked = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
-  return new Uint8Array(await new Response(unpacked).arrayBuffer());
-}
 
 /** The transcription model (Basic Pitch, 230 KB) on the same device as the stem model. */
 async function openPitchSession(url: string, device: 'gpu' | 'cpu'): Promise<ort.InferenceSession> {
@@ -97,21 +85,7 @@ self.onmessage = async (e: MessageEvent<SeparationRequest>) => {
   const req = e.data;
   if (req.type === 'transcribe') return transcribeStems(req.stems);
   try {
-    // The runtime's script and WebAssembly file are served next to the app (public/ort). The script
-    // is handed over as a blob, because the runtime starts its threads from the script's own address:
-    // from a blob that needs no request, and a request for an app file made by a thread of a worker
-    // is never answered in the desktop app's window. The WebAssembly file comes gzip-compressed
-    // (scripts/copy-models.mjs) and is handed over unpacked.
-    const base = new URL(`${import.meta.env.BASE_URL}ort/`, self.location.href).href;
-    const [script, binary] = await Promise.all([
-      fetch(`${base}ort-wasm-simd-threaded.asyncify.mjs`).then((r) => r.text()),
-      fetchWasm(`${base}ort-wasm-simd-threaded.asyncify.wasm.gz`),
-    ]);
-    ort.env.wasm.wasmPaths = { mjs: URL.createObjectURL(new Blob([script], { type: 'text/javascript' })) };
-    ort.env.wasm.wasmBinary = binary;
-    // A graphics card does the arithmetic itself; threads are for the processor path.
-    if (req.device === 'gpu') ort.env.wasm.numThreads = 1;
-    ort.env.logLevel = 'error';
+    await loadRuntime(ort, req.device);
     post({ type: 'progress', progress: 0, step: 'Loading the stem model' });
     let device = req.device;
     let session: ort.InferenceSession;

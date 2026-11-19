@@ -20,3 +20,9 @@ The audio in public/audio was composed for this project and rendered by tools/au
 instrument samples of the Versilian Studios Chamber Orchestra 2 Community Edition (CC0)
 and, for the crowd, a public-domain recording ("Festival concert people crowd",
 Wikimedia Commons). Neither source is redistributed here.
+
+The beat model in public/models/beat-this is the "small0" model of Beat This by Francesco
+Foscarin, Jan Schlüter and Gerhard Widmer (Johannes Kepler University Linz;
+github.com/CPJKU/beat_this), exported by tools/analysis/export_beat_model.py. Its code and
+weights are published under the MIT licence. Its authors note that some of the recordings
+it was trained on are copyrighted or under limited Creative Commons licences.
