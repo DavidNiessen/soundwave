@@ -115,95 +115,103 @@ export function ReplaysPanel({ replays, songs, settings, actions, onSettings, co
         <h2 className="page-title">Watch a replay</h2>
         <p className="head-count">{replays.length ? `${plural(replays.length, 'replay')} · ${caption}` : caption}</p>
       </div>
-      {replays.length === 0 ? (
-        <section className="now hub-intro replays-empty">
-          <Clapperboard strokeWidth={ICON_STROKE} aria-hidden />
-          <div className="now-text">
-            <h2 className="now-title">No replays yet</h2>
-            <p className="now-artist">
-              {settings.replays
-                ? 'Every song you finish is saved here as a replay, with the notes as you played them. Watch your runs again, pause on any moment and slow down the hard parts.'
-                : 'Recording replays is switched off. Turn it on under Gameplay in the settings, and every song you finish is saved here.'}
-            </p>
-            {!settings.replays && (
-              <button type="button" className="btn" data-autofocus onClick={onSettings}>
-                <SettingsIcon strokeWidth={ICON_STROKE} aria-hidden />
-                Open the settings
-              </button>
-            )}
-          </div>
-        </section>
-      ) : (
-        <div className="library-body">
-          <div className="track-column">
-            <ul className="song-list" data-nav-group="replays" aria-label="Replays" ref={list}>
-              {replays.map((r, i) => {
-                const song = byId.get(r.songId);
-                const Icon = PART_ICON[r.part];
-                return (
-                  <li
-                    key={r.id}
-                    data-replay={r.id}
-                    className={`song-item replay-item ${current?.id === r.id ? 'current' : ''}`}
-                    style={{ ['--i' as string]: Math.min(i, 12) }}
+      <div className="library-body">
+        <div className="track-column">
+          <ul className="song-list" data-nav-group="replays" aria-label="Replays" ref={list}>
+            {replays.map((r, i) => {
+              const song = byId.get(r.songId);
+              const Icon = PART_ICON[r.part];
+              return (
+                <li
+                  key={r.id}
+                  data-replay={r.id}
+                  className={`song-item replay-item ${current?.id === r.id ? 'current' : ''}`}
+                  style={{ ['--i' as string]: Math.min(i, 12) }}
+                >
+                  <button
+                    type="button"
+                    className="song-row"
+                    data-autofocus={r.id === startId ? '' : undefined}
+                    aria-label={`${r.title} by ${r.artist}, ${PART_LABEL[r.part]} on ${DIFFICULTY_LABEL[r.difficulty]}, played ${replayDate(r.date)}. Score ${r.results.score}, ${Math.round(r.results.accuracy * 100)} percent.${r.kept ? ' Kept.' : ''} Plays the replay.`}
+                    onFocus={() => setCurrentId(r.id)}
+                    onPointerEnter={(e) => e.pointerType === 'mouse' && setCurrentId(r.id)}
+                    onClick={() => (setCurrentId(r.id), watch(r))}
                   >
-                    <button
-                      type="button"
-                      className="song-row"
-                      data-autofocus={r.id === startId ? '' : undefined}
-                      aria-label={`${r.title} by ${r.artist}, ${PART_LABEL[r.part]} on ${DIFFICULTY_LABEL[r.difficulty]}, played ${replayDate(r.date)}. Score ${r.results.score}, ${Math.round(r.results.accuracy * 100)} percent.${r.kept ? ' Kept.' : ''} Plays the replay.`}
-                      onFocus={() => setCurrentId(r.id)}
-                      onPointerEnter={(e) => e.pointerType === 'mouse' && setCurrentId(r.id)}
-                      onClick={() => (setCurrentId(r.id), watch(r))}
-                    >
-                      <Cover blob={song?.cover} title={r.title} />
-                      <span className="song-text">
-                        <span className="song-title">{r.title}</span>
-                        <span className="song-artist replay-row-sub">
-                          <Icon strokeWidth={ICON_STROKE} aria-hidden />
-                          {PART_LABEL[r.part]} · {DIFFICULTY_LABEL[r.difficulty]} · {replayDate(r.date)}
+                    <Cover blob={song?.cover} title={r.title} />
+                    <span className="song-text">
+                      <span className="song-title">{r.title}</span>
+                      <span className="song-artist replay-row-sub">
+                        <Icon strokeWidth={ICON_STROKE} aria-hidden />
+                        {PART_LABEL[r.part]} · {DIFFICULTY_LABEL[r.difficulty]} · {replayDate(r.date)}
+                      </span>
+                    </span>
+                    <span className="song-side">
+                      {r.kept && (
+                        <span className="replay-kept" role="img" aria-label="Kept">
+                          <Pin strokeWidth={ICON_STROKE} aria-hidden />
                         </span>
-                      </span>
-                      <span className="song-side">
-                        {r.kept && (
-                          <span className="replay-kept" role="img" aria-label="Kept">
-                            <Pin strokeWidth={ICON_STROKE} aria-hidden />
-                          </span>
-                        )}
-                        {r.best && <span className="pill lit replay-best">Best</span>}
-                        <Stars n={r.results.stars} />
-                        <span className="replay-row-score">{r.results.score.toLocaleString()}</span>
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-btn row-info"
-                      data-nav-skip
-                      aria-label={`Options for the replay of ${r.title}`}
-                      onClick={() => (setCurrentId(r.id), setMenu(r))}
-                    >
-                      <Ellipsis strokeWidth={ICON_STROKE} aria-hidden />
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-          <aside className="side" aria-label="Highlighted replay">
-            {current && (
-              <ReplayCard
-                replay={current}
-                song={byId.get(current.songId)}
-                hints={hints}
-                onWatch={() => watch(current)}
-                onExport={() => actions.exportVideo(current)}
-                onKeep={() => toggleKeep(current)}
-                onDelete={() => setAsking(current)}
-              />
+                      )}
+                      {r.best && <span className="pill lit replay-best">Best</span>}
+                      <Stars n={r.results.stars} />
+                      <span className="replay-row-score">{r.results.score.toLocaleString()}</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn row-info"
+                    data-nav-skip
+                    aria-label={`Options for the replay of ${r.title}`}
+                    onClick={() => (setCurrentId(r.id), setMenu(r))}
+                  >
+                    <Ellipsis strokeWidth={ICON_STROKE} aria-hidden />
+                  </button>
+                </li>
+              );
+            })}
+            {replays.length === 0 && (
+              <li className="empty-note replays-none">
+                <Clapperboard strokeWidth={ICON_STROKE} aria-hidden />
+                <p>
+                  {settings.replays
+                    ? 'No replays yet. Finish a song and its replay is here.'
+                    : 'No replays yet. Recording is switched off in the settings.'}
+                </p>
+                {!settings.replays && (
+                  <button type="button" className="btn" data-autofocus onClick={onSettings}>
+                    <SettingsIcon strokeWidth={ICON_STROKE} aria-hidden />
+                    Open the settings
+                  </button>
+                )}
+              </li>
             )}
-          </aside>
+          </ul>
         </div>
-      )}
+        <aside className="side" aria-label="Highlighted replay">
+          {!current && (
+            <section className="now hub-intro">
+              <div className="now-text">
+                <h2 className="now-title">Your runs, again</h2>
+                <p className="now-artist">
+                  {settings.replays
+                    ? 'Every song you finish is saved here as a replay, with the notes as you played them. Watch your runs again, pause on any moment, slow down the hard parts, and turn the best ones into a video.'
+                    : 'Recording replays is switched off. Turn it on under Gameplay in the settings, and every song you finish is saved here.'}
+                </p>
+              </div>
+            </section>
+          )}
+          {current && (
+            <ReplayCard
+              replay={current}
+              song={byId.get(current.songId)}
+              hints={hints}
+              onWatch={() => watch(current)}
+              onExport={() => actions.exportVideo(current)}
+              onKeep={() => toggleKeep(current)}
+              onDelete={() => setAsking(current)}
+            />
+          )}
+        </aside>
+      </div>
 
       {menu && (
         <Dialog title={`Replay of ${menu.title}`} variant="card" closeLabel="Close" onClose={() => setMenu(null)}>
