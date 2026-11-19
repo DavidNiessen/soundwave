@@ -59,6 +59,8 @@ Every song you finish is saved as a replay, the newest 30 by default. The Replay
 
 While a replay plays: `Space` (the top face button, or Start) pauses and plays, `J` and `L` (the triggers) jump 10 seconds back and forward, `Home` (Back/View) starts it over, `Q` and `E` (the shoulder buttons) change the speed from 0.25x to 2x, and `H` (the left face button) hides the controls. On the timeline, which marks every missed note, left and right step 5 seconds; it can also be dragged. The controls step aside while the replay plays and come back with any input.
 
+**Export video** (`V`, the Video button on a replay, its end card or its options) turns a replay into an MP4 to share. Before it records, it asks how the video should look, and remembers the answer: the HUD shown or hidden, the stage shown or hidden, the music on or off, wide 16:9 or upright 9:16, 720p, 1080p or 1440p, and 30 or 60 frames a second. It records as the replay plays, so it takes as long as the song; the replay plays out of sight at the video's size, and every frame the stage, the highway and a HUD drawn for the video are laid onto one picture, recorded with the song by the browser's MediaRecorder. The desktop app, Chrome, Edge and Safari write MP4; Firefox writes WebM instead. A window put in the background pauses the recording until it is back.
+
 A replay can be kept (`K`, or from its options with `O` or the left face button): kept replays are never removed to make room and do not count towards the number kept. Settings → Gameplay switches recording off, sets how many replays are kept and deletes them all. A library backup carries every saved replay.
 
 ## Track editor
