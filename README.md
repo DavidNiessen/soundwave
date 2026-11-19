@@ -53,6 +53,14 @@ Under Settings → Audio the game can play through a chosen output device instea
 
 Controllers (Xbox, PlayStation 4 and 5, Nintendo Switch and most others) work in the menus and in songs: the D-pad or left stick moves the focus ring, the shoulder buttons switch tabs, on the ready-up screen the top face button steps through the parts and the left face button through the difficulties, and the action bar shows the controller's own button symbols. By default the lanes are D-pad left, D-pad right and the left, top and right face buttons (four-lane difficulties skip the top one), the right trigger triggers overdrive and Start/Options/+ pauses. Every lane and overdrive can be rebound to any button, trigger or stick direction in Settings → Shortcuts; under Settings → Controller the button glyphs follow the connected controller or can be fixed to one style. Rumble is off, weak or strong. In the desktop app, a PS5 DualSense connected by USB plays each hit on its left or right haptic motor, following the lane (Settings → Controller can switch that off for plain rumble).
 
+## Replays
+
+Every song you finish is saved as a replay, the newest 30 by default. The Replays tab of the main menu, beside Play and Edit, lists them with their score; a press on one plays it back on the highway and the stage, hit for hit, as it was played. A replay keeps every note of the chart it was played on, so it plays the same after the song is charted again or edited, and even after the song has left the library (then without its music). Test plays from the track editor, and songs skipped or left, are not saved.
+
+While a replay plays: `Space` (the top face button, or Start) pauses and plays, `J` and `L` (the triggers) jump 10 seconds back and forward, `Home` (Back/View) starts it over, `Q` and `E` (the shoulder buttons) change the speed from 0.25x to 2x, and `H` (the left face button) hides the controls. On the timeline, which marks every missed note, left and right step 5 seconds; it can also be dragged. The controls step aside while the replay plays and come back with any input.
+
+A replay can be kept (`K`, or from its options with `O` or the left face button): kept replays are never removed to make room and do not count towards the number kept. Settings → Gameplay switches recording off, sets how many replays are kept and deletes them all. A library backup carries every saved replay.
+
 ## Track editor
 
 The **Edit** tab of the main menu is the list of your tracks, with the highlighted track's sixteen charts beside it (which are yours, which are the game's). Pick a track to open it in the editor, or bring in a new one with **New track** and choose how it gets its first charts:
