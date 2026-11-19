@@ -8,8 +8,10 @@ import {
   randomColors,
   stageLook,
   stageMedia,
+  stageVenue,
   TEMPLATE_INFO,
 } from '../src/game/stages';
+import { VENUES } from '../src/render/venues/catalog';
 import { normalizeSettings } from '../src/game/settings';
 
 describe('stages', () => {
@@ -62,10 +64,21 @@ describe('stages', () => {
     for (const d of BUILT_IN) expect(TEMPLATE_INFO[d.id]).toBeTruthy();
   });
 
-  it('drops the venue a stage saved before the venue became a setting of its own', () => {
-    const [d] = normalizeStages({ mine: [{ id: 'mine-5', venueId: 'moonrise' }] }).mine;
-    expect('venueId' in d).toBe(false);
-    expect('venueId' in stageLook(d)).toBe(false);
+  it('keeps a stage’s venue, and falls back to Moonrise for a venue that is gone', () => {
+    const [d, gone, old] = normalizeStages({
+      mine: [{ id: 'mine-5', venueId: 'warehouse' }, { id: 'mine-6', venueId: 'nowhere' }, { id: 'mine-7' }],
+    }).mine;
+    expect(d.venueId).toBe('warehouse');
+    expect(gone.venueId).toBe('moonrise');
+    expect(old.venueId).toBe('moonrise');
+  });
+
+  it('has a stage of its own for every venue, and changing one stage’s venue leaves the others', () => {
+    for (const v of VENUES) expect(BUILT_IN.some((d) => d.venueId === v.id)).toBe(true);
+    const s = normalizeStages({ active: 'mine-1', mine: [{ id: 'mine-1', venueId: 'arena' }, { id: 'mine-2' }] });
+    expect(stageVenue(s)).toBe('arena');
+    expect(findStage(s, 'mine-2').venueId).toBe('moonrise');
+    expect(stageVenue({ ...s, active: 'warehouse' })).toBe('warehouse');
   });
 
   it('falls back to Festival when the stage in use is gone', () => {

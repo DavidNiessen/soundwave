@@ -15,6 +15,12 @@ export type VenueId = (typeof VENUES)[number]['id'];
 /** What the player picks: a venue, or a different one for every song. */
 export type VenueChoice = VenueId | 'random';
 
+/** What the player picks from: every venue, and a different one for every song. */
+export const VENUE_CHOICES: readonly { id: VenueChoice; name: string; blurb: string }[] = [
+  ...VENUES,
+  { id: 'random', name: 'Random', blurb: 'A different venue for every song' },
+];
+
 export const VENUE_IDS: readonly VenueId[] = VENUES.map((v) => v.id);
 export const DEFAULT_VENUE: VenueId = 'moonrise';
 

@@ -15,6 +15,7 @@ import { GamepadInput, KeyboardInput, TouchInput, type InputHandlers } from './i
 import { WINDOWS } from './judge';
 import { GOLD_STARS, MAX_MULTIPLIER, multiplierFor, STREAK_PER_MULTIPLIER } from './scoring';
 import { highwaySpeed, type Settings } from './settings';
+import { stageVenue } from './stages';
 import { resolveVenue, type VenueChoice, type VenueId } from '../render/venues/catalog';
 
 export interface HudRefs {
@@ -113,7 +114,7 @@ export class PlayController {
   private stageHost: HTMLElement | null = null;
   /** The graphics the newest stage was built with, as JSON. */
   private graphicsKey = '';
-  /** The venue as chosen in the settings, and the one this song is played in. */
+  /** The venue of the stage in use (or Random), and the one this song is played in. */
   private venueChoice: VenueChoice = 'moonrise';
   private venue: VenueId;
   private readonly barLevels: number[];
@@ -229,8 +230,8 @@ export class PlayController {
     this.graphicsKey = JSON.stringify(resolveGraphics(settings.graphics));
     const stageDrawn = stageHost ? new Promise<void>((resolve) => (this.stageSettled = resolve)) : Promise.resolve();
     this.ready = this.highway.ready.then(() => stageDrawn);
-    this.venueChoice = settings.venue;
-    this.venue = pickVenue(settings.venue);
+    this.venueChoice = stageVenue(settings.stage);
+    this.venue = pickVenue(this.venueChoice);
     if (stageHost) {
       // Built once the highway is ready to draw: both compile their shaders in the same GPU process,
       // and the highway, which the player needs first, should not queue behind the stage's.
@@ -385,10 +386,11 @@ export class PlayController {
     this.highway.speed = highwaySpeed(s.trackSpeed);
     this.rumble.update(this.rumbleSettings(s));
     const key = JSON.stringify(resolveGraphics(s.graphics));
-    if (key === this.graphicsKey && s.venue === this.venueChoice) return;
-    if (s.venue !== this.venueChoice) {
-      this.venueChoice = s.venue;
-      this.venue = pickVenue(s.venue);
+    const venue = stageVenue(s.stage);
+    if (key === this.graphicsKey && venue === this.venueChoice) return;
+    if (venue !== this.venueChoice) {
+      this.venueChoice = venue;
+      this.venue = pickVenue(venue);
     }
     this.graphicsKey = key;
     if (this.stageHost) this.buildStage();

@@ -41,7 +41,10 @@ import { playSfx } from '../audio/sfx';
 import { menuPulse } from '../input/rumble';
 import { boostMenuStage } from '../render/aurora/menuStage';
 import { setPreviewStage } from '../render/stage/showStage';
-import { VENUES, type VenueChoice } from '../render/venues/catalog';
+import { DEFAULT_VENUE, menuVenue, VENUE_CHOICES, type VenueChoice } from '../render/venues/catalog';
+import { preloadStage } from '../render/stage/StageView';
+import { VenuePicture } from './VenuePicture';
+import { useSlide } from './useSlide';
 import { deleteMedia, getMedia, mediaIds, mediaUrl, putMedia } from '../storage/stageMedia';
 import { useHints, type Action } from './actions';
 import { Dialog } from './Dialog';
@@ -56,8 +59,6 @@ interface Options {
   /** Whether the browser is on screen (the main menu's Stage tab): only then does it show its stages. */
   on: boolean;
   onChange(next: StageSettings): void;
-  /** The venue sets are played in changed (a setting of its own, whichever stage is in use). */
-  onVenue(venue: VenueChoice): void;
 }
 
 /** The show's own colours, for the cards of stages without colours of their own. */
@@ -168,7 +169,7 @@ function useMediaName(id: string | null): string | null {
  *
  * Returns the tab's content and its actions, which the main menu puts in its action bar.
  */
-export function useStageBrowser({ stages, settings, on, onChange, onVenue }: Options): {
+export function useStageBrowser({ stages, settings, on, onChange }: Options): {
   view: ReactNode;
   actions: Action[];
   editing: boolean;
@@ -184,6 +185,8 @@ export function useStageBrowser({ stages, settings, on, onChange, onVenue }: Opt
    * 3D stage) the 3D stages to start from.
    */
   const [panel, setPanel] = useState<'templates' | 'start' | null>(null);
+  /** The venue a new 3D stage is made in (picked beside the looks it can start from). */
+  const [startVenue, setStartVenue] = useState<VenueChoice>(DEFAULT_VENUE);
   const all = panel !== null;
   const setAll = (on: boolean) => setPanel(on ? 'templates' : null);
   const [activeRow, setActiveRow] = useState<string | null>(null);
@@ -197,7 +200,8 @@ export function useStageBrowser({ stages, settings, on, onChange, onVenue }: Opt
   const draftRef = useRef<StageDef | null>(null);
   const commitTimer = useRef(0);
   const editing = on && editId ? ((draft?.id === editId ? draft : null) ?? stages.mine.find((d) => d.id === editId) ?? null) : null;
-  const shown = editing ?? findStage(stages, focusId);
+  const focused = findStage(stages, focusId);
+  const shown = editing ?? (panel === 'start' ? { ...focused, venueId: startVenue } : focused);
 
   // The real stage shows the stage in focus or being edited; leaving the tab puts the one in use back.
   const preview = on ? JSON.stringify(shown) : '';
@@ -268,6 +272,7 @@ export function useStageBrowser({ stages, settings, on, onChange, onVenue }: Opt
     // A new 3D stage starts from one of the 3D stages, picked in the panel beside the stage.
     if (kind === 'venue') {
       setFocusId(BUILT_IN[0].id);
+      setStartVenue(DEFAULT_VENUE);
       return setPanel('start');
     }
     if (kind === 'gradient') {
@@ -400,8 +405,6 @@ export function useStageBrowser({ stages, settings, on, onChange, onVenue }: Opt
             onUndo={undo}
             canUndo={history.current.length > 0}
             onDelete={() => remove(editing)}
-            venue={settings.venue}
-            onVenue={onVenue}
           />
         ) : all ? (
           <TemplatePanel
@@ -410,13 +413,15 @@ export function useStageBrowser({ stages, settings, on, onChange, onVenue }: Opt
             shown={shown.id}
             onFocus={setFocusId}
             onUse={(id) => {
-              if (panel === 'start') return create(findStage(stages, id));
+              if (panel === 'start') return create(findStage(stages, id), { venueId: startVenue });
               equip(id);
               setAll(false);
               setFocusId(id);
             }}
             onCopy={(d) => create(d)}
             onClose={leaveAll}
+            venue={startVenue}
+            onVenue={setStartVenue}
           />
         ) : (
           <div className="stage-cards" ref={wheelSideways} data-nav-group="stage-cards">
@@ -509,7 +514,7 @@ function Swatch({ def }: { def: StageDef }) {
   if (b.kind === 'venue')
     return (
       <span
-        className="stage-swatch"
+        className="stage-swatch venue"
         aria-hidden
         style={{
           ['--key' as string]: c.key,
@@ -518,7 +523,9 @@ function Swatch({ def }: { def: StageDef }) {
           ['--dark' as string]: 1 - Math.min(1, def.venue) * 0.75,
           ['--beams' as string]: Math.min(1, def.beams),
         }}
-      />
+      >
+        <VenuePicture venue={def.venueId} />
+      </span>
     );
   return (
     <span
@@ -595,25 +602,9 @@ interface EditorProps {
   onUndo(): void;
   canUndo: boolean;
   onDelete(): void;
-  /** The venue sets are played in: not part of the stage, but picked here too. */
-  venue: VenueChoice;
-  onVenue(venue: VenueChoice): void;
 }
 
-function Editor({
-  def,
-  actions,
-  onClose,
-  touch,
-  activeRow,
-  setActiveRow,
-  onSave,
-  onUndo,
-  canUndo,
-  onDelete,
-  venue: venueChoice,
-  onVenue,
-}: EditorProps) {
+function Editor({ def, actions, onClose, touch, activeRow, setActiveRow, onSave, onUndo, canUndo, onDelete }: EditorProps) {
   const [pickerFor, setPickerFor] = useState<string | null>(null);
   const picker = (label: string) => ({
     label,
@@ -709,15 +700,12 @@ function Editor({
         rows: [
           {
             kind: 'choice',
-            id: 'venue-choice',
+            id: 'venueId',
             label: 'Venue',
-            help: `${venueChoice === 'random' ? 'A different venue for every song' : VENUES.find((v) => v.id === venueChoice)?.blurb}. Not part of the stage: every stage is shown in it, and it is also picked on Ready up and in the settings.`,
-            value: venueChoice,
-            options: [
-              ...VENUES.map((v) => ({ value: v.id, label: v.name, help: `${v.blurb}.` })),
-              { value: 'random', label: 'Random', help: 'A different venue for every song.' },
-            ],
-            set: (v) => onVenue(v as VenueChoice),
+            help: `${VENUE_CHOICES.find((v) => v.id === def.venueId)?.blurb ?? ''}.`,
+            value: def.venueId,
+            options: VENUE_CHOICES.map((v) => ({ value: v.id, label: v.name, help: `${v.blurb}.` })),
+            set: (v) => set({ venueId: v as VenueChoice }),
           },
           {
             kind: 'choice',
@@ -1006,6 +994,8 @@ function TemplatePanel({
   onUse,
   onCopy,
   onClose,
+  venue,
+  onVenue,
 }: {
   /** `browse`: use a template or copy it; `start`: pick the 3D stage a new one starts from. */
   mode: 'browse' | 'start';
@@ -1015,8 +1005,13 @@ function TemplatePanel({
   onUse(id: string): void;
   onCopy(d: StageDef): void;
   onClose(): void;
+  /** The venue a new stage is made in (start mode): the looks are seen in it. */
+  venue: VenueChoice;
+  onVenue(venue: VenueChoice): void;
 }) {
   const start = mode === 'start';
+  const venueRow = useSlide<HTMLDivElement>(venue);
+  const picked = VENUE_CHOICES.find((v) => v.id === venue) ?? VENUE_CHOICES[0];
   return createPortal(
     <Dialog title={start ? 'Pick a 3D stage' : 'Templates'} className="see-through stage-drawer" onClose={onClose}>
       <div className="sheet-body template-panel" data-nav-group="templates">
@@ -1024,12 +1019,51 @@ function TemplatePanel({
           <h2 className="display meta-heading">{start ? 'Pick a 3D stage' : 'Templates'}</h2>
           <p className="hint">
             {start
-              ? 'Shown in the venue behind the menus. Point at one to see it, then press it to make it yours.'
+              ? 'Pick a venue, then a look: point at one to see it, press it to make it yours.'
               : 'Use one as it is, or copy it to make it your own.'}
           </p>
         </div>
+        {start && (
+          <div className="start-venue">
+            <h3 className="label" id="start-venue-label">
+              Venue
+            </h3>
+            <div
+              className="venue-row slide"
+              ref={venueRow}
+              role="radiogroup"
+              aria-labelledby="start-venue-label"
+              aria-describedby="start-venue-blurb"
+            >
+              <span className="sel" aria-hidden />
+              {VENUE_CHOICES.map((v) => {
+                const on = venue === v.id;
+                return (
+                  <button
+                    key={v.id}
+                    type="button"
+                    className={`choice venue ${on ? 'on' : ''}`}
+                    data-on={on}
+                    role="radio"
+                    aria-checked={on}
+                    onClick={() => onVenue(v.id)}
+                    onFocus={() => preloadStage(menuVenue(v.id))}
+                    onPointerEnter={() => preloadStage(menuVenue(v.id))}
+                  >
+                    <VenuePicture venue={v.id} />
+                    <span>{v.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="venue-blurb dim" id="start-venue-blurb">
+              {picked.blurb}
+              {venue === 'random' ? '. The menus show Moonrise.' : '.'}
+            </p>
+          </div>
+        )}
         <ul className="template-list">
-          {BUILT_IN.map((d) => (
+          {(start ? BUILT_IN.filter((d) => d.venueId === DEFAULT_VENUE) : BUILT_IN).map((d) => (
             <li key={d.id} className={`template-row ${d.id === active ? 'active' : ''} ${d.id === shown ? 'shown' : ''}`}>
               <button
                 type="button"
@@ -1039,7 +1073,8 @@ function TemplatePanel({
                 onPointerEnter={(e) => e.pointerType === 'mouse' && onFocus(d.id)}
                 onClick={() => onUse(d.id)}
               >
-                <Swatch def={d} />
+                {/* Starting a new stage, each look is seen in the venue picked above. */}
+                <Swatch def={start ? { ...d, venueId: venue } : d} />
                 <span className="template-text">
                   <span className="stage-name">
                     {d.name}

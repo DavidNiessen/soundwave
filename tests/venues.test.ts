@@ -10,6 +10,7 @@ import type { ModelData } from '../src/render/venues/kit/model';
 import { PLAYERS, liftHeight, type LiftFrame } from '../src/render/venues/kit/podiums';
 import { laserPrograms } from '../src/render/venues/warehouseLasers';
 import { normalizeSettings } from '../src/game/settings';
+import { stageVenue } from '../src/game/stages';
 
 describe('venues', () => {
   it('knows every venue and the random choice', () => {
@@ -37,11 +38,13 @@ describe('venues', () => {
     expect(menuVenue('random')).toBe(DEFAULT_VENUE);
   });
 
-  it('stores the venue with the settings and repairs a stored one it does not know', () => {
-    expect(normalizeSettings({}).venue).toBe(DEFAULT_VENUE);
-    expect(normalizeSettings({ venue: 'basement' }).venue).toBe('basement');
-    expect(normalizeSettings({ venue: 'random' }).venue).toBe('random');
-    expect(normalizeSettings({ venue: 'stadium' as never }).venue).toBe(DEFAULT_VENUE);
+  it('takes the venue from the stage in use, and repairs a stored one it does not know', () => {
+    const stage = (venueId: unknown) =>
+      normalizeSettings({ stage: { active: 'mine-1', mine: [{ id: 'mine-1', venueId }] } as never }).stage;
+    expect(stageVenue(normalizeSettings({}).stage)).toBe(DEFAULT_VENUE);
+    expect(stageVenue(stage('basement'))).toBe('basement');
+    expect(stageVenue(stage('random'))).toBe('random');
+    expect(stageVenue(stage('stadium'))).toBe(DEFAULT_VENUE);
   });
 });
 

@@ -4,6 +4,7 @@
  * kept in the settings, so they travel with a library backup.
  */
 import type { Sky, StageLook } from '../render/stage/look';
+import { DEFAULT_VENUE, isVenueChoice, VENUES, type VenueChoice } from '../render/venues/catalog';
 
 /** A colour as `#rrggbb`. */
 export type Hex = string;
@@ -32,6 +33,8 @@ export interface StageDef {
   id: string;
   name: string;
   backdrop: Backdrop;
+  /** The 3D venue it stands in (see src/render/venues/catalog.ts), or a different one for every song. */
+  venueId: VenueChoice;
   /** The sky over the 3D stage. */
   sky: Sky;
   /** How much a video, picture or gradient is darkened behind the highway, 0..0.85. */
@@ -71,6 +74,7 @@ export const RANGES = {
 
 const base: Omit<StageDef, 'id' | 'name'> = {
   backdrop: { kind: 'venue' },
+  venueId: DEFAULT_VENUE,
   sky: 'night',
   dim: 0.35,
   screens: null,
@@ -103,10 +107,12 @@ export const TEMPLATE_INFO: Record<string, string> = {
   sunset: 'Warm orange and pink washes.',
   neon: 'Green and magenta at full tilt.',
   minimal: 'No crowd, no fireworks: the highway in a quiet fog. The lightest to draw.',
+  // The venues' own stages: each venue with its own show.
+  ...Object.fromEntries(VENUES.filter((v) => v.id !== DEFAULT_VENUE).map((v) => [v.id, `${v.blurb}, with its own show.`])),
 };
 
 /** The templates shown in the browser itself; the rest are in its list of all templates. */
-export const FEATURED = ['blackout'];
+export const FEATURED = ['blackout', ...VENUES.filter((v) => v.id !== DEFAULT_VENUE).map((v) => v.id)];
 
 /** The stages that come with the game (the templates). They cannot be changed, only copied. */
 export const BUILT_IN: readonly StageDef[] = [
@@ -147,6 +153,8 @@ export const BUILT_IN: readonly StageDef[] = [
     crowd: false,
     pyro: false,
   },
+  // One for each venue besides Moonrise (whose stages are the ones above), with the venue's own show.
+  ...VENUES.filter((v) => v.id !== DEFAULT_VENUE).map((v): StageDef => ({ ...base, id: v.id, name: v.name, venueId: v.id })),
 ];
 
 export const DEFAULT_STAGES: StageSettings = { active: 'festival', mine: [] };
@@ -183,6 +191,7 @@ function normalizeDef(raw: unknown): StageDef | null {
     id: d.id,
     name: typeof d.name === 'string' && d.name.trim() ? d.name.trim().slice(0, 32) : 'My stage',
     backdrop: normalizeBackdrop(d.backdrop),
+    venueId: isVenueChoice(d.venueId) ? d.venueId : DEFAULT_VENUE,
     sky: d.sky === 'aurora' || d.sky === 'black' ? d.sky : 'night',
     dim: clamp(d.dim, RANGES.dim, 0.35),
     screens: typeof d.screens === 'string' && d.screens ? d.screens : null,
@@ -261,6 +270,9 @@ const hexToRgb = (hex: Hex): [number, number, number] => {
   };
   return [lin((n >> 16) & 255), lin((n >> 8) & 255), lin(n & 255)];
 };
+
+/** The venue the stage in use stands in (or Random). */
+export const stageVenue = (s: StageSettings): VenueChoice => findStage(s, s.active).venueId;
 
 /** The stage as the renderer takes it. */
 export function stageLook(d: StageDef): StageLook {

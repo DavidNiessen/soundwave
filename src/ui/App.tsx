@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { setDiscordEnabled, showScene } from '../app/discord';
-import { findStage } from '../game/stages';
+import { findStage, stageVenue } from '../game/stages';
 import { setActiveStage } from '../render/stage/showStage';
 import { analysisManager, canPlay } from '../analysis/manager';
 import { stemModel } from '../analysis/separation/model';
@@ -302,8 +302,8 @@ export function App() {
   useEffect(() => document.documentElement.style.setProperty('--ui-scale', String(settings.uiScale)), [settings.uiScale]);
   // The menus take the colours of the venue behind them (see the venue themes in styles.css).
   useEffect(() => {
-    document.documentElement.dataset.venue = menuVenue(settings.venue);
-  }, [settings.venue]);
+    document.documentElement.dataset.venue = menuVenue(stageVenue(settings.stage));
+  }, [settings.stage]);
   // Motion: the player's choice, or the system's when they left it alone.
   useEffect(() => {
     const media = matchMedia('(prefers-reduced-motion: reduce)');
@@ -1131,7 +1131,6 @@ export function App() {
           scores={scores}
           settings={settings}
           onPick={setPick}
-          onVenue={(venue) => updateSettings({ ...settings, venue })}
           onStart={() => void start(view)}
           onBack={() => (view.from === 'library' ? setView({ name: 'library' }) : goHome())}
         />
@@ -1190,7 +1189,6 @@ export function App() {
           replayActions={replayActions}
           onSettings={() => setView({ name: 'settings', back: view })}
           onStages={(stage) => updateSettings({ ...settings, stage })}
-          onVenue={(venue) => updateSettings({ ...settings, venue })}
           onExit={canExit() ? () => setExitAsk(true) : undefined}
           update={update.state === 'available' ? update.version : undefined}
           onUpdate={() => setAppCard('update')}
@@ -1201,7 +1199,7 @@ export function App() {
     }
     content = (
       <div className={`menu on-${view.name}`}>
-        <MenuBackground graphics={settings.graphics} venue={menuVenue(settings.venue)} onReady={onStage} />
+        <MenuBackground graphics={settings.graphics} onReady={onStage} />
         <StageBackdrop />
         <div className="veil" aria-hidden />
         {/* One entrance per screen change; the stage behind it stays. */}

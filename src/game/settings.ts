@@ -1,7 +1,6 @@
 import { normalizeBindings, type BindingOverrides } from '../input/bindings';
 import type { GlyphStyle, PadInput } from '../input/pads';
 import { DEFAULT_REPLAY_LIMIT, REPLAY_LIMIT } from '../storage/replays';
-import { DEFAULT_VENUE, isVenueChoice, type VenueChoice } from '../render/venues/catalog';
 import { DEFAULT_GRAPHICS, normalizeGraphics, type GraphicsSettings } from './graphics';
 import { DEFAULT_STAGES, normalizeStages, type StageSettings } from './stages';
 import { DEFAULT_VIDEO_EXPORT, normalizeVideoExport, type VideoExportSettings } from './videoExport';
@@ -46,8 +45,6 @@ export interface Settings {
   graphics: GraphicsSettings;
   /** How the stage looks: the one in use and the player's own (see stages.ts). */
   stage: StageSettings;
-  /** Where sets are played: a venue, or a different one for every song. */
-  venue: VenueChoice;
   /** How the desktop app's window fills the screen. */
   displayMode: DisplayMode;
   /** Interface size relative to the automatic one (which already grows with the window), 0.85..1.3. */
@@ -137,7 +134,6 @@ export const DEFAULT_SETTINGS: Settings = {
   bindings: {},
   graphics: DEFAULT_GRAPHICS,
   stage: DEFAULT_STAGES,
-  venue: DEFAULT_VENUE,
   displayMode: 'borderless',
   uiScale: 1,
   motion: 'system',
@@ -179,7 +175,6 @@ export function normalizeSettings(raw: Partial<Settings>): Settings {
   s.volumeDefaults = VOLUME_DEFAULTS;
   s.graphics = normalizeGraphics(s.graphics);
   s.stage = normalizeStages(s.stage);
-  if (!isVenueChoice(s.venue)) s.venue = DEFAULT_VENUE;
   if (!DISPLAY_MODES.includes(s.displayMode)) s.displayMode = DEFAULT_SETTINGS.displayMode;
   s.uiScale = Math.min(1.3, Math.max(0.85, Number(s.uiScale) || 1));
   if (!['system', 'reduced', 'full'].includes(s.motion)) s.motion = 'system';

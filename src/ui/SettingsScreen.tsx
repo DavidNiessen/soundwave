@@ -1,4 +1,3 @@
-import { VENUES, type VenueChoice } from '../render/venues/catalog';
 import {
   ArrowLeft,
   ChevronLeft,
@@ -690,18 +689,6 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
       {
         title: 'Stage',
         rows: [
-          {
-            kind: 'choice',
-            id: 'venue',
-            label: 'Venue',
-            help: 'Where your sets are played. Also on the Ready up screen.',
-            value: s.venue,
-            options: [
-              ...VENUES.map((v) => ({ value: v.id, label: v.name, help: `${v.blurb}.` })),
-              { value: 'random', label: 'Random', help: 'A different venue for every song.' },
-            ],
-            set: (v) => set({ venue: v as VenueChoice }),
-          },
           {
             kind: 'choice',
             id: 'preset',

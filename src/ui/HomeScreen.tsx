@@ -62,8 +62,6 @@ interface Props {
   onSettings(): void;
   /** The player's stages changed in the Stage tab. */
   onStages(next: Settings['stage']): void;
-  /** The venue sets are played in changed (in the Stage tab's editor). */
-  onVenue(next: Settings['venue']): void;
   /** Asks whether to close the game (absent where the game cannot close itself, as in a browser tab). */
   onExit?(): void;
   /** The version of an update that is ready to install, when the desktop app found one. */
@@ -110,7 +108,6 @@ export function HomeScreen({
   replayActions,
   onSettings,
   onStages,
-  onVenue,
   onExit,
   update,
   onUpdate,
@@ -170,7 +167,7 @@ export function HomeScreen({
   opening.current ??= new Set([...sets.map((s) => s.id), ...(empty ? ['add'] : [])]);
   const late = (id: string) => (opening.current!.has(id) ? '' : 'late');
 
-  const stage = useStageBrowser({ stages: settings.stage, settings, on: tab === 'stage', onChange: onStages, onVenue });
+  const stage = useStageBrowser({ stages: settings.stage, settings, on: tab === 'stage', onChange: onStages });
 
   useActions([
     ...(tab === 'stage'

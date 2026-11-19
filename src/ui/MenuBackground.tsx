@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { BandMeter } from '../audio/bands';
 import { getEngine } from '../audio/engine';
 import { gpuKnown, resolveGraphics, type GraphicsSettings } from '../game/graphics';
-import { acquireMenuStage, menuStageBoosted, releaseMenuStage } from '../render/aurora/menuStage';
+import { acquireMenuStage, menuStageBoosted, releaseMenuStage, watchMenuLoading } from '../render/aurora/menuStage';
+import { shownStage, watchShownStage } from '../render/stage/showStage';
 import type { StageView } from '../render/stage/StageView';
-import type { VenueId } from '../render/venues/catalog';
+import { menuVenue, VENUES, type VenueId } from '../render/venues/catalog';
 
 /**
  * The backdrop behind menus: the 3D stage idling with slow camera moves, reacting to whatever the
@@ -13,9 +14,14 @@ import type { VenueId } from '../render/venues/catalog';
  * shows a black frame, and it draws in a worker of its own (see StageView), so it never slows the
  * menus down.
  *
+ * It stands in the venue of the stage shown (the player's, or one tried out in the Stage tab); while
+ * another venue loads, the one before stays and a small note says what is loading.
+ *
  * `onReady` is told once the stage has drawn (or cannot be built): the loading screen waits for it.
  */
-export function MenuBackground({ graphics, venue, onReady }: { graphics: GraphicsSettings; venue: VenueId; onReady?(): void }) {
+export function MenuBackground({ graphics, onReady }: { graphics: GraphicsSettings; onReady?(): void }) {
+  const def = useSyncExternalStore(watchShownStage, shownStage);
+  const venue = menuVenue(def?.venueId ?? 'moonrise');
   const stageRef = useRef<HTMLDivElement>(null);
   const readyRef = useRef(onReady);
   readyRef.current = onReady;
@@ -60,5 +66,41 @@ export function MenuBackground({ graphics, venue, onReady }: { graphics: Graphic
       if (acquired) releaseMenuStage();
     };
   }, [graphics, venue]);
-  return <div ref={stageRef} className="layer stage-host" />;
+  return (
+    <>
+      <div ref={stageRef} className="layer stage-host" />
+      <StageLoading />
+    </>
+  );
+}
+
+/** How long a venue may take before the note shows: one already loaded never flashes it, ms. */
+const NOTE_DELAY_MS = 250;
+
+/** A note while a venue loads behind the menus (the one before stays on screen meanwhile). */
+function StageLoading() {
+  const [venue, setVenue] = useState<VenueId | null>(null);
+  useEffect(() => {
+    let timer = 0;
+    const stop = watchMenuLoading((v) => {
+      clearTimeout(timer);
+      if (!v) return setVenue(null);
+      timer = window.setTimeout(() => setVenue(v), NOTE_DELAY_MS);
+    });
+    return () => {
+      clearTimeout(timer);
+      stop();
+    };
+  }, []);
+  const name = VENUES.find((v) => v.id === venue)?.name;
+  return (
+    <div className={`stage-loading ${name ? 'on' : ''}`} role="status" aria-live="polite">
+      {name && (
+        <>
+          <span className="stage-loading-ring" aria-hidden />
+          <span>Loading {name}…</span>
+        </>
+      )}
+    </div>
+  );
 }
