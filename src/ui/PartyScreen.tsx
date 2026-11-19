@@ -13,6 +13,7 @@ import {
   Download,
   Gavel,
   Trophy,
+  Music,
   Gauge,
   ListMusic,
   LogIn,
@@ -56,6 +57,10 @@ interface Props {
   onBack(): void;
   /** Opens the server's leaderboards. */
   onBoards(): void;
+  /** Opens the server's shared songs. */
+  onSongs(): void;
+  /** Gets one of the party's songs this player lacks (from the server, or asked of the host). */
+  onGetSong(id: string): void;
   /** Changes settings (the audio offset, calibrated from the lobby). */
   onSettings(patch: Partial<Settings>): void;
 }
@@ -72,7 +77,7 @@ export function PartyScreen(props: Props) {
   if (s.status === 'off' || s.status === 'signed-out' || !s.account) {
     body =
       s.status === 'connecting' || (s.status === 'reconnecting' && !s.account) ? <Waiting s={s} /> : <Connect s={s} settings={settings} />;
-  } else if (!s.party) body = <NoParty s={s} settings={settings} onBoards={props.onBoards} />;
+  } else if (!s.party) body = <NoParty s={s} settings={settings} onBoards={props.onBoards} onSongs={props.onSongs} />;
   else if (s.party.phase === 'results') body = <PartyResults party={s.party} s={s} settings={settings} onStartSong={props.onStartSong} />;
   else body = <Lobby {...props} s={s} party={s.party} />;
 
@@ -293,7 +298,7 @@ function Connect({ s }: { s: OnlineState; settings: Settings }) {
 
 /* Signed in, in no party ------------------------------------------------------------------- */
 
-function NoParty({ s, settings, onBoards }: { s: OnlineState; settings: Settings; onBoards(): void }) {
+function NoParty({ s, settings, onBoards, onSongs }: { s: OnlineState; settings: Settings; onBoards(): void; onSongs(): void }) {
   const hints = useHints(settings);
   const [admin, setAdmin] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -331,6 +336,7 @@ function NoParty({ s, settings, onBoards }: { s: OnlineState; settings: Settings
     { id: 'party-sign-out', label: 'Sign out', icon: LogOut, ...keysOf('party.signOut'), bar: false, run: () => online.signOut() },
     { id: 'party-export', label: 'Save my data', icon: Download, ...keysOf('party.export'), bar: false, run: () => void saveData() },
     { id: 'party-boards', label: 'Leaderboards', icon: Trophy, ...keysOf('party.boards'), run: onBoards },
+    { id: 'party-songs', label: 'Shared songs', icon: Music, ...keysOf('party.songs'), bar: false, run: onSongs },
     ...(mod
       ? [{ id: 'party-admin', label: 'Run the server', icon: Gavel, ...keysOf('party.admin'), bar: false, run: () => setAdmin((a) => !a) }]
       : []),
@@ -414,6 +420,11 @@ function NoParty({ s, settings, onBoards }: { s: OnlineState; settings: Settings
             <Trophy strokeWidth={ICON_STROKE} aria-hidden />
             Leaderboards
           </button>
+          <button type="button" className="btn" data-action="party-songs" onClick={onSongs}>
+            <Hint {...keysOf('party.songs')} {...hints} />
+            <Music strokeWidth={ICON_STROKE} aria-hidden />
+            Shared songs
+          </button>
           {mod && (
             <button type="button" className="btn" data-action="party-admin" onClick={() => setAdmin((a) => !a)}>
               <Hint kbd={keysOf('party.admin').kbd} {...hints} />
@@ -445,6 +456,7 @@ function PartyLobby({
   pick,
   onPick,
   onStartSong,
+  onGetSong,
   settings,
   onSettings,
   s,
@@ -538,7 +550,12 @@ function PartyLobby({
                     </span>
                     <span className="set-notes">
                       {!has(song.id) ? (
-                        <span className="warn">Missing: you sit this song out. Add it to your library to play it.</span>
+                        <span className="warn">
+                          Missing: you sit this song out unless you get it.{' '}
+                          <button type="button" className="btn small" onClick={() => onGetSong(song.id)}>
+                            Get it
+                          </button>
+                        </span>
                       ) : (
                         `${party.members.filter((m) => m.have.includes(song.id)).length} of ${party.members.length} have it`
                       )}

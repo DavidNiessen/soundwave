@@ -84,10 +84,13 @@ import { MetadataSheet } from './MetadataSheet';
 import { Toasts, useToasts } from './Toasts';
 import { PartyBoard, PartyScreen } from './PartyScreen';
 import { BoardsScreen } from './Boards';
+import { SongsScreen } from './SongsScreen';
+import { hashBytes } from '../storage/hash';
+import { writeSoundwave } from '../storage/soundwaveFile';
 import { decodeRun, encodeRun } from '../net/runs';
 import { replayResults } from '../game/replay';
-import { online, parseInvite, type PartyStart } from '../net/client';
-import type { Challenge, WireChart } from '../net/protocol';
+import { online, parseInvite, type PartyStart, type SongEvent } from '../net/client';
+import type { Challenge, SharedSong, WireChart } from '../net/protocol';
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { installUiSounds } from './uiSounds';
 
@@ -121,6 +124,8 @@ type View =
   | { name: 'party' }
   /** The server's leaderboards, challenges and shared replays. */
   | { name: 'boards' }
+  /** The server's library of shared songs. */
+  | { name: 'songs' }
   | { name: 'settings'; back: View }
   | EditorView
   | { name: 'play'; run: Run; buffer: AudioBuffer; key: number }
@@ -155,6 +160,7 @@ const DEPTH: Record<View['name'], number> = {
   lobby: 2,
   party: 2,
   boards: 3,
+  songs: 3,
   editor: 2,
   play: 3,
   replay: 3,
@@ -1087,6 +1093,58 @@ export function App() {
     if (partyNext && byId.has(partyNext)) void loadSongBuffer(partyNext).catch(() => {});
   }, [partyNext, byId]);
 
+  /* Shared songs ---------------------------------------------------------------------------- */
+
+  /** Downloads a whole shared song into the library. */
+  const getShared = async (song: { id: string; title: string }) => {
+    const blob = await online.downloadSong(song.id);
+    const got = await importFiles([new File([blob], `${song.title}.soundwave`)]);
+    if (!got.length) throw new Error(`"${song.title}" could not be added.`);
+  };
+  /** A charts-only song: the player's own audio, checked to be the very same file, with the server's charts. */
+  const useOwnCopy = async (song: SharedSong, audio: File) => {
+    if ((await hashBytes(await audio.arrayBuffer())) !== song.id)
+      throw new Error(`That file is not the same recording as "${song.title}": it has to be the very same file to use its charts.`);
+    const c = await online.songCharts(song.id);
+    const file = await writeSoundwave({ meta: c.meta, analysis: c.analysis ?? undefined, edits: c.edits ?? undefined, audio });
+    const got = await importFiles([new File([file], `${song.title}.soundwave`)]);
+    if (!got.length) throw new Error(`"${song.title}" could not be added.`);
+  };
+  const shareSong = async (song: SongMeta) => void (await online.shareSong(await songFile(song.id)));
+  /** A party's song this player lacks: from the server's library if it is there, else asked of the host. */
+  const getPartySong = (id: string) => {
+    const set = online.snapshot().party?.set.find((x) => x.id === id);
+    if (!set) return;
+    void getShared(set).then(
+      () => toast(`"${set.title}" is in your library.`),
+      () => {
+        online.requestSong(id);
+        toast(`Asked the host for "${set.title}".`);
+      },
+    );
+  };
+  // The host is asked for a song: shared to the server for that player, if this player shares
+  // songs and the server takes them. A song asked for that is ready is downloaded.
+  const songEventRef = useRef<(e: SongEvent) => void>(() => {});
+  songEventRef.current = (e) => {
+    const title = online.snapshot().party?.set.find((x) => x.id === e.songId)?.title ?? 'the song';
+    if (e.type === 'song-ready') {
+      if (!e.ok) return toast(`The host could not send "${title}". Add it to your library yourself to play it.`);
+      return void getShared({ id: e.songId, title }).then(
+        () => toast(`"${title}" is in your library.`),
+        (err: Error) => toast(err.message),
+      );
+    }
+    const song = byId.get(e.songId);
+    const can = settingsRef.current.shareSongs && online.snapshot().info?.sharing === 'songs' && !!song;
+    if (!can) return online.songSent(e.songId, e.from, false);
+    void shareSong(song).then(
+      () => (online.songSent(e.songId, e.from, true), toast(`Sent "${song.title}" to ${e.name}.`)),
+      () => online.songSent(e.songId, e.from, false),
+    );
+  };
+  useEffect(() => online.onSong((e) => songEventRef.current(e)), []);
+
   /** A party's song is over: the score is kept here as any other, and the party gets it. */
   const finishPartySong = (run: Run, results: Results, inputs?: ReplayInputs) => {
     void keepScore(run, results, inputs);
@@ -1243,6 +1301,8 @@ export function App() {
         return showScene({ details: 'Playing together' });
       case 'boards':
         return showScene({ details: 'Looking at the leaderboards' });
+      case 'songs':
+        return showScene({ details: 'Browsing shared songs' });
       case 'editor':
         return showScene({ details: named(view.song), state: 'Editing the chart' });
       case 'play': {
@@ -1250,7 +1310,14 @@ export function App() {
         const part = run.charts[run.index].part;
         const what = `${PART_LABEL[part]} · ${DIFFICULTY_LABEL[run.pick.difficulty]}`;
         const where = run.test ? 'Test play' : run.songs.length > 1 ? `Song ${run.index + 1} of ${run.songs.length}` : '';
-        return showScene({ details: named(run.songs[run.index]), state: where ? `${what} · ${where}` : what, part, partText: what });
+        return showScene({
+          details: named(run.songs[run.index]),
+          state: where ? `${what} · ${where}` : what,
+          part,
+          partText: what,
+          // The song's cover, where a server shares it publicly; the game's icon otherwise.
+          cover: online.coverUrl(run.songs[run.index].id),
+        });
       }
       case 'results': {
         const { song, results } = view.run.results[view.run.index] ?? { song: view.run.songs[view.run.index], results: null };
@@ -1415,7 +1482,20 @@ export function App() {
           settings={settings}
           onBack={goHome}
           onBoards={() => setView({ name: 'boards' })}
+          onSongs={() => setView({ name: 'songs' })}
+          onGetSong={getPartySong}
           onSettings={(patch) => updateSettings({ ...settings, ...patch })}
+        />
+      );
+    } else if (view.name === 'songs') {
+      screen = (
+        <SongsScreen
+          library={songs}
+          settings={settings}
+          onGet={getShared}
+          onUseOwnCopy={useOwnCopy}
+          onShare={shareSong}
+          onBack={() => setView({ name: 'party' })}
         />
       );
     } else if (view.name === 'boards') {

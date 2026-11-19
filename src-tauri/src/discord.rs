@@ -57,6 +57,9 @@ pub struct Presence {
     part: Option<String>,
     #[serde(default)]
     part_text: Option<String>,
+    /// The song's cover, by a public https address (a Soundwave server's): the large picture.
+    #[serde(default)]
+    cover: Option<String>,
 }
 
 /// The badge picture for a part (src-tauri/icons/discord/), for the parts there are.
@@ -112,12 +115,22 @@ fn send(
             let state = p.state.as_deref().map(fit);
             let badge = p.part.as_deref().and_then(part_badge);
             let badge_text = p.part_text.as_deref().map(fit);
-            let mut assets = Assets::new().large_image(ICON_URL).large_text("Soundwave");
+            // With a cover (from a server), it is the large picture and the game's icon the small one,
+            // unless the part's badge takes that place.
+            let cover = p
+                .cover
+                .as_deref()
+                .filter(|c| c.starts_with("https://") && c.len() < 256);
+            let mut assets = Assets::new()
+                .large_image(cover.unwrap_or(ICON_URL))
+                .large_text("Soundwave");
             if let Some(badge) = &badge {
                 assets = assets.small_image(badge.as_str());
                 if let Some(text) = &badge_text {
                     assets = assets.small_text(text.as_str());
                 }
+            } else if cover.is_some() {
+                assets = assets.small_image(ICON_URL).small_text("Soundwave");
             }
             let mut activity = Activity::new()
                 .activity_type(ActivityType::Playing)

@@ -20,6 +20,8 @@ export interface Presence {
   /** The part being played, shown as a small badge on the game's icon, with its hover text. */
   part?: Part;
   partText?: string;
+  /** The song's cover, by a public https address (a server's), shown as the large picture. */
+  cover?: string;
 }
 
 /** Where the song being played stands, and how many seconds of it are left. */

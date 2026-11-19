@@ -75,6 +75,22 @@ this week. Any run on a board can be watched; players can share runs to the serv
 send one to a friend as a challenge, played against as a ghost. The owner and moderators set the
 weekly challenge and remove cheated runs.
 
+## Shared songs
+
+Off by default. Sharing music with others can infringe copyright, and you answer for what your
+server hands out, so turning it on is your decision: set `songSharing` (`SOUNDWAVE_SONG_SHARING`) to
+`songs` for whole songs, audio included, or `charts` to keep everything but the audio (a player then
+adds their own copy of the very same recording, which the game checks). `songMaxMb` limits one song,
+`quotaMb` what each player shares in all. Every song records who shared it and when; players can
+report a song, and the uploader, you or a moderator can remove it everywhere at once.
+
+With `publicCovers` (`SOUNDWAVE_PUBLIC_COVERS`) on, song covers are served without signing in, so a
+player's Discord status can show the cover of the song they play. Only covers, never audio.
+
+In a party, a player without one of the set's songs can get it: from the library when it is there,
+otherwise the host's game shares it for them (if the host lets it, in Settings → Online, and the
+server takes whole songs).
+
 ## HTTPS
 
 The server speaks plain HTTP. The game connects over plain HTTP only to a server on the player's
