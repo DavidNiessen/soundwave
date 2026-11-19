@@ -112,6 +112,11 @@ export class GameSession {
     return this.points + this.sustainPoints(this.now);
   }
 
+  /** The song time the session has reached. */
+  get time() {
+    return this.now;
+  }
+
   /** The overdrive meter right now, 0..1. */
   get overdrive() {
     return this.overdriveActive ? Math.max(0, this.meter - Math.max(0, this.now - this.mark) * this.drain) : this.meter;
@@ -228,12 +233,27 @@ export class GameSession {
     return true;
   }
 
-  /** Advance to song time t: what is due before t happens, each thing at its own time. */
+  /**
+   * Advance to song time t: what is due before t happens, each thing at its own time. Time only
+   * goes forward here, so a frame whose clock reads a little behind the last input changes nothing;
+   * the song is wound back only by `rewind`.
+   */
   update(t: number) {
-    // The song was wound back (after a pause): time counts on from there.
-    if (t < this.now) this.mark = Math.min(this.mark, t);
+    if (!(t > this.now)) return;
     this.advance(t);
     this.now = t;
+  }
+
+  /**
+   * The song was wound back to song time t (resuming from a pause): time counts on from there, so
+   * an overdrive still running drains again over the stretch that is played twice. Notes already
+   * judged stay judged. Holds are dropped first (`dropHolds`), as a pause does.
+   */
+  rewind(t: number) {
+    if (!(t < this.now)) return;
+    this.settle(this.now);
+    this.now = t;
+    this.mark = t;
   }
 
   /** Brings the session to the time of an input: what was due before it has happened, and the points up to it are settled. */

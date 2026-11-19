@@ -20,9 +20,10 @@
 import { DIFFICULTIES, PARTS, type Chart, type Difficulty, type Note, type Part } from '../chart/types';
 import type { Results } from '../game/GameSession';
 import { GOLD_STARS } from '../game/scoring';
-import type { ReplayInputs } from '../game/replay';
+import { LAST_OP, type ReplayInputs } from '../game/replay';
 
-export const REPLAY_VERSION = 1;
+/** 2: a run is its inputs, with a rewind for each pause (1 also held an update for every frame). */
+export const REPLAY_VERSION = 2;
 const MAGIC = 'SWREPLAY';
 /** Most operations read from one file: a long song at a high frame rate stays far below it. */
 const MAX_OPS = 4_000_000;
@@ -123,7 +124,7 @@ export async function readReplay(file: Blob): Promise<Replay> {
   const m = cleanMeta(meta);
   const c = cleanChart(chart);
   if (!m || !c || c.part !== m.part || c.difficulty !== m.difficulty) throw bad();
-  for (let i = 0; i < k; i++) if ((ops[i] & 7) > 4 || ops[i] >> 3 >= c.lanes || Number.isNaN(times[i])) throw bad();
+  for (let i = 0; i < k; i++) if ((ops[i] & 7) > LAST_OP || ops[i] >> 3 >= c.lanes || Number.isNaN(times[i])) throw bad();
   return { meta: m, data: { id: m.id, chart: c, inputs: { ops, times } } };
 }
 

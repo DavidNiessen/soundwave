@@ -6,7 +6,7 @@ import { StageView } from '../render/stage/StageView';
 import { barAt, barIntensity } from '../render/stage/LightShow';
 import { resolveGraphics } from './graphics';
 import { GameSession, type Results } from './GameSession';
-import { ReplayPlayback, ReplayRecorder, type ReplayInputs } from './replay';
+import { ReplayPlayback, ReplayRecorder, replayResults, type ReplayInputs } from './replay';
 import { BufferAnalyser } from '../audio/bufferAnalyser';
 import type { StageInput } from '../render/stage/protocol';
 import { Rumbler } from '../input/rumble';
@@ -444,6 +444,7 @@ export class PlayController {
     // Rewind slightly so the player can re-enter the groove.
     const at = Math.max(this.startAt - LEAD_IN, this.engine.time() - 1.5);
     this.recorder!.dropHolds(this.engine.time());
+    this.recorder!.rewind(at);
     await this.engine.play(at, 0.05);
     this.highway.reset();
     this.lastCount = -1;
@@ -518,10 +519,14 @@ export class PlayController {
   private finish() {
     if (this.phase === 'finished') return;
     if (this.playback) this.playback.finish();
-    else this.recorder!.update(Number.POSITIVE_INFINITY);
+    else this.recorder!.end();
     this.setPhase('finished');
     this.stage?.finale(FINALE_SECONDS);
-    this.onFinish(this.session.results(), this.recorder?.take());
+    // The score of record is the run judged again from its inputs alone. Live, an input can reach
+    // the session after a frame has already moved past its time, and be judged a few milliseconds
+    // off; judged again, every input is taken at its own time, as a replay or a server would.
+    const inputs = this.recorder?.take();
+    this.onFinish(inputs ? replayResults(this.chart, inputs) : this.session.results(), inputs);
   }
 
   private loop = () => {
