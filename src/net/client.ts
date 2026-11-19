@@ -373,8 +373,9 @@ class OnlineClient {
   }
 
   /** Everything the server holds about the player (a JSON file to save). */
+  /** Everything the server holds about the player: a zip, with a README of what each file is. */
   exportData() {
-    return this.request<unknown>('/me/export', { auth: true });
+    return this.request<Blob>('/me/export', { auth: true, file: true });
   }
 
   /* Leaderboards and runs -------------------------------------------------------- */

@@ -11,8 +11,8 @@ import type { SongMeta } from '../storage/db';
 import { ICON_STROKE } from './icons';
 
 /** Saves text as a file the player keeps (their data from the server). */
-export function download(name: string, text: string, type = 'application/json') {
-  const url = URL.createObjectURL(new Blob([text], { type }));
+export function download(name: string, data: string | Blob, type = 'application/json') {
+  const url = URL.createObjectURL(typeof data === 'string' ? new Blob([data], { type }) : data);
   const a = document.createElement('a');
   a.href = url;
   a.download = name;

@@ -26,6 +26,7 @@ import {
   SkipForward,
   Swords,
   Undo2,
+  UserMinus,
   UserPlus,
   Users,
   WifiOff,
@@ -363,7 +364,7 @@ function NoParty({
   const saveData = async () => {
     try {
       const data = await online.exportData();
-      download(`soundwave-${s.info?.name ?? 'server'}-my-data.json`.replace(/[^\w.-]+/g, '-'), JSON.stringify(data, null, 2));
+      download(`soundwave-${s.info?.name ?? 'server'}-my-data.zip`.replace(/[^\w.-]+/g, '-'), data);
     } catch (e) {
       online.report((e as Error).message);
     }
@@ -698,7 +699,14 @@ function PartyLobby({
         </h2>
         <ul className="party-members">
           {party.members.map((m) => (
-            <MemberLine key={m.id} m={m} host={m.id === party.host} me={m.id === me.id} setSize={party.set.length} />
+            <MemberLine
+              key={m.id}
+              m={m}
+              host={m.id === party.host}
+              me={m.id === me.id}
+              setSize={party.set.length}
+              onRemove={host && m.id !== me.id ? () => online.kick(m.id) : undefined}
+            />
           ))}
         </ul>
         {!calibrated && (
@@ -922,7 +930,20 @@ function ShowdownPanel({
   );
 }
 
-function MemberLine({ m, host, me, setSize }: { m: Member; host: boolean; me: boolean; setSize: number }) {
+function MemberLine({
+  m,
+  host,
+  me,
+  setSize,
+  onRemove,
+}: {
+  m: Member;
+  host: boolean;
+  me: boolean;
+  setSize: number;
+  /** The host removes this player from the party (absent for the host's own line, and for everyone else). */
+  onRemove?: () => void;
+}) {
   const Icon = PART_ICON[m.part];
   const missing = setSize - m.have.length;
   return (
@@ -948,6 +969,11 @@ function MemberLine({ m, host, me, setSize }: { m: Member; host: boolean; me: bo
           .filter(Boolean)
           .join(' · ')}
       </span>
+      {onRemove && (
+        <button type="button" className="btn small party-remove" aria-label={`Remove ${m.name} from the party`} onClick={onRemove}>
+          <UserMinus strokeWidth={ICON_STROKE} aria-hidden />
+        </button>
+      )}
     </li>
   );
 }

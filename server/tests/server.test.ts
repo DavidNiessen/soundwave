@@ -6,6 +6,22 @@ import { DEFAULTS, type Config } from '../src/config.ts';
 import { Store } from '../src/db.ts';
 import { Parties } from '../src/parties.ts';
 
+/** The files of a data export (a zip whose files are stored as they are), by name. */
+async function exported(token: string): Promise<Record<string, string>> {
+  const res = await fetch(server.url + '/me/export', { headers: { Authorization: `Bearer ${token}` } });
+  expect(res.headers.get('content-type')).toBe('application/zip');
+  const zip = Buffer.from(await res.arrayBuffer());
+  const files: Record<string, string> = {};
+  for (let at = 0; zip.readUInt32LE(at) === 0x04034b50;) {
+    const size = zip.readUInt32LE(at + 18);
+    const nameLength = zip.readUInt16LE(at + 26);
+    const name = zip.toString('utf8', at + 30, at + 30 + nameLength);
+    files[name] = zip.toString('utf8', at + 30 + nameLength, at + 30 + nameLength + size);
+    at += 30 + nameLength + size;
+  }
+  return files;
+}
+
 const SONG = 'a'.repeat(64);
 const SONG2 = 'b'.repeat(64);
 const chart = (duration = 30): WireChart => ({
@@ -170,9 +186,10 @@ describe('accounts', () => {
     expect((await api('POST', '/mod/ban', { name: 'Owner' }, modAgain.access)).status).toBe(403);
     const log = await api<{ action: string; target: string; reason: string }[]>('GET', '/mod/audit', undefined, owner.access);
     expect(log.body[0]).toMatchObject({ action: 'ban 2 h', target: 'Player', reason: 'Cheating' });
-    const exp = await api<{ account: { name: string } }>('GET', '/me/export', undefined, owner.access);
-    expect(exp.body.account.name).toBe('Owner');
-    expect(JSON.stringify(exp.body)).not.toContain('argon2id$');
+    const exp = await exported(owner.access);
+    expect(Object.keys(exp).sort()).toEqual(['README.txt', 'account.json', 'avatar.json', 'bands.json', 'runs.json', 'songs-shared.json']);
+    expect(JSON.parse(exp['account.json']).account.name).toBe('Owner');
+    expect(Object.values(exp).join('\n')).not.toContain('argon2id$');
   });
 });
 
@@ -249,8 +266,8 @@ describe('parties over the network', () => {
     await api('PUT', '/me/profile', { avatar: theirs }, guestS.access);
     const seen = await shown;
     expect(seen.party!.members.find((x) => x.name === 'Guest')!.avatar).toEqual(theirs);
-    const exp = await api<{ avatar: unknown }>('GET', '/me/export', undefined, guestS.access);
-    expect(exp.body.avatar).toEqual(theirs);
+    const exp = await exported(guestS.access);
+    expect(JSON.parse(exp['avatar.json'])).toEqual(theirs);
   });
 
   it('end for everyone when the host leaves, and refuse what only the host may do', async () => {

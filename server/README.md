@@ -148,6 +148,39 @@ Parties live in memory and are gone when the server stops. There is no telemetry
 everything the server holds about them from the game (**Save my data**, `GET /me/export`) and delete
 their account (`DELETE /me`).
 
+## API
+
+Every request but `/info`, the join page, the sign-up and sign-in, and public covers needs a signed-in
+player's access token (`Authorization: Bearer …`). Bodies and answers are JSON unless said otherwise.
+
+| Request                                              | What it does                                                                |
+| ---------------------------------------------------- | --------------------------------------------------------------------------- |
+| `GET /info`                                          | The server's name, description, join mode, protocol version, players online |
+| `GET /join?invite=…`                                 | The join page an invite link opens (HTML)                                   |
+| `POST /auth/signup`, `/auth/signin`, `/auth/refresh` | Make an account, sign in, trade a refresh token for new tokens              |
+| `GET /me`, `DELETE /me`                              | The signed-in account; delete it and everything with it                     |
+| `GET /me/export`                                     | Everything held about the player: a zip with a README (`application/zip`)   |
+| `GET /me/profile`, `PUT /me/profile`                 | The player's avatar: `{ avatar: { top, bottom, finish } \| null }`          |
+| `GET /presence`                                      | Who is online and what they are doing                                       |
+| `POST /invites`                                      | Make an invite link: `{ uses?, hours? }`                                    |
+| `POST /scores`                                       | A finished run, judged again before it is taken                             |
+| `GET /boards/top`                                    | The week's top players                                                      |
+| `GET /boards/:songId`                                | The charts of a song that have boards                                       |
+| `GET /boards/:songId/:chartId/:part/:difficulty`     | A board (`?week=1` for this week's)                                         |
+| `GET /scores/:id/run`                                | A run on a board, to watch it                                               |
+| `POST /scores/:id/share`                             | Share your run to the replay list, or not: `{ shared }`                     |
+| `DELETE /scores/:id?reason=…`                        | Remove a cheated run (owner and moderators)                                 |
+| `GET /replays?song=…`                                | The replays players shared                                                  |
+| `GET /bands/:songId`                                 | A song's band boards, one per line-up                                       |
+| `GET /showdown/rotation`, `POST /showdown/rotation`  | The Showdown rotation; set it (owner and moderators): `{ songs }`           |
+| `GET /songs?query=…`, `POST /songs`                  | Shared songs; share one (the `.soundwave` file as the body)                 |
+| `GET /songs/:id/file`, `GET /songs/:id/charts`       | A shared song's file, or its charts without the audio                       |
+| `POST /songs/:id/report`, `DELETE /songs/:id`        | Report a song; remove it (its uploader, the owner, moderators)              |
+| `GET /covers/:songId.jpg`                            | A shared song's cover (public with `publicCovers`)                          |
+| `GET /mod/reports`                                   | Reported songs (owner and moderators)                                       |
+| `POST /mod/…`, `GET /mod/audit`                      | Moderation, see above                                                       |
+| `/ws`                                                | The WebSocket: parties, Showdown, bands (see Protocol)                      |
+
 ## Protocol
 
 The messages are in [src/net/protocol.ts](../src/net/protocol.ts), shared with the game. A game and a

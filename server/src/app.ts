@@ -15,6 +15,7 @@ import type { Store, UserRow } from './db.ts';
 import { Parties } from './parties.ts';
 import { Bands } from './bands.ts';
 import { Profiles } from './profiles.ts';
+import { zip } from './zip.ts';
 import { Rotation } from './rotation.ts';
 import { Scores } from './scores.ts';
 import { joinPage } from './joinPage.ts';
@@ -35,6 +36,25 @@ type Handler = (
 ) => Promise<unknown> | unknown;
 
 /** An answer that is a file, not JSON (a song, a cover). */
+/** What a player's data export holds, file by file. */
+const EXPORT_README = (server: string) => `Your data on ${server}, a Soundwave server
+=============================================
+
+Everything this server holds about your account, as it was when you saved it.
+
+account.json       Your account (name, role, when it was made), a ban if there is one, the invites
+                   you made, and what moderators did about you. Your password is stored only as an
+                   Argon2id hash and sign-ins only as hashes of their tokens: neither is in here.
+avatar.json        Your look on the stage: three colours, or null when you have none.
+runs.json          Every run you sent to the leaderboards: the song, chart, part and difficulty, the
+                   score, and the inputs it was judged from (base64; see src/game/replay.ts in the
+                   game's source). Runs you shared to the replay list say so.
+bands.json         The band runs you played in, by song, with your part and difficulty.
+songs-shared.json  The songs you shared to the server's library.
+
+To delete your account and everything with it: Play together, Delete my account.
+`;
+
 class Binary {
   readonly type: string;
   readonly body: Buffer;
@@ -163,13 +183,20 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     },
     'GET /me/export': (req) => {
       const u = me(req);
-      return {
-        ...accounts.export(u),
-        avatar: profiles.avatarOf(u.id) ?? null,
-        runs: scores.exportOf(u),
-        songsShared: songs.exportOf(u),
-        bands: bands.exportOf(u.id),
-      };
+      const json = (v: unknown) => JSON.stringify(v, null, 2);
+      // One zip of everything held about the player, with a README of what each file is.
+      return new Binary(
+        'application/zip',
+        zip({
+          'README.txt': EXPORT_README(config.name),
+          'account.json': json(accounts.export(u)),
+          'avatar.json': json(profiles.avatarOf(u.id) ?? null),
+          'runs.json': json(scores.exportOf(u)),
+          'bands.json': json(bands.exportOf(u.id)),
+          'songs-shared.json': json(songs.exportOf(u)),
+        }),
+        'soundwave-my-data.zip',
+      );
     },
     'GET /me/profile': (req) => ({ avatar: profiles.avatarOf(me(req).id) ?? null }),
     'PUT /me/profile': (req, body) => {

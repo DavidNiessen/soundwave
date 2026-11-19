@@ -6765,15 +6765,19 @@ a.btn {
 }
 .party-member {
   display: grid;
-  grid-template-columns: 1.6rem minmax(0, 1fr) auto;
+  grid-template-columns: 1.6rem minmax(0, 1fr) auto auto;
   grid-template-areas:
-    'tick name pick'
-    'tick state state';
+    'tick name pick remove'
+    'tick state state remove';
   align-items: center;
   column-gap: 0.7rem;
   padding: 0.5rem 0.7rem;
   border-radius: var(--r-m);
   background: var(--row);
+}
+.party-remove {
+  grid-area: remove;
+  margin-left: 0.3rem;
 }
 .party-member.me {
   background: var(--row-hi);
