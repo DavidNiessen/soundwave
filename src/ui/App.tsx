@@ -71,6 +71,7 @@ import { LobbyScreen } from './LobbyScreen';
 import { watchStageLoading } from '../render/stage/StageView';
 import { bootDone, bootStep } from './boot';
 import { MenuBackground } from './MenuBackground';
+import { menuVenue } from '../render/venues/catalog';
 import { onBackdrop } from './windowDrag';
 import { InstallAppCard, UpdateCard } from './AppUpdates';
 import { checkForUpdates, updates } from '../app/updates';
@@ -296,6 +297,10 @@ export function App() {
     return () => window.removeEventListener('mousedown', press);
   }, [windowed]);
   useEffect(() => document.documentElement.style.setProperty('--ui-scale', String(settings.uiScale)), [settings.uiScale]);
+  // The menus take the colours of the venue behind them (see the venue themes in styles.css).
+  useEffect(() => {
+    document.documentElement.dataset.venue = menuVenue(settings.venue);
+  }, [settings.venue]);
   // Motion: the player's choice, or the system's when they left it alone.
   useEffect(() => {
     const media = matchMedia('(prefers-reduced-motion: reduce)');
@@ -1119,6 +1124,7 @@ export function App() {
           scores={scores}
           settings={settings}
           onPick={setPick}
+          onVenue={(venue) => updateSettings({ ...settings, venue })}
           onStart={() => void start(view)}
           onBack={() => (view.from === 'library' ? setView({ name: 'library' }) : goHome())}
         />
@@ -1186,7 +1192,7 @@ export function App() {
     }
     content = (
       <div className={`menu on-${view.name}`}>
-        <MenuBackground graphics={settings.graphics} onReady={onStage} />
+        <MenuBackground graphics={settings.graphics} venue={menuVenue(settings.venue)} onReady={onStage} />
         <div className="veil" aria-hidden />
         {/* One entrance per screen change; the stage behind it stays. */}
         {booted && (
