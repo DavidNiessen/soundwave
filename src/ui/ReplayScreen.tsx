@@ -9,7 +9,7 @@ import type { Settings } from '../game/settings';
 import { keysOf } from '../input/bindings';
 import { useInputMode } from '../input/inputMode';
 import { NAV_EVENT, TAB_EVENT, type Dir } from '../input/menuNav';
-import { backInput, pads, PAUSE_INPUT } from '../input/pads';
+import { backInput, confirmInput, pads, PAUSE_INPUT } from '../input/pads';
 import { menuPulse } from '../input/rumble';
 import type { ReplayMeta } from '../storage/replays';
 import { Hint, useActions, useHints } from './actions';
@@ -36,12 +36,6 @@ export const REPLAY_SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 /** Seconds a jump back or forward covers, and a step along the timeline with the arrows or the D-pad. */
 const JUMP = 10;
 const NUDGE = 5;
-/**
- * How long the controls stay after the last input while the replay plays: seconds of the song
- * heard, not of the clock, so a slow device that is still building the stage never hides them
- * before they were seen.
- */
-const IDLE_SECONDS = 2.6;
 /** Directions on a controller (see input/menuNav). */
 const PAD_DIRS = new Set(['b12', 'b13', 'b14', 'b15', 'a0-', 'a0+', 'a1-', 'a1+']);
 const ARROW_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
@@ -74,6 +68,8 @@ const speedLabel = (r: number) => `${r}×`;
  */
 export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, onBack, onExport }: Props) {
   const hints = useHints(settings);
+  const styleRef = useRef(hints.style);
+  styleRef.current = hints.style;
   const mode = useInputMode();
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -89,25 +85,15 @@ export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, 
   const [rate, setRateState] = useState(1);
   /** The end of the replay was reached: its card is up. */
   const [ended, setEnded] = useState(false);
-  /** The controls are in view (they step aside while the replay plays and nothing is touched). */
+  /** The controls are in view. They step aside only when the player hides them (the hide key or button). */
   const [awake, setAwake] = useState(true);
   const away = !awake && !ended;
   const awayRef = useRef(away);
   awayRef.current = away;
-  /** Seconds of the song left to play before the controls step aside (null: they stay). */
-  const idleLeft = useRef<number | null>(null);
   const duration = Math.max(chart.duration, buffer.duration);
 
-  /** Brings the controls back, and sends them away again after a while if the replay is playing. */
-  const wake = useCallback(() => {
-    setAwake(true);
-    idleLeft.current = phaseRef.current === 'playing' ? IDLE_SECONDS : null;
-  }, []);
-  const sleep = () => {
-    idleLeft.current = null;
-    setAwake(false);
-  };
-  useEffect(() => wake(), [phase, wake]);
+  const wake = useCallback(() => setAwake(true), []);
+  const sleep = () => setAwake(false);
 
   useEffect(() => {
     const ctrl = new PlayController(
@@ -133,20 +119,9 @@ export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, 
     // The time and the timeline's head follow the song every frame, outside React.
     let raf = 0;
     let shown = '';
-    let lastT = ctrl.time;
     const draw = () => {
       raf = requestAnimationFrame(draw);
       const t = ctrl.time;
-      // Only the song playing on counts down: a jump through it does not.
-      const step = (t - lastT) / ctrl.playbackRate;
-      lastT = t;
-      if (idleLeft.current !== null && ctrl.currentPhase === 'playing' && step > 0 && step < 0.5) {
-        idleLeft.current -= step;
-        if (idleLeft.current <= 0) {
-          idleLeft.current = null;
-          setAwake(false);
-        }
-      }
       const p = Math.max(0, Math.min(1, t / ctrl.duration));
       scrubRef.current?.style.setProperty('--p', p.toFixed(4));
       const now = clock(t);
@@ -231,40 +206,27 @@ export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, 
     return () => window.removeEventListener(TAB_EVENT, onTab);
   }, [stepRate]);
 
-  // Any input brings the controls back. While they are away, a direction only brings them back
-  // (it does not also move the focus, which the player could not see).
+  // Hidden controls stay hidden while the replay's shortcuts are used (play, jumps, speed). They come
+  // back with the hide key, a click or tap, or a move or press of the menus: that move or press
+  // only brings them back, it does not also act on a control the player could not see.
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (awayRef.current && ARROW_KEYS.has(e.key)) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-      }
+      if (!awayRef.current || (!ARROW_KEYS.has(e.key) && e.key !== 'Enter')) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
       wake();
     };
-    const pointer = (e: PointerEvent) => {
-      if (e.pointerType === 'mouse' && e.type === 'pointermove' && e.movementX === 0 && e.movementY === 0) return;
-      if (e.pointerType === 'touch' && e.type === 'pointermove') return;
-      // A tap on the picture puts the controls away again, as it brought them back.
-      const onPicture = e.target instanceof Element && !e.target.closest('.replay-dock, [data-modal]');
-      if (e.type === 'pointerdown' && e.pointerType === 'touch' && onPicture && !awayRef.current && phaseRef.current === 'playing') {
-        sleep();
-        return;
-      }
-      wake();
-    };
+    const pointer = () => awayRef.current && wake();
     const release = pads.capture((e) => {
-      if (!e.down) return false;
-      const swallow = awayRef.current && PAD_DIRS.has(e.input);
+      if (!e.down || !awayRef.current || (!PAD_DIRS.has(e.input) && e.input !== confirmInput(styleRef.current))) return false;
       wake();
-      return swallow;
+      return true;
     });
     window.addEventListener('keydown', key, true);
-    window.addEventListener('pointermove', pointer);
     window.addEventListener('pointerdown', pointer);
     return () => {
       release();
       window.removeEventListener('keydown', key, true);
-      window.removeEventListener('pointermove', pointer);
       window.removeEventListener('pointerdown', pointer);
     };
   }, [wake]);
@@ -374,22 +336,12 @@ export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, 
 
       <section className="replay-dock" aria-label="Replay controls" data-nav-group="replay">
         <header className="replay-head">
-          <button type="button" className="btn small quiet replay-leave" data-action="back" data-sfx="back" onClick={onBack}>
-            <Hint kbd="Escape" pad={backInput(hints.style)} {...hints} />
-            <ArrowLeft strokeWidth={ICON_STROKE} aria-hidden />
-            Back
-          </button>
           <div className="replay-what">
             <span className="replay-title">{replay.title}</span>
             <span className="replay-sub">
               {what} · {replayDate(replay.date)}
             </span>
           </div>
-          <button type="button" className="btn small quiet replay-export" data-action="export" onClick={exportVideo}>
-            <Hint {...keysOf('replay.export')} {...hints} />
-            <Film strokeWidth={ICON_STROKE} aria-hidden />
-            Video
-          </button>
           <span className="replay-time" aria-hidden>
             <span ref={timeRef}>0:00</span>
             <span className="replay-total"> / {clock(duration)}</span>
@@ -482,18 +434,26 @@ export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, 
               <Hint kbd={next.kbd} pad={next.pad} {...hints} />
             </button>
           </div>
-          <button
-            type="button"
-            className="icon-btn replay-hide"
-            data-action="controls"
-            aria-label="Hide the controls"
-            title="Hide the controls"
-            onClick={toggleControls}
-          >
-            <EyeOff strokeWidth={ICON_STROKE} aria-hidden />
-            <Hint {...keysOf('replay.controls')} {...hints} />
-          </button>
         </div>
+        <footer className="replay-foot">
+          <button type="button" className="btn small quiet" data-action="back" data-sfx="back" onClick={onBack}>
+            <Hint kbd="Escape" pad={backInput(hints.style)} {...hints} />
+            <ArrowLeft strokeWidth={ICON_STROKE} aria-hidden />
+            Back
+          </button>
+          <span className="replay-foot-end">
+            <button type="button" className="btn small quiet" data-action="export" onClick={exportVideo}>
+              <Hint {...keysOf('replay.export')} {...hints} />
+              <Film strokeWidth={ICON_STROKE} aria-hidden />
+              Video
+            </button>
+            <button type="button" className="btn small quiet" data-action="controls" onClick={toggleControls}>
+              <Hint {...keysOf('replay.controls')} {...hints} />
+              <EyeOff strokeWidth={ICON_STROKE} aria-hidden />
+              Hide
+            </button>
+          </span>
+        </footer>
       </section>
 
       {ended && (
