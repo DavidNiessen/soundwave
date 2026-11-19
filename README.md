@@ -133,6 +133,22 @@ pnpm tauri build    # build an installer (NSIS/MSI on Windows)
 
 The installers are not signed with a Windows or Apple developer certificate yet: Windows asks to confirm the first start (More info, Run anyway), and macOS wants the app opened once with a right-click and Open.
 
+### Discord status and Join from Discord
+
+The desktop app shows what the player is doing on their Discord profile, and lets Discord friends join their party, for a
+Discord application the build names. Without one both are off.
+
+1. Make an application at [discord.com/developers/applications](https://discord.com/developers/applications) and copy
+   its Application ID. Nothing else needs setting up there: the pictures come by address.
+2. Give the build the id as `SOUNDWAVE_DISCORD_CLIENT_ID`: for the release workflows a repository variable (Settings →
+   Secrets and variables → Actions → Variables), for a development build an environment variable where it starts
+   (`$env:SOUNDWAVE_DISCORD_CLIENT_ID = "…"; pnpm tauri dev`).
+3. In the game: the Discord status on (Settings → Advanced) and **Friends can join from Discord** on (Settings → Online). A party's Join button
+   then shows on the profile while the party is not **Private** (`T` in its lobby), greyed out once it is full.
+
+A friend who presses Join needs the desktop app, started once (it registers the `discord-<id>` link Discord opens to start
+it; on macOS the game has to be running already), and an account on the party's server, or a way to make one there.
+
 ## Production web build
 
 ```bash

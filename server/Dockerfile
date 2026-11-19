@@ -9,6 +9,7 @@ RUN cd server && npm install --omit=dev --no-audit --no-fund
 COPY src/net/protocol.ts src/net/protocol.ts
 COPY src/chart/types.ts src/chart/types.ts
 COPY src/game/GameSession.ts src/game/judge.ts src/game/scoring.ts src/game/replay.ts src/game/
+COPY src/storage/soundwaveFile.ts src/storage/soundwaveFile.ts
 COPY server/src server/src
 
 RUN mkdir /data && chown node /data
