@@ -144,7 +144,7 @@ interface Base {
   help: string;
   disabled?: boolean;
 }
-type Row =
+export type Row =
   | (Base & { kind: 'choice'; value: string; options: Option[]; set(v: string): void })
   | (Base & { kind: 'slider'; value: number; min: number; max: number; step: number; format(v: number): string; set(v: number): void })
   | (Base & { kind: 'action'; button: string; run(): void; note?: ReactNode; danger?: boolean })
@@ -175,7 +175,7 @@ function assign(list: string[], index: number, input: string): string[] {
   return out;
 }
 
-const ON_OFF: Option[] = [
+export const ON_OFF: Option[] = [
   { value: 'off', label: 'Off' },
   { value: 'on', label: 'On' },
 ];
@@ -610,7 +610,7 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
     // Auto shows what it picked; touching any option turns that into a custom setup.
     const shown = resolveGraphics(g);
     const setG = (patch: Partial<GraphicsSettings>) => set({ graphics: { ...shown, ...patch, preset: 'custom' } });
-    const level = (id: 'crowd' | 'beams' | 'lights' | 'effects', label: string, help: string): Row => ({
+    const level = (id: 'crowd' | 'beams' | 'lights' | 'effects' | 'textures', label: string, help: string): Row => ({
       kind: 'choice',
       id,
       label,
@@ -737,6 +737,11 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
           level('beams', 'Beams', 'Moving light beams in the haze.'),
           level('lights', 'Lights and bulbs', 'Washes, bulbs and glowing details.'),
           level('effects', 'Fireworks and smoke', 'Fireworks and smoke jets on big moments.'),
+          level(
+            'textures',
+            'Textures',
+            'Scanned surfaces in the venues: 1K at Low, 2K at Medium, 4K at High. 4K needs a strong graphics card.',
+          ),
         ],
       },
     ];
@@ -1409,7 +1414,19 @@ function useBindingMoves(ref: React.RefObject<HTMLElement | null>, on: boolean) 
   }, [ref, on]);
 }
 
-function RowView({ row, active, first, touch, onActive }: { row: Row; active: boolean; first: boolean; touch: boolean; onActive(): void }) {
+export function RowView({
+  row,
+  active,
+  first,
+  touch,
+  onActive,
+}: {
+  row: Row;
+  active: boolean;
+  first: boolean;
+  touch: boolean;
+  onActive(): void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLSpanElement>(null);
   const index =

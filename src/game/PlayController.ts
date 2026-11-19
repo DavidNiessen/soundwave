@@ -15,6 +15,8 @@ import { GamepadInput, KeyboardInput, TouchInput, type InputHandlers } from './i
 import { WINDOWS } from './judge';
 import { GOLD_STARS, MAX_MULTIPLIER, multiplierFor, STREAK_PER_MULTIPLIER } from './scoring';
 import { highwaySpeed, type Settings } from './settings';
+import { stageVenue } from './stages';
+import { resolveVenue, type VenueChoice, type VenueId } from '../render/venues/catalog';
 
 export interface HudRefs {
   score: HTMLElement;
@@ -55,6 +57,13 @@ export interface FrameJob {
 const LEAD_IN = 3;
 /** Song time a replay starts at: a moment before the song, without a countdown. */
 export const REPLAY_START = -1.5;
+
+/** The venue the last song played in at random: the next one goes somewhere else. */
+let lastRandom: VenueId | undefined;
+function pickVenue(choice: VenueChoice): VenueId {
+  if (choice !== 'random') return choice;
+  return (lastRandom = resolveVenue(choice, Math.random() * 1e4, lastRandom));
+}
 /** How long the stage celebrates after the last note before the result comes up, seconds. */
 export const FINALE_SECONDS = 4;
 
@@ -105,6 +114,9 @@ export class PlayController {
   private stageHost: HTMLElement | null = null;
   /** The graphics the newest stage was built with, as JSON. */
   private graphicsKey = '';
+  /** The venue of the stage in use (or Random), and the one this song is played in. */
+  private venueChoice: VenueChoice = 'moonrise';
+  private venue: VenueId;
   private readonly barLevels: number[];
   private readonly input: KeyboardInput | null = null;
   private readonly padInput: GamepadInput | null = null;
@@ -218,6 +230,8 @@ export class PlayController {
     this.graphicsKey = JSON.stringify(resolveGraphics(settings.graphics));
     const stageDrawn = stageHost ? new Promise<void>((resolve) => (this.stageSettled = resolve)) : Promise.resolve();
     this.ready = this.highway.ready.then(() => stageDrawn);
+    this.venueChoice = stageVenue(settings.stage);
+    this.venue = pickVenue(this.venueChoice);
     if (stageHost) {
       // Built once the highway is ready to draw: both compile their shaders in the same GPU process,
       // and the highway, which the player needs first, should not queue behind the stage's.
@@ -372,7 +386,12 @@ export class PlayController {
     this.highway.speed = highwaySpeed(s.trackSpeed);
     this.rumble.update(this.rumbleSettings(s));
     const key = JSON.stringify(resolveGraphics(s.graphics));
-    if (key === this.graphicsKey) return;
+    const venue = stageVenue(s.stage);
+    if (key === this.graphicsKey && venue === this.venueChoice) return;
+    if (venue !== this.venueChoice) {
+      this.venueChoice = venue;
+      this.venue = pickVenue(venue);
+    }
     this.graphicsKey = key;
     if (this.stageHost) this.buildStage();
   }
@@ -385,7 +404,7 @@ export class PlayController {
   private buildStage() {
     const pending = this.stage !== this.shownStage ? this.stage : null;
     pending?.dispose();
-    const stage = new StageView(this.stageHost!, JSON.parse(this.graphicsKey), { mode: 'play', part: this.chart.part });
+    const stage = new StageView(this.stageHost!, JSON.parse(this.graphicsKey), { mode: 'play', part: this.chart.part, venue: this.venue });
     if (this.isFrozen) stage.setRate('frozen');
     this.stage = stage;
     if (this.stageTaker) stage.capture(this.stageTaker);

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { setDiscordEnabled, showScene } from '../app/discord';
+import { findStage, stageVenue } from '../game/stages';
+import { setActiveStage } from '../render/stage/showStage';
 import { analysisManager, canPlay } from '../analysis/manager';
 import { stemModel } from '../analysis/separation/model';
 import { analysisDevice, type AnalysisDevice } from '../analysis/separation/support';
@@ -71,6 +73,7 @@ import { LobbyScreen } from './LobbyScreen';
 import { watchStageLoading } from '../render/stage/StageView';
 import { bootDone, bootStep } from './boot';
 import { MenuBackground } from './MenuBackground';
+import { menuVenue } from '../render/venues/catalog';
 import { onBackdrop } from './windowDrag';
 import { InstallAppCard, UpdateCard } from './AppUpdates';
 import { checkForUpdates, updates } from '../app/updates';
@@ -78,6 +81,7 @@ import { PlayScreen } from './PlayScreen';
 import { ReplayScreen } from './ReplayScreen';
 import { ResultsScreen, SummaryScreen, type SetResult } from './ResultsScreen';
 import { SettingsScreen } from './SettingsScreen';
+import { StageBackdrop } from './StageBackdrop';
 import type { SongActions } from './SongMenu';
 import { SongSheet } from './SongSheet';
 import { MetadataSheet } from './MetadataSheet';
@@ -296,6 +300,10 @@ export function App() {
     return () => window.removeEventListener('mousedown', press);
   }, [windowed]);
   useEffect(() => document.documentElement.style.setProperty('--ui-scale', String(settings.uiScale)), [settings.uiScale]);
+  // The menus take the colours of the venue behind them (see the venue themes in styles.css).
+  useEffect(() => {
+    document.documentElement.dataset.venue = menuVenue(stageVenue(settings.stage));
+  }, [settings.stage]);
   // Motion: the player's choice, or the system's when they left it alone.
   useEffect(() => {
     const media = matchMedia('(prefers-reduced-motion: reduce)');
@@ -963,6 +971,10 @@ export function App() {
     }
   };
 
+  // Every stage (the menus' and the song's) is the player's stage; the stage browser shows the ones
+  // it tries out over it (see showStage).
+  useEffect(() => setActiveStage(findStage(settings.stage, settings.stage.active)), [settings.stage]);
+
   // The player's Discord profile shows where they are and what they play (desktop app; src/app/discord.ts).
   useEffect(() => setDiscordEnabled(settings.discordStatus), [settings.discordStatus]);
   useEffect(() => {
@@ -1176,6 +1188,7 @@ export function App() {
           replays={replays}
           replayActions={replayActions}
           onSettings={() => setView({ name: 'settings', back: view })}
+          onStages={(stage) => updateSettings({ ...settings, stage })}
           onExit={canExit() ? () => setExitAsk(true) : undefined}
           update={update.state === 'available' ? update.version : undefined}
           onUpdate={() => setAppCard('update')}
@@ -1187,6 +1200,7 @@ export function App() {
     content = (
       <div className={`menu on-${view.name}`}>
         <MenuBackground graphics={settings.graphics} onReady={onStage} />
+        <StageBackdrop />
         <div className="veil" aria-hidden />
         {/* One entrance per screen change; the stage behind it stays. */}
         {booted && (

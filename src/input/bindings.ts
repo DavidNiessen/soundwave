@@ -13,7 +13,7 @@
 import type { PadInput } from './pads';
 
 /** Where a shortcut works. */
-export type Area = 'menus' | 'home' | 'library' | 'lobby' | 'results' | 'settings' | 'song' | 'replay' | 'editor';
+export type Area = 'menus' | 'home' | 'library' | 'lobby' | 'results' | 'settings' | 'stages' | 'song' | 'replay' | 'editor';
 
 export const AREAS: { id: Area; label: string }[] = [
   { id: 'menus', label: 'Every menu' },
@@ -22,6 +22,7 @@ export const AREAS: { id: Area; label: string }[] = [
   { id: 'lobby', label: 'Before a song' },
   { id: 'results', label: 'After a song' },
   { id: 'settings', label: 'Settings' },
+  { id: 'stages', label: 'Stages' },
   { id: 'song', label: 'Playing a song' },
   { id: 'replay', label: 'Watching a replay' },
   { id: 'editor', label: 'Track editor' },
@@ -95,6 +96,13 @@ export const COMMANDS: Command[] = [
     { id: 'results.part4', label: 'Next song: drums', key: 'Digit4' },
   ]),
   ...cmd('settings', [{ id: 'settings.reset', label: 'Restore defaults', key: 'KeyR', pad: 'b3' }]),
+  ...cmd('stages', [
+    { id: 'stages.new', label: 'New stage', key: 'KeyN', pad: 'b3' },
+    { id: 'stages.edit', label: 'Customize the stage', key: 'KeyC', pad: 'b2' },
+    { id: 'stages.drop', label: 'Test the drop', key: 'KeyT', pad: 'b9' },
+    { id: 'stages.random', label: 'Random colours', key: 'KeyR', pad: 'b8' },
+    { id: 'stages.undo', label: 'Undo', key: 'Ctrl+KeyZ' },
+  ]),
   ...cmd('song', [{ id: 'song.pause', label: 'Pause', key: 'KeyP', pad: 'b9' }]),
   // The speed is changed with the tab buttons (Q and E, the shoulder buttons).
   ...cmd('replay', [

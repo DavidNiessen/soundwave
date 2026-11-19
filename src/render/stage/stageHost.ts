@@ -1,7 +1,9 @@
 import { detectGpu } from '../../game/graphics';
-import { AuroraStage } from '../aurora/AuroraStage';
-import { loadVenue, watchVenue } from '../aurora/assets';
+import { loadCast, loadVenue, watchVenue } from '../aurora/assets';
+import { loadModel } from '../venues/kit/model';
+import { Stage } from './Stage';
 import type { Beat, FromStage, StageInput, StageRate, ToStage } from './protocol';
+import type { StageLook } from './look';
 
 /** How often a frozen stage still draws, ms (so a resized window is not left blank). */
 const FROZEN_MS = 500;
@@ -11,13 +13,15 @@ const nextFrame: (cb: () => void) => unknown =
 
 /** One stage and what the page last told it. */
 interface Slot {
-  stage: AuroraStage | null;
+  stage: Stage | null;
   input: StageInput;
   /** A beat heard since the last frame (a downbeat outranks a beat). */
   beat: Beat | 'none';
   rate: StageRate;
   lastFrozen: number;
   size: { width: number; height: number; dpr: number };
+  /** A look that came while the stage was still being built. */
+  look: StageLook | null;
   disposed: boolean;
   canvas: HTMLCanvasElement | OffscreenCanvas;
   /** Every frame drawn is copied to the page (a video is being recorded). */
@@ -94,6 +98,7 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
       rate: 'full',
       lastFrozen: 0,
       size: { width: m.width, height: m.height, dpr: m.dpr },
+      look: null,
       disposed: false,
       canvas: m.canvas,
       capture: false,
@@ -101,9 +106,9 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
       stepped: false,
     };
     slots.set(m.id, slot);
-    let stage: AuroraStage;
+    let stage: Stage;
     try {
-      stage = await AuroraStage.create(m.canvas, m.graphics, m.options);
+      stage = await Stage.create(m.canvas, m.graphics, m.options);
     } catch (err) {
       slots.delete(m.id);
       const message = err instanceof Error ? err.message : String(err);
@@ -111,6 +116,7 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
       return;
     }
     if (slot.disposed) return stage.dispose();
+    if (slot.look) stage.setLookOptions(slot.look);
     stage.setSize(slot.size.width, slot.size.height, slot.size.dpr);
     await stage.prepare();
     if (slot.disposed) return stage.dispose();
@@ -127,7 +133,7 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
       case 'preload':
         // The page picks the Auto graphics tier by the GPU's name: found here, off the page.
         post({ type: 'gpu', name: detectGpu() });
-        loadVenue().catch(() => undefined);
+        (m.venue === 'moonrise' ? loadVenue() : Promise.all([loadCast(), loadModel(m.venue)])).catch(() => undefined);
         return;
       case 'visible':
         visible = m.visible;
@@ -154,6 +160,16 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
         break;
       case 'rate':
         slot.rate = m.rate;
+        break;
+      case 'look':
+        slot.look = m.look;
+        slot.stage?.setLookOptions(m.look);
+        // Seen at once on a stage that only draws now and then (under a screen).
+        if (slot.rate === 'frozen' && slot.stage) draw(slot);
+        break;
+      case 'screen':
+        if (slot.stage) slot.stage.setScreenFrame(m.frame);
+        else m.frame?.close();
         break;
       case 'overdrive':
         slot.stage?.overdriveStart();
