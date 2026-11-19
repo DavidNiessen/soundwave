@@ -11,7 +11,8 @@ import {
   Check,
   Crown,
   Download,
-  FileKey,
+  Gavel,
+  Trophy,
   Gauge,
   ListMusic,
   LogIn,
@@ -25,16 +26,18 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { DIFFICULTIES, PARTS, type Difficulty, type Part } from '../chart/types';
-import type { Settings } from '../game/settings';
+import { isCalibrated, type Settings } from '../game/settings';
+import { Calibration } from './Calibration';
 import { formatTime, type Pick } from '../game/setlist';
 import { keysOf } from '../input/bindings';
 import { PadGlyph } from '../input/glyphs';
 import { confirmInput } from '../input/pads';
-import { online, type OnlineState } from '../net/client';
+import { online, parseInvite, type OnlineState } from '../net/client';
 import type { BoardLine, Member, PartyState, ResultLine, SetSong, SongResults } from '../net/protocol';
 import type { SongMeta } from '../storage/db';
 import { Hint, useActions, useHints } from './actions';
 import { Cover } from './Cover';
+import { AdminPanel, download, InvitePanel } from './ServerAdmin';
 import { HoldButton } from './HoldButton';
 import { DIFFICULTY_LABEL, ICON_STROKE, PART_ICON, PART_LABEL, Pips, Stars } from './icons';
 
@@ -51,6 +54,10 @@ interface Props {
   onStartSong(index: number): void;
   settings: Settings;
   onBack(): void;
+  /** Opens the server's leaderboards. */
+  onBoards(): void;
+  /** Changes settings (the audio offset, calibrated from the lobby). */
+  onSettings(patch: Partial<Settings>): void;
 }
 
 const useOnline = () => useSyncExternalStore(online.subscribe, online.snapshot);
@@ -65,7 +72,7 @@ export function PartyScreen(props: Props) {
   if (s.status === 'off' || s.status === 'signed-out' || !s.account) {
     body =
       s.status === 'connecting' || (s.status === 'reconnecting' && !s.account) ? <Waiting s={s} /> : <Connect s={s} settings={settings} />;
-  } else if (!s.party) body = <NoParty s={s} settings={settings} />;
+  } else if (!s.party) body = <NoParty s={s} settings={settings} onBoards={props.onBoards} />;
   else if (s.party.phase === 'results') body = <PartyResults party={s.party} s={s} settings={settings} onStartSong={props.onStartSong} />;
   else body = <Lobby {...props} s={s} party={s.party} />;
 
@@ -113,17 +120,15 @@ function Waiting({ s }: { s: OnlineState }) {
 
 /* Connecting and signing in --------------------------------------------------------------- */
 
-function Connect({ s, settings }: { s: OnlineState; settings: Settings }) {
-  const hints = useHints(settings);
+function Connect({ s }: { s: OnlineState; settings: Settings }) {
   const [address, setAddress] = useState(s.server?.replace(/^https?:\/\//, '') ?? '');
-  const [how, setHow] = useState<'in' | 'up'>('in');
+  const [how, setHow] = useState<'in' | 'up'>(s.invite ? 'up' : 'in');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
-  const [extra, setExtra] = useState('');
-  const [key, setKey] = useState<string | null>(null);
+  const [serverPassword, setServerPassword] = useState('');
+  const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const keyInput = useRef<HTMLInputElement>(null);
   const info = s.info;
 
   const run = async (what: () => Promise<unknown>) => {
@@ -138,42 +143,35 @@ function Connect({ s, settings }: { s: OnlineState; settings: Settings }) {
     }
   };
 
-  // The server is asked what it is once it is known (a stored address).
+  // The server is asked what it is once it is known (a stored address, or an invite link opened).
   useEffect(() => {
     if (s.server && !info) void run(() => online.choose(s.server!));
   }, [s.server, info]);
+  // An invite link opened elsewhere (a click, the web game's address) lands here ready to sign up.
+  useEffect(() => {
+    if (!s.invite) return;
+    setHow('up');
+    if (s.server) setAddress(s.server.replace(/^https?:\/\//, ''));
+  }, [s.invite, s.server]);
 
-  const openKey = async (file: File) =>
+  /** The server field takes an address or a whole invite link. */
+  const connect = () =>
     run(async () => {
-      const k = await online.useKeyFile(file);
-      setAddress(k.server.replace(/^https?:\/\//, ''));
-      setKey(k.token);
+      const invite = parseInvite(address);
+      if (!invite) return void (await online.choose(address));
+      await online.useInvite(invite);
+      setAddress(invite.server.replace(/^https?:\/\//, ''));
       setHow('up');
     });
 
-  useActions([
-    {
-      id: 'key-file',
-      label: 'Open a key file',
-      icon: FileKey,
-      ...keysOf('party.keyFile'),
-      bar: false,
-      run: () => keyInput.current?.click(),
-    },
-  ]);
-
-  const needs = info?.mode;
+  const mode = info?.mode;
+  /** A code typed or pasted (a whole link works too), else the invite a link brought. */
+  const invite = (code.trim() && (parseInvite(code)?.invite ?? code.trim())) || s.invite || undefined;
   const submit = () =>
     run(() =>
       how === 'in'
         ? online.signIn(name, password)
-        : online.signUp({
-            name,
-            password,
-            ...(needs === 'password' ? { serverPassword: extra } : {}),
-            ...(extra && needs !== 'password' ? { invite: extra } : {}),
-            ...(key ? { key } : {}),
-          }),
+        : online.signUp({ name, password, ...(invite ? { invite } : mode === 'password' ? { serverPassword } : {}) }),
     );
 
   return (
@@ -182,12 +180,12 @@ function Connect({ s, settings }: { s: OnlineState; settings: Settings }) {
         className="ready-panel"
         onSubmit={(e) => {
           e.preventDefault();
-          void run(() => online.choose(address));
+          void connect();
         }}
       >
         <h2 className="label">Server</h2>
         <label className="meta-field">
-          <span className="dim">Its address, from whoever runs it</span>
+          <span className="dim">Its address, or the invite link you were sent</span>
           <input
             value={address}
             onChange={(e) => setAddress(e.target.value)}
@@ -198,27 +196,9 @@ function Connect({ s, settings }: { s: OnlineState; settings: Settings }) {
             data-autofocus
           />
         </label>
-        <div className="party-row">
-          <button type="submit" className="btn primary" disabled={busy || !address.trim()}>
-            Connect
-          </button>
-          <button type="button" className="btn" data-action="key-file" onClick={() => keyInput.current?.click()}>
-            <Hint kbd={keysOf('party.keyFile').kbd} {...hints} />
-            <FileKey strokeWidth={ICON_STROKE} aria-hidden />
-            Open a key file
-          </button>
-          <input
-            ref={keyInput}
-            type="file"
-            accept=".soundwave-key,application/json"
-            hidden
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              e.target.value = '';
-              if (f) void openKey(f);
-            }}
-          />
-        </div>
+        <button type="submit" className="btn primary" disabled={busy || !address.trim()}>
+          Connect
+        </button>
         {info && (
           <p className="hint">
             <strong>{info.name}</strong>
@@ -226,9 +206,8 @@ function Connect({ s, settings }: { s: OnlineState; settings: Settings }) {
             {
               {
                 public: 'anyone can make an account',
-                password: 'making an account needs the server’s password',
+                password: 'making an account needs the server’s password or an invite',
                 invite: 'making an account needs an invite',
-                key: 'making an account needs a key file',
               }[info.mode]
             }
           </p>
@@ -277,25 +256,22 @@ function Connect({ s, settings }: { s: OnlineState; settings: Settings }) {
               autoComplete={how === 'up' ? 'new-password' : 'current-password'}
             />
           </label>
-          {how === 'up' && !key && (
+          {how === 'up' && s.invite && !code && <p className="hint">Your invite lets you in.</p>}
+          {how === 'up' && mode === 'password' && !invite && (
             <label className="meta-field">
-              <span className="dim">
-                {needs === 'password'
-                  ? 'The server’s password'
-                  : needs === 'invite'
-                    ? 'Invite code (or the owner’s set-up code)'
-                    : 'Set-up code, if you run this server'}
-              </span>
-              <input
-                type={needs === 'password' ? 'password' : 'text'}
-                value={extra}
-                onChange={(e) => setExtra(e.target.value)}
-                spellCheck={false}
-              />
+              <span className="dim">The server’s password</span>
+              <input type="password" value={serverPassword} onChange={(e) => setServerPassword(e.target.value)} />
             </label>
           )}
-          {how === 'up' && key && <p className="hint">Your key file makes the account.</p>}
-          {how === 'up' && needs === 'key' && !key && <p className="hint">This server gives out key files. Open the one you were sent.</p>}
+          {how === 'up' && !s.invite && (
+            <label className="meta-field">
+              <span className="dim">
+                {mode === 'invite' ? 'Your invite link or code' : 'An invite link or code, if you have one'} (the server’s owner uses their
+                set-up code here)
+              </span>
+              <input value={code} onChange={(e) => setCode(e.target.value)} spellCheck={false} />
+            </label>
+          )}
           <button type="submit" className="btn primary wide" disabled={busy || !name.trim() || !password}>
             <LogIn strokeWidth={ICON_STROKE} aria-hidden />
             {how === 'in' ? 'Sign in' : 'Make the account'}
@@ -317,19 +293,17 @@ function Connect({ s, settings }: { s: OnlineState; settings: Settings }) {
 
 /* Signed in, in no party ------------------------------------------------------------------- */
 
-function NoParty({ s, settings }: { s: OnlineState; settings: Settings }) {
+function NoParty({ s, settings, onBoards }: { s: OnlineState; settings: Settings; onBoards(): void }) {
   const hints = useHints(settings);
+  const [admin, setAdmin] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const mod = s.account!.role !== 'player';
   const [code, setCode] = useState('');
   const codeInput = useRef<HTMLInputElement>(null);
   const saveData = async () => {
     try {
       const data = await online.exportData();
-      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `soundwave-${s.info?.name ?? 'server'}-my-data.json`.replace(/[^\w.-]+/g, '-');
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      download(`soundwave-${s.info?.name ?? 'server'}-my-data.json`.replace(/[^\w.-]+/g, '-'), JSON.stringify(data, null, 2));
     } catch (e) {
       online.report((e as Error).message);
     }
@@ -356,6 +330,10 @@ function NoParty({ s, settings }: { s: OnlineState; settings: Settings }) {
     },
     { id: 'party-sign-out', label: 'Sign out', icon: LogOut, ...keysOf('party.signOut'), bar: false, run: () => online.signOut() },
     { id: 'party-export', label: 'Save my data', icon: Download, ...keysOf('party.export'), bar: false, run: () => void saveData() },
+    { id: 'party-boards', label: 'Leaderboards', icon: Trophy, ...keysOf('party.boards'), run: onBoards },
+    ...(mod
+      ? [{ id: 'party-admin', label: 'Run the server', icon: Gavel, ...keysOf('party.admin'), bar: false, run: () => setAdmin((a) => !a) }]
+      : []),
   ]);
 
   return (
@@ -415,8 +393,38 @@ function NoParty({ s, settings }: { s: OnlineState; settings: Settings }) {
           <button type="button" className="btn" data-sfx="back" onClick={() => online.forget()}>
             Forget this server
           </button>
+          {s.account!.role !== 'owner' &&
+            (deleting ? (
+              <button
+                type="button"
+                className="btn danger"
+                onClick={() => void online.deleteAccount().catch((e) => online.report((e as Error).message))}
+              >
+                Delete it, with all my scores
+              </button>
+            ) : (
+              <button type="button" className="btn" onClick={() => setDeleting(true)}>
+                Delete my account
+              </button>
+            ))}
+        </div>
+        <div className="party-row">
+          <button type="button" className="btn" data-action="party-boards" onClick={onBoards}>
+            <Hint {...keysOf('party.boards')} {...hints} />
+            <Trophy strokeWidth={ICON_STROKE} aria-hidden />
+            Leaderboards
+          </button>
+          {mod && (
+            <button type="button" className="btn" data-action="party-admin" onClick={() => setAdmin((a) => !a)}>
+              <Hint kbd={keysOf('party.admin').kbd} {...hints} />
+              <Gavel strokeWidth={ICON_STROKE} aria-hidden />
+              {admin ? 'Hide the server tools' : 'Run the server'}
+            </button>
+          )}
         </div>
       </section>
+      {(s.info?.mode === 'invite' || mod) && <InvitePanel mod={mod} />}
+      {mod && admin && <AdminPanel owner={s.account!.role === 'owner'} />}
     </div>
   );
 }
@@ -430,8 +438,22 @@ function Lobby(props: LobbyProps) {
   return me ? <PartyLobby {...props} me={me} /> : null;
 }
 
-function PartyLobby({ library, playable, setlist, pick, onPick, onStartSong, settings, s, party, me }: LobbyProps & { me: Member }) {
+function PartyLobby({
+  library,
+  playable,
+  setlist,
+  pick,
+  onPick,
+  onStartSong,
+  settings,
+  onSettings,
+  s,
+  party,
+  me,
+}: LobbyProps & { me: Member }) {
   const hints = useHints(settings);
+  const calibrated = isCalibrated(settings);
+  const [calibrating, setCalibrating] = useState(false);
   const pad = hints.mode === 'pad';
   const host = party.host === s.account!.id;
   const has = (id: string) => library.has(id);
@@ -442,18 +464,18 @@ function PartyLobby({ library, playable, setlist, pick, onPick, onStartSong, set
   // On joining, the player's own part and difficulty go to the party; the songs they have follow the set.
   const sentFor = useRef<string | null>(null);
   useEffect(() => {
-    const key = `${party.code}|${haveKey}`;
+    const key = `${party.code}|${haveKey}|${calibrated}`;
     if (sentFor.current === key) return;
     const first = !sentFor.current?.startsWith(`${party.code}|`);
     sentFor.current = key;
-    online.ready(first ? pick.part : me.part, first ? pick.difficulty : me.difficulty, first ? false : me.ready, have);
-  }, [party.code, haveKey, me, pick, have]);
+    online.ready(first ? pick.part : me.part, first ? pick.difficulty : me.difficulty, first ? false : me.ready, have, calibrated);
+  }, [party.code, haveKey, me, pick, have, calibrated]);
 
   const choose = (part: Part, difficulty: Difficulty) => {
     onPick({ part, difficulty });
-    online.ready(part, difficulty, me.ready, have);
+    online.ready(part, difficulty, me.ready, have, calibrated);
   };
-  const toggleReady = () => online.ready(me.part, me.difficulty, !me.ready, have);
+  const toggleReady = () => online.ready(me.part, me.difficulty, !me.ready, have, calibrated);
   const useSetlist = () => {
     if (!setlist.length) return;
     online.setSet(setlist.map((x): SetSong => ({ id: x.id, title: x.title, artist: x.artist, duration: x.duration })));
@@ -541,6 +563,23 @@ function PartyLobby({ library, playable, setlist, pick, onPick, onStartSong, set
             <MemberLine key={m.id} m={m} host={m.id === party.host} me={m.id === me.id} setSize={party.set.length} />
           ))}
         </ul>
+        {!calibrated && (
+          <p className="hint party-calibrate">
+            Scores are compared here, so your audio offset matters: it was never calibrated on this output.
+            <button type="button" className="btn small" onClick={() => setCalibrating(true)}>
+              <Gauge strokeWidth={ICON_STROKE} aria-hidden />
+              Calibrate now
+            </button>
+          </p>
+        )}
+        {calibrating && (
+          <Calibration
+            onDone={(ms) => {
+              setCalibrating(false);
+              if (ms !== null) onSettings({ offsetMs: ms, calibratedOn: settings.outputDevice });
+            }}
+          />
+        )}
 
         <h2 className="label">Your part</h2>
         <div className="pick-line">
@@ -653,7 +692,13 @@ function MemberLine({ m, host, me, setSize }: { m: Member; host: boolean; me: bo
         {PART_LABEL[m.part]} · {DIFFICULTY_LABEL[m.difficulty]}
       </span>
       <span className="dim party-state">
-        {!m.connected ? 'Reconnecting…' : missing > 0 && setSize > 0 ? `Missing ${missing} ${missing === 1 ? 'song' : 'songs'}` : ''}
+        {[
+          !m.connected ? 'Reconnecting…' : '',
+          missing > 0 && setSize > 0 ? `Missing ${missing} ${missing === 1 ? 'song' : 'songs'}` : '',
+          m.calibrated ? 'Calibrated' : 'Not calibrated',
+        ]
+          .filter(Boolean)
+          .join(' · ')}
       </span>
     </li>
   );

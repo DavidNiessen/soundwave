@@ -83,8 +83,11 @@ import { SongSheet } from './SongSheet';
 import { MetadataSheet } from './MetadataSheet';
 import { Toasts, useToasts } from './Toasts';
 import { PartyBoard, PartyScreen } from './PartyScreen';
-import { online, type PartyStart } from '../net/client';
-import type { WireChart } from '../net/protocol';
+import { BoardsScreen } from './Boards';
+import { decodeRun, encodeRun } from '../net/runs';
+import { replayResults } from '../game/replay';
+import { online, parseInvite, type PartyStart } from '../net/client';
+import type { Challenge, WireChart } from '../net/protocol';
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { installUiSounds } from './uiSounds';
 
@@ -106,6 +109,8 @@ interface Run {
   test?: { back: EditorView; startAt: number };
   /** A song played with a party: which of its set, and when it starts (performance.now ms). */
   party?: { songIndex: number; at: number };
+  /** Played against a challenger's run, which runs beside the highway as a ghost. */
+  challenge?: { id: string; name: string; inputs: ReplayInputs; score: number };
 }
 
 type View =
@@ -114,6 +119,8 @@ type View =
   | LobbyView
   /** Playing together on a server: signing in, the party's lobby and its results. */
   | { name: 'party' }
+  /** The server's leaderboards, challenges and shared replays. */
+  | { name: 'boards' }
   | { name: 'settings'; back: View }
   | EditorView
   | { name: 'play'; run: Run; buffer: AudioBuffer; key: number }
@@ -147,6 +154,7 @@ const DEPTH: Record<View['name'], number> = {
   settings: 1,
   lobby: 2,
   party: 2,
+  boards: 3,
   editor: 2,
   play: 3,
   replay: 3,
@@ -471,6 +479,42 @@ export function App() {
         setSheet(got[0]);
     });
   useEffect(() => watchOpenedFiles((files) => openedRef.current(files)), []);
+  // Invite links: the desktop app opens soundwave://join links, and the web game is opened with
+  // ?server=…&invite=… by a server's join page. Either lands on Play together, ready to sign up.
+  const inviteRef = useRef<(text: string) => void>(() => {});
+  inviteRef.current = (text) => {
+    const invite = parseInvite(text);
+    if (!invite) return;
+    void online.useInvite(invite).then(
+      () => {
+        if (!['play', 'replay', 'export', 'editor'].includes(viewRef.current.name)) setView({ name: 'party' });
+      },
+      (e: Error) => toast(e.message),
+    );
+  };
+  const invitesWatched = useRef(false);
+  useEffect(() => {
+    if (!booted || invitesWatched.current) return;
+    invitesWatched.current = true;
+    if (!inDesktopApp()) {
+      const here = new URL(location.href);
+      if (!here.searchParams.has('invite')) return;
+      inviteRef.current(here.href);
+      // The invite is not left in the address, where a reload or a shared tab would carry it on.
+      here.searchParams.delete('invite');
+      here.searchParams.delete('server');
+      history.replaceState(history.state, '', here.pathname + here.search + here.hash);
+      return;
+    }
+    let stop = () => {};
+    void import('@tauri-apps/plugin-deep-link')
+      .then(async ({ getCurrent, onOpenUrl }) => {
+        for (const url of (await getCurrent()) ?? []) inviteRef.current(url);
+        stop = await onOpenUrl((urls) => urls.forEach((url) => inviteRef.current(url)));
+      })
+      .catch(() => {});
+    return () => stop();
+  }, [booted]);
   const exportSong = useCallback(
     async (song: SongMeta) => {
       try {
@@ -844,11 +888,106 @@ export function App() {
       /* scores are best-effort */
     }
     if (inputs && settingsRef.current.replays) void saveReplay(song, run.charts[run.index], results, inputs, best);
+    if (inputs) void postRun(run, results, inputs);
     return best;
+  };
+
+  /**
+   * Sends a finished run to the server's leaderboards while signed in (and the player lets it):
+   * the server judges it again from its inputs before it takes the score.
+   */
+  const postRun = async (run: Run, results: Results, inputs: ReplayInputs) => {
+    if (!online.snapshot().account || !settingsRef.current.postScores) return;
+    const song = run.songs[run.index];
+    try {
+      const r = await online.postScore({
+        songId: song.id,
+        title: song.title,
+        artist: song.artist,
+        chart: run.charts[run.index],
+        ...encodeRun(inputs),
+        result: {
+          score: results.score,
+          stars: results.stars,
+          accuracy: results.accuracy,
+          bestStreak: results.bestStreak,
+          fullCombo: results.fullCombo,
+        },
+        ...(run.challenge ? { challenge: run.challenge.id } : {}),
+      });
+      if (r.best && r.rank) toast(`Number ${r.rank} on ${online.snapshot().info?.name ?? 'the server'}’s board for this chart.`);
+    } catch (e) {
+      toast(`Your score did not reach the server: ${(e as Error).message}`);
+    }
+  };
+
+  /** Watches a run from a server's board, on the song when the library has it. */
+  const watchRun = (scoreId: string) => {
+    menuPulse('launch');
+    const back = view;
+    void wipeTo(async () => {
+      const r = await online.run(scoreId);
+      const chart = cleanChart(r.chart);
+      if (!chart) throw new Error('This run’s chart is damaged.');
+      const inputs = decodeRun(r.ops, r.times);
+      const meta: ReplayMeta = {
+        id: `server-${r.scoreId}`,
+        date: r.at,
+        songId: r.songId,
+        title: r.title,
+        artist: `${r.name}’s run${r.artist ? ` · ${r.artist}` : ''}`,
+        part: chart.part,
+        difficulty: chart.difficulty,
+        results: replayResults(chart, inputs),
+        best: false,
+        kept: false,
+        duration: chart.duration,
+      };
+      const buffer = byId.has(r.songId) ? await loadSongBuffer(r.songId).catch(() => null) : null;
+      return {
+        name: 'replay',
+        meta,
+        data: { id: meta.id, chart, inputs },
+        buffer: buffer ?? silence(chart.duration),
+        silent: !buffer,
+        back,
+        key: Date.now(),
+      };
+    });
+  };
+
+  /** Beat my run: plays the challenger's chart, with their run beside the highway as a ghost. */
+  const playChallenge = (c: Challenge) => {
+    const meta = byId.get(c.songId);
+    if (!meta) return toast(`You need "${c.title}" in your library to play this challenge.`);
+    menuPulse('launch');
+    void wipeTo(async () => {
+      const r = await online.run(c.scoreId);
+      const chart = cleanChart(r.chart);
+      if (!chart) throw new Error('This run’s chart is damaged.');
+      const run: Run = {
+        songs: [meta],
+        charts: [chart],
+        index: 0,
+        results: [],
+        pick: { part: chart.part, difficulty: chart.difficulty },
+        lobby: { name: 'lobby', ids: [meta.id], from: 'home' },
+        challenge: { id: c.id, name: c.from, inputs: decodeRun(r.ops, r.times), score: c.score },
+      };
+      return { name: 'play', run, buffer: await loadSongBuffer(meta.id), key: Date.now() };
+    });
   };
 
   const finish = async (run: Run, results: Results, inputs?: ReplayInputs) => {
     const best = await keepScore(run, results, inputs);
+    if (run.challenge) {
+      const d = results.score - run.challenge.score;
+      toast(
+        d > 0
+          ? `You beat ${run.challenge.name}’s run by ${d.toLocaleString()}.`
+          : `${run.challenge.name}’s run stays ahead by ${(-d).toLocaleString()}.`,
+      );
+    }
     setView({ name: 'results', run: withResult(run, { song: run.songs[run.index], results, best }) });
   };
 
@@ -1102,6 +1241,8 @@ export function App() {
         return showScene({ details: 'Getting a set ready', state: count(view.ids.length) });
       case 'party':
         return showScene({ details: 'Playing together' });
+      case 'boards':
+        return showScene({ details: 'Looking at the leaderboards' });
       case 'editor':
         return showScene({ details: named(view.song), state: 'Editing the chart' });
       case 'play': {
@@ -1192,6 +1333,7 @@ export function App() {
         onFinish={(r, inputs) =>
           partyRun ? finishPartySong(run, r, inputs) : run.test ? setView({ ...run.test.back, tested: r }) : void finish(run, r, inputs)
         }
+        ghost={run.challenge ? { name: run.challenge.name, inputs: run.challenge.inputs } : undefined}
         together={
           partyRun
             ? {
@@ -1272,6 +1414,22 @@ export function App() {
           onStartSong={(i) => void startPartySong(i)}
           settings={settings}
           onBack={goHome}
+          onBoards={() => setView({ name: 'boards' })}
+          onSettings={(patch) => updateSettings({ ...settings, ...patch })}
+        />
+      );
+    } else if (view.name === 'boards') {
+      screen = (
+        <BoardsScreen
+          library={songs}
+          playable={(id) => canPlay(analysisStatus[id])}
+          setlist={setSongs_}
+          pick={pick}
+          settings={settings}
+          onWatch={watchRun}
+          onPlayChallenge={playChallenge}
+          onPlaySet={(ids) => setView({ name: 'lobby', ids, from: 'home' })}
+          onBack={() => setView({ name: 'party' })}
         />
       );
     } else if (view.name === 'results') {
@@ -1411,6 +1569,45 @@ export function App() {
           onStart={(v, plan) => recordVideo(exportAsk, v, plan)}
           onClose={() => setExportAsk(null)}
         />
+      )}
+      {/* The first start asks once how the player wants to play (Settings → Online changes it). */}
+      {booted && !settings.playModeAsked && view.name === 'home' && launch === null && (
+        <Dialog
+          title="How do you want to play?"
+          variant="card"
+          closeLabel="Just me"
+          onClose={() => updateSettings({ ...settingsRef.current, playModeAsked: true })}
+        >
+          {(close) => (
+            <div className="pause-card">
+              <h2 className="display">How do you want to play?</h2>
+              <p className="hint">You can change this any time in Settings → Online.</p>
+              <button type="button" className="btn primary wide" data-autofocus onClick={close}>
+                Just me
+              </button>
+              <button
+                type="button"
+                className="btn wide"
+                onClick={() => {
+                  updateSettings({ ...settingsRef.current, playMode: 'nearby', playModeAsked: true });
+                  setView({ name: 'party' });
+                }}
+              >
+                With friends nearby
+              </button>
+              <button
+                type="button"
+                className="btn wide"
+                onClick={() => {
+                  updateSettings({ ...settingsRef.current, playMode: 'server', playModeAsked: true });
+                  setView({ name: 'party' });
+                }}
+              >
+                On a server
+              </button>
+            </div>
+          )}
+        </Dialog>
       )}
       {exitAsk && (
         <Dialog title="Close the game" variant="card" closeLabel="Stay" onClose={() => setExitAsk(false)}>

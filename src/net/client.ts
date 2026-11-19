@@ -12,10 +12,16 @@ import {
   PROTOCOL_VERSION,
   type Account,
   type ApiError,
+  type Board,
   type BoardLine,
+  type Challenge,
+  type RankLine,
+  type Run,
+  type ScoreSubmission,
+  type Weekly,
   type ClientMessage,
   type Difficulty,
-  type KeyFile,
+  type Invite,
   type Part,
   type PartyState,
   type ServerInfo,
@@ -51,6 +57,8 @@ export interface OnlineState {
   party: PartyState | null;
   /** The last thing that went wrong, in a sentence for the player. */
   error: string | null;
+  /** An invite's code, from a link the player opened or pasted, waiting for the sign-up it lets in. */
+  invite: string | null;
 }
 
 /** A song the party starts: when (performance.now ms on this machine) and on which chart (null: sit it out). */
@@ -94,8 +102,33 @@ export function serverAddress(typed: string): string {
   return url.origin;
 }
 
+/**
+ * An invite in any of the shapes it reaches the game: a server's join page
+ * (https://play.example.com/join?invite=…), a soundwave://join?server=…&invite=… link, or the
+ * web game's own address with ?server=…&invite=…. Null when the text is none of them.
+ */
+export function parseInvite(text: string): { server: string; invite: string } | null {
+  let url: URL;
+  try {
+    url = new URL(text.trim());
+  } catch {
+    return null;
+  }
+  const invite = url.searchParams.get('invite');
+  if (!invite) return null;
+  const named = url.searchParams.get('server');
+  try {
+    if (named) return { server: serverAddress(named), invite };
+    if (url.pathname.replace(/\/+$/, '') === '/join' && (url.protocol === 'https:' || url.protocol === 'http:'))
+      return { server: serverAddress(url.origin), invite };
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 class OnlineClient {
-  private state: OnlineState = { status: 'off', server: null, info: null, account: null, party: null, error: null };
+  private state: OnlineState = { status: 'off', server: null, info: null, account: null, party: null, error: null, invite: null };
   private readonly listeners = new Set<() => void>();
   /**
    * The live board of the song the party plays. Apart from the rest, as it changes ten times a
@@ -240,22 +273,15 @@ class OnlineClient {
     return info;
   }
 
-  /** A key file opened in the game: its server is chosen, and its token is what signing up needs. */
-  async useKeyFile(file: Blob): Promise<KeyFile> {
-    let key: KeyFile;
-    try {
-      key = JSON.parse(await file.text()) as KeyFile;
-    } catch {
-      throw new Error('This is not a Soundwave key file.');
-    }
-    if (typeof key?.server !== 'string' || typeof key.token !== 'string') throw new Error('This is not a Soundwave key file.');
-    if (key.expires && key.expires < Date.now()) throw new Error('This key file has run out. Ask the server’s owner for a new one.');
-    await this.choose(key.server);
-    return key;
+  /** An invite link opened or pasted: its server is chosen, and its code waits for the sign-up. */
+  async useInvite(invite: { server: string; invite: string }) {
+    await this.choose(invite.server);
+    this.set({ invite: invite.invite });
   }
 
   async signUp(req: SignUp) {
     this.signedIn(await this.request<Session>('/auth/signup', { body: req }));
+    this.set({ invite: null });
     this.connect();
   }
 
@@ -291,8 +317,61 @@ class OnlineClient {
     return this.request<unknown>('/me/export', { auth: true });
   }
 
-  makeInvite() {
-    return this.request<{ link: string; code: string; expires: number }>('/invites', { body: { uses: 1 }, auth: true });
+  /* Leaderboards, runs and challenges -------------------------------------------------------- */
+
+  /** Sends a finished run to the leaderboards; the server judges it again before it takes it. */
+  postScore(sub: ScoreSubmission) {
+    return this.request<{ id: string; rank: number; best: boolean }>('/scores', { body: sub, auth: true });
+  }
+  rankings(song: string, chart: string, part: Part, difficulty: Difficulty, week = false) {
+    return this.request<Board>(`/boards/${song}/${chart}/${part}/${difficulty}${week ? '?week=1' : ''}`, { auth: true });
+  }
+  run(scoreId: string) {
+    return this.request<Run>(`/scores/${scoreId}/run`, { auth: true });
+  }
+  share(scoreId: string, shared = true) {
+    return this.request<unknown>(`/scores/${scoreId}/share`, { body: { shared }, auth: true });
+  }
+  sharedRuns(song?: string) {
+    return this.request<(RankLine & { songId: string; title: string; artist: string; part: Part; difficulty: Difficulty })[]>(
+      `/replays${song ? `?song=${song}` : ''}`,
+      { auth: true },
+    );
+  }
+  removeScore(scoreId: string, reason: string) {
+    return this.request<unknown>(`/scores/${scoreId}?reason=${encodeURIComponent(reason)}`, { method: 'DELETE', auth: true });
+  }
+  topThisWeek() {
+    return this.request<{ name: string; score: number }[]>('/boards/top', { auth: true });
+  }
+  challenge(to: string, scoreId: string) {
+    return this.request<{ id: string }>('/challenges', { body: { to, scoreId }, auth: true });
+  }
+  challenges() {
+    return this.request<{ received: Challenge[]; sent: Challenge[] }>('/me/challenges', { auth: true });
+  }
+  weekly() {
+    return this.request<Weekly | null>('/weekly', { auth: true });
+  }
+  setWeekly(songs: SetSong[], days: number) {
+    return this.request<Weekly>('/weekly', { body: { songs, days }, auth: true });
+  }
+
+  /* Moderation (owner and moderators) --------------------------------------------------------- */
+
+  moderate(action: 'kick' | 'ban' | 'unban' | 'role' | 'reset-password', body: Record<string, unknown>) {
+    return this.request<{ ok?: boolean; password?: string }>(`/mod/${action}`, { body, auth: true });
+  }
+  auditLog() {
+    return this.request<{ at: number; actor: string; action: string; target: string; reason: string }[]>('/mod/audit', { auth: true });
+  }
+  deleteAccount() {
+    return this.request<unknown>('/me', { method: 'DELETE', auth: true }).then(() => this.forget());
+  }
+
+  /** `uses` and `hours`: null for no limit (the owner's and moderators' choice; a player's invite is one use, a week). */
+  makeInvite(uses: number | null = 1, hours: number | null = 24 * 7) {
+    return this.request<Invite>('/invites', { body: { uses, hours }, auth: true });
   }
 
   /* The connection ------------------------------------------------------------------------------ */
@@ -438,8 +517,8 @@ class OnlineClient {
   setSet(songs: SetSong[]) {
     this.send({ type: 'set', songs });
   }
-  ready(part: Part, difficulty: Difficulty, ready: boolean, have: string[]) {
-    this.send({ type: 'ready', part, difficulty, ready, have });
+  ready(part: Part, difficulty: Difficulty, ready: boolean, have: string[], calibrated = false) {
+    this.send({ type: 'ready', part, difficulty, ready, have, calibrated });
   }
   start(songIndex: number, charts: WireChart[], assign: Record<string, number>) {
     this.send({ type: 'start', songIndex, charts, assign });

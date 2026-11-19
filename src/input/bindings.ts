@@ -99,7 +99,6 @@ export const COMMANDS: Command[] = [
   ...cmd('party', [
     { id: 'party.create', label: 'Start a party', key: 'KeyC', pad: 'b3' },
     { id: 'party.join', label: 'Join a party', key: 'KeyJ', pad: 'b2' },
-    { id: 'party.keyFile', label: 'Open a key file', key: 'KeyK' },
     { id: 'party.signOut', label: 'Sign out', key: 'KeyO' },
     { id: 'party.export', label: 'Save my data from the server', key: 'KeyD' },
     { id: 'party.ready', label: 'Ready, or not', key: 'KeyR', pad: 'b9' },
@@ -109,6 +108,9 @@ export const COMMANDS: Command[] = [
     { id: 'party.next', label: 'Next song', key: 'KeyN', pad: 'b9' },
     { id: 'party.lobby', label: 'Back to the party lobby', key: 'KeyB', pad: 'b8' },
     { id: 'party.leave', label: 'Leave the party', key: 'KeyL' },
+    { id: 'party.boards', label: 'Leaderboards', key: 'KeyG', pad: 'b10' },
+    { id: 'party.invite', label: 'Invite a friend', key: 'KeyI' },
+    { id: 'party.admin', label: 'Run the server', key: 'KeyM' },
   ]),
   ...cmd('settings', [{ id: 'settings.reset', label: 'Restore defaults', key: 'KeyR', pad: 'b3' }]),
   ...cmd('song', [{ id: 'song.pause', label: 'Pause', key: 'KeyP', pad: 'b9' }]),

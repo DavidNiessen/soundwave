@@ -1,5 +1,11 @@
-# The server's image (server/Dockerfile) needs only the server and the protocol it shares with the game.
+# The server's image (server/Dockerfile) needs only the server, the protocol it shares with the
+# game, and the game's judging, which it checks scores with.
 *
 !server/package.json
 !server/src
 !src/net/protocol.ts
+!src/chart/types.ts
+!src/game/GameSession.ts
+!src/game/judge.ts
+!src/game/scoring.ts
+!src/game/replay.ts

@@ -13,10 +13,16 @@ import { Accounts, Refusal } from './accounts.ts';
 import type { Config } from './config.ts';
 import type { Store, UserRow } from './db.ts';
 import { Parties } from './parties.ts';
+import { Scores } from './scores.ts';
+import { joinPage } from './joinPage.ts';
 import { clientMessage } from './validate.ts';
 
 /** The most bytes an HTTP request's body may have (everything it carries is small). */
 const BODY_MAX = 64 * 1024;
+/** A run's inputs are bigger: a long song at a high frame rate. */
+const RUN_MAX = 8 * 1024 * 1024;
+
+type Handler = (req: IncomingMessage, body: Record<string, unknown>, ip: string, params: string[]) => Promise<unknown> | unknown;
 
 /** A bucket of attempts per address: `burst` at once, refilled at `perMinute`. */
 class RateLimit {
@@ -49,6 +55,7 @@ export interface RunningServer {
 
 export async function startServer(config: Config, store: Store, log: (line: string) => void = console.log): Promise<RunningServer> {
   const accounts = new Accounts(store, config);
+  const scores = new Scores(store);
   /** Each signed-in player's socket (one per player: signing in elsewhere replaces it). */
   const sockets = new Map<string, WebSocket>();
   const clock = () => performance.now();
@@ -79,7 +86,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     req.socket.remoteAddress ||
     '?';
 
-  const routes: Record<string, (req: IncomingMessage, body: Record<string, unknown>, ip: string) => Promise<unknown> | unknown> = {
+  const routes: Record<string, Handler> = {
     'GET /info': (): ServerInfo => ({
       name: config.name,
       description: config.description,
@@ -106,12 +113,31 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       drop(u.id, 'Your account was deleted.');
       return { ok: true };
     },
-    'GET /me/export': (req) => accounts.export(me(req)),
+    'GET /me/export': (req) => {
+      const u = me(req);
+      return { ...accounts.export(u), runs: scores.exportOf(u), challenges: scores.challenges(u) };
+    },
+    'POST /scores': (req, body, ip) => {
+      if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many scores at once. Wait a minute.');
+      return scores.submit(me(req), body);
+    },
+    'GET /boards/top': (req) => (me(req), scores.topThisWeek()),
+    'GET /replays': (req) => {
+      me(req);
+      const song = new URL(req.url ?? '/', 'http://x').searchParams.get('song') ?? undefined;
+      return scores.shared(song);
+    },
+    'POST /challenges': (req, body) => scores.challenge(me(req), body.to, body.scoreId),
+    'GET /me/challenges': (req) => scores.challenges(me(req)),
+    'GET /weekly': (req) => (me(req), scores.weekly()),
+    'POST /weekly': (req, body) => {
+      scores.setWeekly(me(req), body.songs, body.days);
+      return scores.weekly();
+    },
     'POST /invites': (req, body, ip) => {
       if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many invites at once. Wait a minute.');
       return accounts.makeInvite(me(req), body.uses, body.hours);
     },
-    'POST /keys': (req, body) => accounts.makeKey(me(req), body.hours),
     'POST /mod/kick': (req, body) => {
       const u = accounts.kick(me(req), body.name, body.reason);
       drop(
@@ -137,6 +163,34 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     'GET /mod/audit': (req) => accounts.audit(me(req)),
   };
 
+  const ID = '([0-9a-f-]{36})';
+  const patterns: [string, RegExp, Handler][] = [
+    [
+      'GET',
+      /^\/boards\/([0-9a-f]{64})\/([0-9a-f]{64})\/(vocals|lead|bass|drums)\/(easy|medium|hard|expert)$/,
+      (req, _b, _ip, [song, chart, part, difficulty]) =>
+        scores.board(me(req), song, chart, part, difficulty, new URL(req.url ?? '/', 'http://x').searchParams.get('week') === '1'),
+    ],
+    ['GET', /^\/boards\/([0-9a-f]{64})$/, (req, _b, _ip, [song]) => (me(req), scores.boardsOf(song))],
+    ['GET', new RegExp(`^/scores/${ID}/run$`), (req, _b, _ip, [id]) => (me(req), scores.run(id))],
+    [
+      'POST',
+      new RegExp(`^/scores/${ID}/share$`),
+      (req, body, _ip, [id]) => {
+        scores.share(me(req), id, body.shared !== false);
+        return { ok: true };
+      },
+    ],
+    [
+      'DELETE',
+      new RegExp(`^/scores/${ID}$`),
+      (req, _b, _ip, [id]) => {
+        scores.remove(me(req), id, new URL(req.url ?? '/', 'http://x').searchParams.get('reason'));
+        return { ok: true };
+      },
+    ],
+  ];
+
   const me = (req: IncomingMessage): UserRow => {
     const auth = req.headers.authorization;
     return accounts.authenticate(auth?.startsWith('Bearer ') ? auth.slice(7) : undefined);
@@ -158,8 +212,28 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     if (req.method === 'OPTIONS') return void res.writeHead(204).end();
     const path = (req.url ?? '/').split('?')[0].replace(/\/+$/, '') || '/';
-    const route = routes[`${req.method} ${path}`];
+    // An invite link's page: plain HTML, with nothing on it that runs.
+    if (req.method === 'GET' && path === '/join') {
+      const code = new URL(req.url ?? '/', 'http://x').searchParams.get('invite') ?? '';
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'",
+        'Cache-Control': 'no-store',
+      });
+      return void res.end(joinPage(config, code, code.length <= 64 && accounts.inviteValid(code)));
+    }
+    let params: string[] = [];
+    let route = routes[`${req.method} ${path}`];
+    if (!route)
+      for (const [method, pattern, handler] of patterns) {
+        const m = req.method === method ? pattern.exec(path) : null;
+        if (!m) continue;
+        route = handler;
+        params = m.slice(1).map(decodeURIComponent);
+        break;
+      }
     if (!route) return reply(res, 404, { error: 'There is nothing here.' });
+    const limit = path === '/scores' ? RUN_MAX : BODY_MAX;
     try {
       let body: Record<string, unknown> = {};
       if (req.method === 'POST') {
@@ -167,7 +241,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
         let size = 0;
         for await (const c of req) {
           size += (c as Buffer).length;
-          if (size > BODY_MAX) throw new Refusal(413, 'That request is too big.');
+          if (size > limit) throw new Refusal(413, 'That request is too big.');
           chunks.push(c as Buffer);
         }
         if (size) {
@@ -179,7 +253,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
           }
         }
       }
-      reply(res, 200, await route(req, body, addressOf(req)));
+      reply(res, 200, await route(req, body, addressOf(req), params));
     } catch (e) {
       if (e instanceof Refusal) return reply(res, e.status, { error: e.message });
       log(`Error on ${req.method} ${path}: ${(e as Error).stack ?? e}`);

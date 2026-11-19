@@ -151,6 +151,7 @@ export class Parties {
         me.part = msg.part;
         me.difficulty = msg.difficulty;
         me.ready = msg.ready;
+        me.calibrated = msg.calibrated === true;
         me.have = msg.have.filter((id) => s.set.some((song) => song.id === id));
         return this.share(party);
       case 'start':
@@ -310,6 +311,7 @@ export class Parties {
       part: 'lead',
       difficulty: 'medium',
       ready: false,
+      calibrated: false,
       have: [],
       connected: true,
     });

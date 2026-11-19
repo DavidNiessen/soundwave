@@ -26,7 +26,7 @@ export type Part = 'vocals' | 'lead' | 'bass' | 'drums';
 export type Difficulty = 'easy' | 'medium' | 'hard' | 'expert';
 export type Role = 'owner' | 'moderator' | 'player';
 /** Who may make an account on a server. */
-export type JoinMode = 'public' | 'password' | 'invite' | 'key';
+export type JoinMode = 'public' | 'password' | 'invite';
 
 /* HTTP ------------------------------------------------------------------------------------- */
 
@@ -60,18 +60,18 @@ export interface SignUp {
   password: string;
   /** The server's password (mode `password`). */
   serverPassword?: string;
-  /** An invite's code (mode `invite`), or the owner's set-up code. */
+  /** An invite's code (it lets its holder in, whatever the mode), or the owner's set-up code. */
   invite?: string;
-  /** A key file's token (mode `key`). */
-  key?: string;
 }
 
-/** A `.soundwave-key` file: opening it connects to the server and signs up in one step. */
-export interface KeyFile {
-  server: string;
-  name: string;
-  token: string;
-  expires?: number;
+/** `POST /invites`: an invite, and the link it travels as (the server's join page). */
+export interface Invite {
+  code: string;
+  link: string;
+  /** Uses left; null for no limit. */
+  uses: number | null;
+  /** When it runs out (ms), or null: never. */
+  expires: number | null;
 }
 
 /** A failed request's body. */
@@ -99,6 +99,8 @@ export interface Member {
   have: string[];
   /** False while the player's connection is gone (they have RECONNECT_GRACE_MS to come back). */
   connected: boolean;
+  /** Their audio offset was calibrated on the output they play through (a hint: scores are compared). */
+  calibrated: boolean;
 }
 
 /** How one player's song went: the score of record, judged again from their inputs. */
@@ -175,7 +177,7 @@ export type ClientMessage =
   /** The host picks the set. */
   | { type: 'set'; songs: SetSong[] }
   /** A player's own choices, and which of the set's songs they have. */
-  | { type: 'ready'; part: Part; difficulty: Difficulty; ready: boolean; have: string[] }
+  | { type: 'ready'; part: Part; difficulty: Difficulty; ready: boolean; have: string[]; calibrated?: boolean }
   /**
    * The host starts a song: the charts in play, and which one each player gets (by index into
    * `charts`; a player missing from `assign` sits the song out). Everyone plays the host's charts.
@@ -200,3 +202,84 @@ export type ServerMessage =
   | { type: 'error'; message: string }
   /** The server closes the connection, and says why. */
   | { type: 'bye'; reason: string };
+
+/* Leaderboards ------------------------------------------------------------------------------ */
+
+/**
+ * What a chart id is the hash of (SHA-256, hex): its lanes and notes, written the same way on
+ * every machine. A new analysis or a hand edit makes a new id, and so a board of its own.
+ */
+export const chartKey = (c: Pick<WireChart, 'lanes' | 'notes'>) =>
+  JSON.stringify([c.lanes, c.notes.map((n) => [n.t, n.lane, n.dur, n.phrase, n.release ? 1 : 0])]);
+
+/** `POST /scores`: a finished run, which the server judges again from its inputs before taking it. */
+export interface ScoreSubmission {
+  songId: string;
+  title: string;
+  artist: string;
+  chart: WireChart;
+  /** The run's operations (src/game/replay.ts): one byte each, base64. */
+  ops: string;
+  /** Their song times, float32 little-endian, base64. */
+  times: string;
+  result: SongScore;
+  /** The challenge this run answers, if it is one. */
+  challenge?: string;
+}
+
+export interface RankLine {
+  rank: number;
+  scoreId: string;
+  name: string;
+  score: number;
+  stars: number;
+  accuracy: number;
+  fullCombo: boolean;
+  at: number;
+  shared: boolean;
+}
+
+/** `GET /boards/:songId/:chartId/:part/:difficulty`: the best run of each player, best first. */
+export interface Board {
+  lines: RankLine[];
+  /** The player's own line, wherever it ranks. */
+  me: RankLine | null;
+}
+
+/** `GET /scores/:id/run`: everything needed to watch a run, or play against it as a ghost. */
+export interface Run {
+  scoreId: string;
+  name: string;
+  songId: string;
+  title: string;
+  artist: string;
+  chart: WireChart;
+  ops: string;
+  times: string;
+  result: SongScore;
+  at: number;
+}
+
+export interface Challenge {
+  id: string;
+  from: string;
+  to: string;
+  scoreId: string;
+  songId: string;
+  title: string;
+  artist: string;
+  part: Part;
+  difficulty: Difficulty;
+  score: number;
+  created: number;
+  /** The answer's score, once played. */
+  answer: number | null;
+}
+
+/** The server's weekly challenge: a few songs, and the best total over them. */
+export interface Weekly {
+  songs: SetSong[];
+  start: number;
+  end: number;
+  standings: { name: string; score: number; songs: number }[];
+}

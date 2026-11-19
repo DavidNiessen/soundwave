@@ -15,11 +15,8 @@ export type GameEvent =
   | { type: 'overdrive-start' }
   | { type: 'overdrive-end' };
 
-const enum NoteState {
-  Pending = 0,
-  Hit = 1,
-  Missed = 2,
-}
+// A plain object rather than an enum: the server runs this file as it is (Node strips the types).
+const NoteState = { Pending: 0, Hit: 1, Missed: 2 } as const;
 
 /** How early a sustain may be released and still count as complete. */
 const SUSTAIN_RELEASE_GRACE = 0.12;

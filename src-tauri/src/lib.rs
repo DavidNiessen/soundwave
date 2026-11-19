@@ -50,6 +50,9 @@ pub fn run() {
             song_files::focus(app);
         }));
     }
+    // soundwave:// links (the invite links a Soundwave server makes) open the game. Registered after
+    // the single-instance plugin, which hands a link clicked while the game runs to the running game.
+    builder = builder.plugin(tauri_plugin_deep_link::init());
     // Updates: the app asks GitHub for the newest full release, checks its signature against the
     // public key in tauri.conf.json, installs it and restarts (src/app/updates.ts).
     #[cfg(desktop)]
@@ -92,6 +95,14 @@ pub fn run() {
             // A song file double-clicked in Explorer starts the game with its path.
             let cwd = std::env::current_dir().unwrap_or_default();
             song_files::open(app.handle(), song_files::song_files(std::env::args(), &cwd));
+            // The installers register the scheme; a development build or an AppImage registers it here.
+            #[cfg(any(windows, target_os = "linux"))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                if let Err(e) = app.deep_link().register_all() {
+                    log::warn!("soundwave:// links could not be registered: {e}");
+                }
+            }
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()

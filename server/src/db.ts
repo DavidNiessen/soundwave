@@ -27,7 +27,7 @@ export interface InviteRow {
   expires: number | null;
   /** The role an account made with it gets: 'owner' for the set-up code, otherwise 'player'. */
   role: Role;
-  /** 'invite' or 'key' (a key file's token). */
+  /** Always 'invite' (key files, the other kind once planned, were dropped for invite links). */
   kind: 'invite' | 'key';
   created: number;
 }
@@ -159,7 +159,7 @@ export class Store {
     this.db.prepare('DELETE FROM refresh_tokens WHERE user = ?').run(user);
   }
 
-  /* Invites and key files -------------------------------------------------------------------- */
+  /* Invites -------------------------------------------------------------------------------- */
 
   addInvite(i: InviteRow) {
     this.db

@@ -52,7 +52,11 @@ class Tape {
 export class ReplayRecorder {
   private tape = new Tape();
 
-  constructor(readonly session: GameSession) {}
+  readonly session: GameSession;
+
+  constructor(session: GameSession) {
+    this.session = session;
+  }
 
   press(lane: number, t: number) {
     const at = Math.fround(t);
@@ -146,11 +150,12 @@ export class ReplayPlayback {
   readonly end: number;
   private next = 0;
   private readonly framed: boolean;
+  readonly chart: Chart;
+  readonly inputs: ReplayInputs;
 
-  constructor(
-    readonly chart: Chart,
-    readonly inputs: ReplayInputs,
-  ) {
+  constructor(chart: Chart, inputs: ReplayInputs) {
+    this.chart = chart;
+    this.inputs = inputs;
     const n = Math.min(inputs.ops.length, inputs.times.length);
     this.due = new Float64Array(n);
     let latest = Number.NEGATIVE_INFINITY;

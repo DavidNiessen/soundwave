@@ -37,7 +37,7 @@ export async function checkPassword(password: string, stored: string): Promise<b
   return got.length === want.length && timingSafeEqual(got, want);
 }
 
-/** A random token for a refresh, an invite or a key file, safe in a link. */
+/** A random token for a refresh or an invite, safe in a link. */
 export const randomToken = (bytes = 24) => b64(randomBytes(bytes));
 
 export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -79,12 +79,6 @@ export interface AccessClaims {
   sub: string;
   exp: number;
   kind: 'access';
-}
-
-/** What a key file's token says: which invite row it is. */
-export interface KeyClaims {
-  code: string;
-  kind: 'key';
 }
 
 /** A name players are shown by: 2 to 24 letters, digits, spaces, dots, dashes or underscores. */

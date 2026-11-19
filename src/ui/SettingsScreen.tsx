@@ -1,4 +1,5 @@
 import {
+  Globe,
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
@@ -37,6 +38,7 @@ import { backInput, confirmInput, PAUSE_INPUT, pads, resolveStyle, styleFor, SYS
 import { dualSenseHaptics, menuPulse, Rumbler } from '../input/rumble';
 import { usePads } from '../input/usePads';
 import { Hint, keyName, useActions, useHints } from './actions';
+import { online } from '../net/client';
 import { Calibration } from './Calibration';
 import { Dialog } from './Dialog';
 import { ICON_STROKE } from './icons';
@@ -92,7 +94,7 @@ interface Props {
   onReplaysDeleted?(): void;
 }
 
-type Tab = 'video' | 'audio' | 'game' | 'controller' | 'touch' | 'shortcuts' | 'advanced';
+type Tab = 'video' | 'audio' | 'game' | 'controller' | 'touch' | 'shortcuts' | 'online' | 'advanced';
 const TABS: [Tab, string, LucideIcon][] = [
   ['video', 'Video', Monitor],
   ['audio', 'Audio', Volume2],
@@ -100,6 +102,7 @@ const TABS: [Tab, string, LucideIcon][] = [
   ['controller', 'Controller', Gamepad2],
   ['touch', 'Touch', Hand],
   ['shortcuts', 'Shortcuts', CommandIcon],
+  ['online', 'Online', Globe],
   ['advanced', 'Advanced', SlidersHorizontal],
 ];
 const TAB_KEY = 'soundwave.settings-tab';
@@ -122,6 +125,7 @@ const FIELDS: Record<Tab, readonly (keyof Settings)[]> = {
   controller: ['glyphs', 'rumble', 'rumbleHits', 'rumbleMisses', 'rumbleSustains', 'rumbleOverdrive', 'ps5Haptics'],
   touch: ['touchHaptics', 'touchOverdriveSide'],
   shortcuts: ['keys4', 'keys5', 'overdriveKey', 'pad4', 'pad5', 'padOverdrive', 'bindings'],
+  online: ['playMode', 'displayName', 'postScores', 'showdownHits', 'discordJoin', 'shareSongs'],
   advanced: ['checkUpdates', 'discordStatus'],
 };
 
@@ -557,7 +561,7 @@ export function SettingsScreen({ settings, model, device, onChange, onBack, inSo
         <Calibration
           onDone={(ms) => {
             setCalibrating(false);
-            if (ms !== null) set({ offsetMs: ms });
+            if (ms !== null) set({ offsetMs: ms, calibratedOn: settings.outputDevice });
           }}
         />
       )}
@@ -594,6 +598,7 @@ interface Ctx {
 
 function buildSections(tab: Tab, c: Ctx): Section[] {
   const { settings: s, set } = c;
+  if (tab === 'online') return onlineSections(s, set);
   const toggle = (id: string, label: string, help: string, value: boolean, change: (v: boolean) => void, disabled = false): Row => ({
     kind: 'choice',
     id,
@@ -1692,4 +1697,100 @@ function Detail({ row }: { row: Row }) {
       )}
     </div>
   );
+}
+
+/* ------------------------------------------------------------------------------------------- */
+/* Online (docs/specs/online-play.md, 5.1)                                                      */
+
+function onlineSections(s: Settings, set: (patch: Partial<Settings>) => void): Section[] {
+  const o = online.snapshot();
+  const onOff = (id: keyof Settings & string, label: string, help: string, value: boolean, change: (v: boolean) => void): Row => ({
+    kind: 'choice',
+    id,
+    label,
+    help,
+    value: value ? 'on' : 'off',
+    options: [
+      { value: 'off', label: 'Off' },
+      { value: 'on', label: 'On' },
+    ],
+    set: (v) => change(v === 'on'),
+  });
+  return [
+    {
+      title: 'How you play',
+      rows: [
+        {
+          kind: 'choice',
+          id: 'playMode',
+          label: 'How to play',
+          help: 'Just me keeps the game offline, as it always was. With friends nearby, the desktop app hosts sessions friends join on this network or over the internet, with no accounts. On a server, you sign in to a Soundwave server for parties, leaderboards and shared songs.',
+          value: s.playMode,
+          options: [
+            { value: 'solo', label: 'Just me' },
+            { value: 'nearby', label: 'With friends nearby' },
+            { value: 'server', label: 'On a server' },
+          ],
+          set: (v) => set({ playMode: v as Settings['playMode'], playModeAsked: true }),
+        },
+        {
+          kind: 'text',
+          id: 'displayName',
+          label: 'Display name',
+          help: 'The name others see in a session you host or join. A server uses your account’s name instead.',
+          value: s.displayName,
+          set: (v) => set({ displayName: v.slice(0, 24) }),
+        },
+        onOff(
+          'shareSongs',
+          'Share my songs with the session',
+          'In a session you host, a friend without one of the set’s songs can get it from you, audio, charts and all. They accept each song first.',
+          s.shareSongs,
+          (v) => set({ shareSongs: v }),
+        ),
+      ],
+    },
+    {
+      title: 'Server',
+      rows: [
+        {
+          kind: 'info',
+          id: 'serverInfo',
+          label: 'Server',
+          help: 'The Soundwave server you play on, if any.',
+          body: o.account
+            ? `Signed in as ${o.account.name} on ${o.info?.name ?? o.server}. Sign out, save your data or forget the server under Play together.`
+            : o.server
+              ? `${o.info?.name ?? o.server}: not signed in.`
+              : 'No server yet. Connect to one under Play together.',
+        },
+        onOff(
+          'postScores',
+          'Send my scores to the leaderboards',
+          'While you are signed in, every song you finish goes to the server’s leaderboards with its run, which the server judges again to check the score. Off, nothing you play alone is sent.',
+          s.postScores,
+          (v) => set({ postScores: v }),
+        ),
+        {
+          kind: 'choice',
+          id: 'showdownHits',
+          label: 'Showdown hits reach me as',
+          help: 'Fog hazes the far part of your highway, never the strike line, and leaves your score alone. Drain caps your multiplier at 2× instead: nothing on the highway moves or flashes, only a coloured edge and a timer show the hit. Both cost about the same.',
+          value: s.showdownHits,
+          options: [
+            { value: 'fog', label: 'Fog' },
+            { value: 'drain', label: 'Drain (calm hits)' },
+          ],
+          set: (v) => set({ showdownHits: v as Settings['showdownHits'] }),
+        },
+        onOff(
+          'discordJoin',
+          'Friends can join from Discord',
+          'Your Discord status gets a Join button, so Discord friends can join your session or party in one press. Never shown for a private one.',
+          s.discordJoin,
+          (v) => set({ discordJoin: v }),
+        ),
+      ],
+    },
+  ];
 }

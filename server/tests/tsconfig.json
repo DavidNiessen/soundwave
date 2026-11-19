@@ -5,5 +5,5 @@
     "module": "ESNext",
     "moduleResolution": "Bundler"
   },
-  "include": [".", "../src", "../../src/net/protocol.ts", "../../src/net/client.ts"]
+  "include": [".", "../src", "../../src/net/protocol.ts", "../../src/net/client.ts", "../../src/game/replay.ts"]
 }

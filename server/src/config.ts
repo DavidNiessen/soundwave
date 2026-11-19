@@ -19,15 +19,19 @@ export interface Config {
   /** The password making an account needs, in mode `password`. */
   password: string;
   /**
-   * The address players reach the server at (https://…), written into key files and invite links.
+   * The address players reach the server at (https://…), written into invite links.
    * Behind a proxy it is not the address the server listens on.
    */
   publicUrl: string;
   /** Behind a reverse proxy (Caddy): take the player's address from X-Forwarded-For. */
   trustProxy: boolean;
+  /** The web game an invite link offers to play in (an owner may host their own copy). */
+  webGameUrl: string;
+  /** Where an invite link sends someone who has neither the app nor a browser that can play. */
+  downloadUrl: string;
 }
 
-const MODES: JoinMode[] = ['public', 'password', 'invite', 'key'];
+const MODES: JoinMode[] = ['public', 'password', 'invite'];
 
 export const DEFAULTS: Config = {
   name: 'Soundwave server',
@@ -39,6 +43,8 @@ export const DEFAULTS: Config = {
   password: '',
   publicUrl: '',
   trustProxy: false,
+  webGameUrl: 'https://soundwave.niessen.dev',
+  downloadUrl: 'https://github.com/DavidNiessen/soundwave/releases/latest',
 };
 
 /** Reads the settings: defaults, then the file, then the environment. */
@@ -62,6 +68,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     ...(env.SOUNDWAVE_MODE ? { mode: env.SOUNDWAVE_MODE as JoinMode } : {}),
     ...(env.SOUNDWAVE_PASSWORD ? { password: env.SOUNDWAVE_PASSWORD } : {}),
     ...(env.SOUNDWAVE_PUBLIC_URL ? { publicUrl: env.SOUNDWAVE_PUBLIC_URL } : {}),
+    ...(env.SOUNDWAVE_WEB_GAME ? { webGameUrl: env.SOUNDWAVE_WEB_GAME } : {}),
     ...(env.SOUNDWAVE_TRUST_PROXY ? { trustProxy: env.SOUNDWAVE_TRUST_PROXY === '1' || env.SOUNDWAVE_TRUST_PROXY === 'true' } : {}),
   };
   const c: Config = { ...DEFAULTS, ...fromFile, ...fromEnv, ...overrides, dataDir };
@@ -70,5 +77,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
   if (!Number.isInteger(c.port) || c.port < 0 || c.port > 65535) throw new Error(`port must be a number from 0 to 65535.`);
   if (!c.publicUrl) c.publicUrl = `http://localhost:${c.port}`;
   c.publicUrl = c.publicUrl.replace(/\/+$/, '');
+  c.webGameUrl = c.webGameUrl.replace(/\/+$/, '');
   return c;
 }

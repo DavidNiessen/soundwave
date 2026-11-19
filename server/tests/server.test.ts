@@ -95,8 +95,8 @@ describe('accounts', () => {
     expect((await api<{ name: string }>('GET', '/me', undefined, r.body.access)).body.name).toBe('Robin');
   });
 
-  it('makes the owner with the set-up code, in any mode', async () => {
-    await start({ mode: 'key' });
+  it('makes the owner with the set-up code, and lets the owner hand out invite links', async () => {
+    await start({ mode: 'invite', publicUrl: 'https://play.example.com' });
     expect((await api('POST', '/auth/signup', { name: 'Stranger', password: 'correct horse' })).status).toBe(403);
     const owner = await signUp('Owner', { invite: server.accounts.ownerCode });
     expect(owner.user.role).toBe('owner');
@@ -104,17 +104,42 @@ describe('accounts', () => {
     expect(
       (await api('POST', '/auth/signup', { name: 'Second', password: 'correct horse', invite: server.accounts.ownerCode })).status,
     ).toBe(403);
-    // The owner hands out a key file; it makes one account.
-    const key = await api<{ token: string; server: string }>('POST', '/keys', {}, owner.access);
-    expect(key.status).toBe(200);
-    expect((await signUp('Keyed', { key: key.body.token })).user.role).toBe('player');
-    expect((await api('POST', '/auth/signup', { name: 'Keyed2', password: 'correct horse', key: key.body.token })).status).toBe(403);
+    // An invite for two, with no end date; the link is the server's own join page.
+    const inv = await api<{ code: string; link: string; uses: number; expires: number | null }>(
+      'POST',
+      '/invites',
+      { uses: 2, hours: null },
+      owner.access,
+    );
+    expect(inv.body).toMatchObject({ uses: 2, expires: null, link: `https://play.example.com/join?invite=${inv.body.code}` });
+    await signUp('First', { invite: inv.body.code });
+    await signUp('Second', { invite: inv.body.code });
+    expect((await api('POST', '/auth/signup', { name: 'Third', password: 'correct horse', invite: inv.body.code })).status).toBe(403);
+  });
+
+  it('serve the join page an invite link opens, which opens the game', async () => {
+    await start({ mode: 'invite', name: 'Our <server>', publicUrl: 'https://play.example.com' });
+    const owner = await signUp('Owner', { invite: server.accounts.ownerCode });
+    const inv = await api<{ code: string }>('POST', '/invites', {}, owner.access);
+    const page = await fetch(`${server.url}/join?invite=${inv.body.code}`);
+    expect(page.headers.get('content-type')).toContain('text/html');
+    const html = await page.text();
+    expect(html).toContain(`soundwave://join?server=${encodeURIComponent('https://play.example.com')}&amp;invite=${inv.body.code}`);
+    expect(html).toContain('https://soundwave.niessen.dev/?server=');
+    // The server's name is shown as text, never as markup.
+    expect(html).toContain('Our &lt;server&gt;');
+    const spent = await (await fetch(`${server.url}/join?invite=nope`)).text();
+    expect(spent).toContain('has run out or was used up');
   });
 
   it('asks for the server password in password mode', async () => {
     await start({ mode: 'password', password: 'letmein' });
     expect((await api('POST', '/auth/signup', { name: 'Robin', password: 'correct horse', serverPassword: 'nope' })).status).toBe(403);
     await signUp('Robin', { serverPassword: 'letmein' });
+    // An invite lets its holder in without the password.
+    const owner = await signUp('Owner', { invite: server.accounts.ownerCode });
+    const inv = await api<{ code: string }>('POST', '/invites', {}, owner.access);
+    await signUp('Invited', { invite: inv.body.code });
   });
 
   it('lets members invite on an invite-only server', async () => {

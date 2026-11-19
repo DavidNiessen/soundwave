@@ -1,9 +1,9 @@
 /**
  * Accounts on a server: making one (as the server's mode allows), signing in, staying signed in,
- * invites and key files, and what owners and moderators can do (docs/specs/online-play.md, 3.2).
+ * invites, and what owners and moderators can do (docs/specs/online-play.md, 3.2).
  */
 import { randomBytes, randomUUID } from 'node:crypto';
-import type { Account, KeyFile, Role, Session, SignUp } from '../../src/net/protocol.ts';
+import type { Account, Invite, Role, Session, SignUp } from '../../src/net/protocol.ts';
 import {
   ACCESS_TTL_MS,
   checkPassword,
@@ -15,7 +15,6 @@ import {
   sha256,
   Signer,
   type AccessClaims,
-  type KeyClaims,
 } from './auth.ts';
 import type { Config } from './config.ts';
 import { FOREVER, type Store, type UserRow } from './db.ts';
@@ -31,6 +30,9 @@ export class Refusal extends Error {
 
 const account = (u: UserRow): Account => ({ id: u.id, name: u.name, role: u.role });
 const canModerate = (r: Role) => r === 'owner' || r === 'moderator';
+
+/** The link an invite travels as: the server's own join page, which opens the game. */
+export const inviteLink = (server: string, code: string) => `${server}/join?invite=${encodeURIComponent(code)}`;
 
 export class Accounts {
   readonly signer: Signer;
@@ -73,33 +75,23 @@ export class Accounts {
     if (this.store.userByName(name)) throw new Refusal(409, 'That name is taken on this server. Pick another one.');
     const now = this.now();
     let role: Role = 'player';
-    // The owner's set-up code works in every mode.
-    const owner =
-      req.invite && req.invite === this.store.getMeta('owner-code') ? this.store.useInvite(req.invite, 'invite', now) : undefined;
-    if (owner) role = 'owner';
-    else {
-      const mode = this.config.mode;
-      if (mode === 'password' && req.serverPassword !== this.config.password)
-        throw new Refusal(403, 'Making an account here needs the server’s password. Ask its owner for it.');
-      if (mode === 'invite' && !(req.invite && this.store.useInvite(req.invite, 'invite', now)) && !this.useKey(req.key, now))
-        throw new Refusal(
-          403,
-          'Making an account here needs an invite. Ask a player on the server for a link, or the owner for a key file.',
-        );
-      if (mode === 'key' && !this.useKey(req.key, now))
-        throw new Refusal(403, 'Making an account here needs a key file from the server’s owner.');
+    const mode = this.config.mode;
+    // An invite lets its holder in whatever the mode (the owner's set-up code is one, for the owner).
+    // Without one, a password server asks for its password and an invite-only server says no.
+    if (!req.invite && mode === 'password' && req.serverPassword !== this.config.password)
+      throw new Refusal(403, 'Making an account here needs the server’s password, or an invite. Ask its owner.');
+    if (!req.invite && mode === 'invite')
+      throw new Refusal(403, 'Making an account here needs an invite. Ask someone on the server for an invite link.');
+    if (req.invite) {
+      const invite = this.store.useInvite(req.invite, 'invite', now);
+      if (!invite) throw new Refusal(403, 'That invite has run out or was used up. Ask for a new link.');
+      role = invite.role === 'owner' ? 'owner' : 'player';
     }
     const user = { id: randomUUID(), name, hash: await hashPassword(req.password!), role, created: now };
     this.store.addUser(user);
     if (role === 'owner')
       this.store.log({ at: now, actor: user.id, action: 'owner', target: user.id, reason: 'Signed up with the set-up code' });
     return this.issue(this.store.userById(user.id)!);
-  }
-
-  private useKey(token: string | undefined, now: number): boolean {
-    if (!token) return false;
-    const claims = this.signer.verify<KeyClaims>(token);
-    return claims?.kind === 'key' && !!this.store.useInvite(claims.code, 'key', now);
   }
 
   async signIn(name: unknown, password: unknown): Promise<Session> {
@@ -148,26 +140,27 @@ export class Accounts {
     this.store.deleteUser(user.id);
   }
 
-  /** An invite link: any player may make them on an invite-only server, owners and moderators on any. */
-  makeInvite(by: UserRow, uses: unknown, hours: unknown) {
-    if (this.config.mode !== 'invite' && !canModerate(by.role))
-      throw new Refusal(403, 'Only the owner and moderators can make invites here.');
+  /**
+   * An invite link: the server's address and a code that makes accounts. On an invite-only server
+   * any player can make one (one use, a week); the owner and moderators can make them in any mode,
+   * for as many uses and as long as they like (null: no limit).
+   */
+  makeInvite(by: UserRow, uses: unknown, hours: unknown): Invite {
+    const mod = canModerate(by.role);
+    if (this.config.mode !== 'invite' && !mod) throw new Refusal(403, 'Only the owner and moderators can make invites here.');
     const code = randomToken(12);
-    const n = typeof uses === 'number' && Number.isInteger(uses) && uses > 0 ? Math.min(uses, 1000) : 1;
-    const h = typeof hours === 'number' && hours > 0 ? Math.min(hours, 24 * 365) : 24 * 7;
-    const expires = this.now() + h * 3_600_000;
+    const n = !mod ? 1 : uses === null ? null : typeof uses === 'number' && Number.isInteger(uses) && uses > 0 ? Math.min(uses, 10_000) : 1;
+    const h = !mod ? 24 * 7 : hours === null ? null : typeof hours === 'number' && hours > 0 ? Math.min(hours, 24 * 365) : 24 * 7;
+    const expires = h === null ? null : this.now() + h * 3_600_000;
     this.store.addInvite({ code, by: by.id, uses: n, expires, role: 'player', kind: 'invite', created: this.now() });
-    return { code, uses: n, expires, link: `${this.config.publicUrl}/join?invite=${code}` };
+    return { code, uses: n, expires, link: inviteLink(this.config.publicUrl, code) };
   }
 
-  /** A key file: the server's address and a signed token that makes one account. */
-  makeKey(by: UserRow, hours: unknown): KeyFile {
-    if (!canModerate(by.role)) throw new Refusal(403, 'Only the owner and moderators can make key files.');
-    const code = randomToken(12);
-    const expires = typeof hours === 'number' && hours > 0 ? this.now() + Math.min(hours, 24 * 365) * 3_600_000 : null;
-    this.store.addInvite({ code, by: by.id, uses: 1, expires, role: 'player', kind: 'key', created: this.now() });
-    const token = this.signer.sign({ code, kind: 'key' } satisfies KeyClaims);
-    return { server: this.config.publicUrl, name: this.config.name, token, ...(expires ? { expires } : {}) };
+  /** Whether an invite still lets someone in (for the join page; it is not used up by looking). */
+  inviteValid(code: string): boolean {
+    const i = this.store.invite(code);
+    const now = this.now();
+    return !!i && i.kind === 'invite' && (i.expires === null || i.expires > now) && (i.uses === null || i.uses > 0);
   }
 
   /* Moderation ------------------------------------------------------------------------------- */

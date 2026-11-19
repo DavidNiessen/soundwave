@@ -18,7 +18,7 @@ Object.assign(globalThis, {
     removeItem: (k: string) => void storage.delete(k),
   },
 });
-const { online, serverAddress } = await import('../../src/net/client.ts');
+const { online, parseInvite, serverAddress } = await import('../../src/net/client.ts');
 
 const SONG = 'c'.repeat(64);
 const chart: WireChart = {
@@ -65,6 +65,17 @@ describe('server addresses', () => {
     expect(serverAddress('192.168.1.20:7420/')).toBe('http://192.168.1.20:7420');
     expect(() => serverAddress('http://play.example.com')).toThrow(/HTTPS/);
     expect(() => serverAddress('')).toThrow(/address/);
+  });
+
+  it('read an invite from its join page, a soundwave:// link or the web game’s address', () => {
+    const want = { server: 'https://play.example.com', invite: 'AbC123' };
+    expect(parseInvite('https://play.example.com/join?invite=AbC123')).toEqual(want);
+    expect(parseInvite('  https://play.example.com/join/?invite=AbC123 ')).toEqual(want);
+    expect(parseInvite('soundwave://join?server=https%3A%2F%2Fplay.example.com&invite=AbC123')).toEqual(want);
+    expect(parseInvite('https://soundwave.niessen.dev/?server=https%3A%2F%2Fplay.example.com&invite=AbC123')).toEqual(want);
+    // A plain address, or a link to a server outside the network over plain HTTP, is no invite.
+    expect(parseInvite('play.example.com')).toBeNull();
+    expect(parseInvite('http://play.example.com/join?invite=AbC123')).toBeNull();
   });
 });
 

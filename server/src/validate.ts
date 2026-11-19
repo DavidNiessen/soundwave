@@ -101,6 +101,7 @@ export function clientMessage(raw: unknown): ClientMessage | undefined {
         difficulty: raw.difficulty as Difficulty,
         ready: raw.ready,
         have: raw.have as string[],
+        calibrated: raw.calibrated === true,
       };
     }
     case 'start': {
