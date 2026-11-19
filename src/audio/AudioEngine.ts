@@ -11,6 +11,11 @@ export class AudioEngine {
   readonly ctx: AudioContext;
   readonly analyser: AnalyserNode;
   readonly gain: GainNode;
+  /**
+   * The song alone, at full level and before the player's volume: for recording a video of a
+   * replay. Connected to nothing until something listens to it.
+   */
+  readonly tap: GainNode;
   /** Everything the game plays (songs, menu music, interface sounds) leaves through this. */
   readonly master: GainNode;
   private source: AudioBufferSourceNode | null = null;
@@ -34,6 +39,7 @@ export class AudioEngine {
   constructor() {
     this.ctx = new AudioContext({ latencyHint: 'interactive' });
     this.gain = this.ctx.createGain();
+    this.tap = this.ctx.createGain();
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 2048;
     this.analyser.smoothingTimeConstant = 0.6;
@@ -98,6 +104,7 @@ export class AudioEngine {
     src.buffer = this.buffer;
     src.playbackRate.value = rate;
     src.connect(this.gain);
+    src.connect(this.tap);
     const startAt = this.ctx.currentTime + delay;
     this.rate = rate;
     this.startCtxTime = startAt;
@@ -123,9 +130,10 @@ export class AudioEngine {
     else this.pausedAt = t;
   }
 
-  pause() {
+  /** `at`: the song time to stand at (by default the one heard now; see `graphTime` for a recording). */
+  pause(at?: number) {
     if (!this.playing) return;
-    this.pausedAt = this.time();
+    this.pausedAt = at ?? this.time();
     this.playing = false;
     this.stopSource();
   }
@@ -172,6 +180,15 @@ export class AudioEngine {
   /** Scheduling-clock time (AudioContext.currentTime domain) at which song time `t` plays. */
   contextTimeFor(t: number) {
     return this.startCtxTime + (t - this.startSong) / this.rate;
+  }
+
+  /**
+   * Song time leaving the audio graph now: what the recording tap carries (see `tap`), without the
+   * output's latency or the player's offset.
+   */
+  graphTime() {
+    if (!this.playing) return this.pausedAt;
+    return this.startSong + (this.ctx.currentTime - this.startCtxTime) * this.rate;
   }
 
   /** Song time in seconds as heard by the player at `perfNow` (defaults to now). */

@@ -1,6 +1,8 @@
 import { normalizeBindings, type BindingOverrides } from '../input/bindings';
 import type { GlyphStyle, PadInput } from '../input/pads';
+import { DEFAULT_REPLAY_LIMIT, REPLAY_LIMIT } from '../storage/replays';
 import { DEFAULT_GRAPHICS, normalizeGraphics, type GraphicsSettings } from './graphics';
+import { DEFAULT_VIDEO_EXPORT, normalizeVideoExport, type VideoExportSettings } from './videoExport';
 
 export interface Settings {
   /** How fast the track scrolls, as a multiple of the usual speed (see TRACK_SPEED). */
@@ -50,6 +52,12 @@ export interface Settings {
   touchHaptics: boolean;
   /** Which side of the screen the touch overdrive button sits on. */
   touchOverdriveSide: 'left' | 'right';
+  /** Every finished song is saved as a replay. */
+  replays: boolean;
+  /** How many replays are kept; older ones make room for new ones (kept replays aside). */
+  replayLimit: number;
+  /** How a replay's video is made (asked each time it is exported, remembered from the last). */
+  videoExport: VideoExportSettings;
   /** The desktop app looks for a new release when it starts. */
   checkUpdates: boolean;
   /** The desktop app shows what is being played on the player's Discord profile. */
@@ -73,6 +81,12 @@ export function clampTrackSpeed(v: number): number {
   if (!Number.isFinite(v)) return 1;
   const stepped = Math.round(v / TRACK_SPEED.step) * TRACK_SPEED.step;
   return Math.min(TRACK_SPEED.max, Math.max(TRACK_SPEED.min, Number(stepped.toFixed(2))));
+}
+
+/** A number of replays to keep, on the slider's steps and within its range. */
+export function clampReplayLimit(v: number): number {
+  if (!Number.isFinite(v)) return DEFAULT_REPLAY_LIMIT;
+  return Math.min(REPLAY_LIMIT.max, Math.max(REPLAY_LIMIT.min, Math.round(v / REPLAY_LIMIT.step) * REPLAY_LIMIT.step));
 }
 
 export type MotionPref = 'system' | 'reduced' | 'full';
@@ -121,6 +135,9 @@ export const DEFAULT_SETTINGS: Settings = {
   motion: 'system',
   touchHaptics: true,
   touchOverdriveSide: 'right',
+  replays: true,
+  replayLimit: DEFAULT_REPLAY_LIMIT,
+  videoExport: DEFAULT_VIDEO_EXPORT,
   checkUpdates: true,
   discordStatus: true,
   volumeDefaults: VOLUME_DEFAULTS,
@@ -162,6 +179,9 @@ export function normalizeSettings(raw: Partial<Settings>): Settings {
   s.muteUnfocused = Boolean(s.muteUnfocused);
   s.songPreviews = Boolean(s.songPreviews);
   s.checkUpdates = Boolean(s.checkUpdates);
+  s.replays = Boolean(s.replays);
+  s.replayLimit = clampReplayLimit(Number(s.replayLimit));
+  s.videoExport = normalizeVideoExport(s.videoExport);
   s.discordStatus = Boolean(s.discordStatus);
   if (typeof s.outputDevice !== 'string') s.outputDevice = '';
   if (typeof s.outputDeviceName !== 'string' || !s.outputDevice) s.outputDeviceName = '';

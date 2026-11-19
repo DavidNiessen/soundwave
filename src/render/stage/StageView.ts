@@ -58,6 +58,12 @@ function receive(m: FromStage) {
       debugAsks.get(m.id)?.(m.info);
       debugAsks.delete(m.id);
       return;
+    case 'frame': {
+      const view = views.get(m.id);
+      if (view) view.onFrame(m.frame);
+      else m.frame.close();
+      return;
+    }
   }
 }
 
@@ -140,6 +146,8 @@ export class StageView {
   private disposed = false;
   private lastInput = 0;
   private lastSize = '';
+  /** Takes each frame drawn while a video is recorded (see `capture`). */
+  private frameTaker: ((frame: ImageBitmap) => void) | null = null;
 
   constructor(
     private host: HTMLElement,
@@ -184,8 +192,10 @@ export class StageView {
     if (target === 'worker') {
       const offscreen = canvas.transferControlToOffscreen();
       worker!.postMessage({ ...base, canvas: offscreen } satisfies ToStage, [offscreen]);
+      if (this.frameTaker) worker!.postMessage({ type: 'capture', id: this.id, on: true } satisfies ToStage);
     } else {
       this.send({ ...base, canvas });
+      if (this.frameTaker) this.send({ type: 'capture', id: this.id, on: true });
       void getPageHost().then((handle) => {
         this.pageHandle = handle;
         const queued = this.queue;
@@ -272,6 +282,21 @@ export class StageView {
 
   finale(seconds: number) {
     this.send({ type: 'finale', id: this.id, seconds });
+  }
+
+  /**
+   * Hands every frame the stage draws to `take` (an ImageBitmap it then owns), or stops with null:
+   * for recording a video, where the stage's picture is laid under the highway's.
+   */
+  capture(take: ((frame: ImageBitmap) => void) | null) {
+    this.frameTaker = take;
+    this.send({ type: 'capture', id: this.id, on: !!take });
+  }
+
+  /** @internal A frame drawn while capture is on. */
+  onFrame(frame: ImageBitmap) {
+    if (this.frameTaker && !this.disposed) this.frameTaker(frame);
+    else frame.close();
   }
 
   /** Dev diagnostics from the stage, wherever it runs. */

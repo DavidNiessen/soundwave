@@ -125,11 +125,13 @@ fn file_kind(kind: &str) -> Result<(&'static str, &'static str), String> {
     match kind {
         "song" => Ok(("Soundwave song", EXT)),
         "backup" => Ok(("Soundwave library backup", "soundwave-backup")),
+        "video-mp4" => Ok(("MP4 video", "mp4")),
+        "video-webm" => Ok(("WebM video", "webm")),
         _ => Err(format!("unknown kind of file: {kind}")),
     }
 }
 
-/// Asks where to save a file (a song, or a library backup) and creates it there. The number to
+/// Asks where to save a file (a song, a library backup or a replay's video) and creates it there. The number to
 /// write it by with `save_file_write`, or none when the player cancelled. The page then sends the
 /// file in pieces, so a library of several gigabytes never has to be held in memory at once.
 #[tauri::command]
@@ -141,10 +143,10 @@ pub async fn save_file_begin(
     kind: String,
 ) -> Result<Option<u32>, String> {
     let (description, ext) = file_kind(&kind)?;
-    let title = if kind == "backup" {
-        "Export library"
-    } else {
-        "Export song"
+    let title = match kind.as_str() {
+        "backup" => "Export library",
+        "video-mp4" | "video-webm" => "Export video",
+        _ => "Export song",
     };
     let Some(chosen) = app
         .dialog()
@@ -240,5 +242,12 @@ mod tests {
             found,
             vec![dir.join("a.soundwave"), dir.join("b.SOUNDWAVE")]
         );
+    }
+
+    #[test]
+    fn saves_videos_with_their_own_extension() {
+        assert_eq!(file_kind("video-mp4"), Ok(("MP4 video", "mp4")));
+        assert_eq!(file_kind("video-webm"), Ok(("WebM video", "webm")));
+        assert!(file_kind("video-avi").is_err());
     }
 }

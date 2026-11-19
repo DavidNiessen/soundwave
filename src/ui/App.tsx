@@ -13,6 +13,7 @@ import type { Chart, Part } from '../chart/types';
 import { detectGrid } from '../editor/detect';
 import { emptyEdits } from '../editor/edits';
 import type { Results } from '../game/GameSession';
+import type { ReplayInputs } from '../game/replay';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { applyDisplayMode, canExit, exitApp, inDesktopApp, isFullscreenToggle, toggledMode } from '../game/displayMode';
 import {
@@ -36,17 +37,26 @@ import { pads, resolveStyle } from '../input/pads';
 import { setBindings } from '../input/bindings';
 import { menuPulse, setMenuRumble } from '../input/rumble';
 import {
+  deleteReplays,
   deleteSong,
+  getReplayData,
   getSong,
   listAllScores,
+  listReplays,
   listSongs,
+  pruneReplays,
+  putReplay,
   StorageBlockedError,
   submitScore,
+  updateReplay,
   type BestScore,
   type SongMeta,
 } from '../storage/db';
+import { newReplayId, type ReplayData, type ReplayMeta } from '../storage/replays';
 import { soundwaveFileName, isSoundwaveFile } from '../storage/soundwaveFile';
-import { saveSongFile, watchOpenedFiles } from '../storage/share';
+import { chooseSaveTarget, saveSongFile, watchOpenedFiles, type SaveTarget } from '../storage/share';
+import { videoFileName, type VideoExportSettings, type VideoFormat } from '../game/videoExport';
+import { ExportVideoDialog, VideoExportScreen } from './VideoExport';
 import { readSongPackage, songFile, storeNewSong, storeSongPackage, updateSongMeta } from '../storage/songFile';
 import { ActionBar, useActions } from './actions';
 import { Dialog } from './Dialog';
@@ -64,6 +74,7 @@ import { onBackdrop } from './windowDrag';
 import { InstallAppCard, UpdateCard } from './AppUpdates';
 import { checkForUpdates, updates } from '../app/updates';
 import { PlayScreen } from './PlayScreen';
+import { ReplayScreen } from './ReplayScreen';
 import { ResultsScreen, SummaryScreen, type SetResult } from './ResultsScreen';
 import { SettingsScreen } from './SettingsScreen';
 import type { SongActions } from './SongMenu';
@@ -98,6 +109,21 @@ type View =
   | { name: 'settings'; back: View }
   | EditorView
   | { name: 'play'; run: Run; buffer: AudioBuffer; key: number }
+  /** A saved replay being watched; `silent`: its song is gone, so it plays without music. */
+  | { name: 'replay'; meta: ReplayMeta; data: ReplayData; buffer: AudioBuffer; silent: boolean; back: View; key: number }
+  /** A replay's video being recorded into `target`. */
+  | {
+      name: 'export';
+      meta: ReplayMeta;
+      data: ReplayData;
+      buffer: AudioBuffer;
+      video: VideoExportSettings;
+      format: VideoFormat;
+      target: SaveTarget;
+      fileName: string;
+      back: View;
+      key: number;
+    }
   | { name: 'results'; run: Run }
   | { name: 'summary'; run: Run };
 
@@ -107,12 +133,31 @@ function Busy() {
   return null;
 }
 
-const DEPTH: Record<View['name'], number> = { home: 0, library: 1, settings: 1, lobby: 2, editor: 2, play: 3, results: 4, summary: 5 };
+const DEPTH: Record<View['name'], number> = {
+  home: 0,
+  library: 1,
+  settings: 1,
+  lobby: 2,
+  editor: 2,
+  play: 3,
+  replay: 3,
+  export: 3,
+  results: 4,
+  summary: 5,
+};
+
+/** Silence the length of a song, for a replay whose song has left the library (a low rate keeps it small). */
+function silence(seconds: number): AudioBuffer {
+  const rate = 8000;
+  return getEngine().ctx.createBuffer(1, Math.max(1, Math.ceil((seconds + 1) * rate)), rate);
+}
 
 export function App() {
   const [view, setView] = useState<View>({ name: 'home' });
   const [songs, setSongs] = useState<SongMeta[]>([]);
   const [scores, setScores] = useState<BestScore[]>([]);
+  /** The saved replays, newest first. */
+  const [replays, setReplays] = useState<ReplayMeta[]>([]);
   /** What has come back from storage since the game opened. */
   const [loaded, setLoaded] = useState({ songs: false, scores: false });
   /** The first screen waits for the library, so it arrives whole instead of filling in piece by piece. */
@@ -284,10 +329,19 @@ export function App() {
     setLoaded((l) => (l.scores ? l : { ...l, scores: true }));
   }, []);
 
+  const refreshReplays = useCallback(async () => {
+    try {
+      setReplays(await listReplays());
+    } catch {
+      /* replays are best-effort */
+    }
+  }, []);
+
   useEffect(() => {
     void refresh();
     void refreshScores();
-  }, [refresh, refreshScores]);
+    void refreshReplays();
+  }, [refresh, refreshScores, refreshReplays]);
 
   // Every song is separated into stems before it is charted. The model for that is fetched once,
   // the first time the game opens on a device that can run it.
@@ -404,7 +458,8 @@ export function App() {
   const openedRef = useRef<(files: File[]) => void>(() => {});
   openedRef.current = (files) =>
     void importFiles(files).then((got) => {
-      if (got.length === 1 && view.name !== 'play' && view.name !== 'editor') setSheet(got[0]);
+      if (got.length === 1 && view.name !== 'play' && view.name !== 'replay' && view.name !== 'export' && view.name !== 'editor')
+        setSheet(got[0]);
     });
   useEffect(() => watchOpenedFiles((files) => openedRef.current(files)), []);
   const exportSong = useCallback(
@@ -471,7 +526,7 @@ export function App() {
 
   // Files dropped anywhere on a menu are imported.
   const [dragging, setDragging] = useState(false);
-  const inMenus = view.name !== 'play';
+  const inMenus = view.name !== 'play' && view.name !== 'replay' && view.name !== 'export';
   const takesDrops = inMenus && view.name !== 'editor';
   useEffect(() => {
     if (!takesDrops) return;
@@ -552,16 +607,17 @@ export function App() {
   const [launch, setLaunch] = useState<'in' | 'out' | null>(null);
   const launchRef = useRef(launch);
   launchRef.current = launch;
-  const playAt = async (run: Run, index: number, started = false) => {
+  /** Closes the wipe over the screen, loads what comes next behind it, and opens it again. */
+  const wipeTo = async (load: () => Promise<View>, started = false) => {
     // One launch at a time: a second press while the wipe is up does nothing.
     if (launchRef.current && !started) return;
     setLaunch('in');
     const minWipe = new Promise((r) => setTimeout(r, 620));
     try {
       getEngine().stop();
-      const buffer = await loadSongBuffer(run.songs[index].id);
+      const next = await load();
       await minWipe;
-      setView({ name: 'play', run: { ...run, index }, buffer, key: Date.now() });
+      setView(next);
       // The sheets part once the play screen has had a moment to build its highway behind them,
       // so the way out is as smooth as the way in.
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -573,6 +629,90 @@ export function App() {
       toast((e as Error).message);
     }
   };
+  const playAt = (run: Run, index: number, started = false) =>
+    wipeTo(
+      async () => ({ name: 'play', run: { ...run, index }, buffer: await loadSongBuffer(run.songs[index].id), key: Date.now() }),
+      started,
+    );
+
+  /* Replays -------------------------------------------------------------------------------- */
+
+  /** Opens a saved replay: its song when the library still has it, silence when it does not. */
+  const watchReplay = (meta: ReplayMeta) => {
+    menuPulse('launch');
+    void wipeTo(async () => ({
+      name: 'replay',
+      ...(await loadReplay(meta)),
+      meta,
+      back: view.name === 'replay' ? view.back : view,
+      key: Date.now(),
+    }));
+  };
+  /** The replay whose video is being set up (the export dialog is open). */
+  const [exportAsk, setExportAsk] = useState<ReplayMeta | null>(null);
+  /** Loads a replay with its song, or silence where the song has left the library. */
+  const loadReplay = async (meta: ReplayMeta) => {
+    const data = await getReplayData(meta.id);
+    if (!data) throw new Error('This replay is no longer saved.');
+    let buffer: AudioBuffer | null = null;
+    if (byId.has(meta.songId)) buffer = await loadSongBuffer(meta.songId).catch(() => null);
+    return { data, buffer: buffer ?? silence(Math.max(meta.duration, data.chart.duration)), silent: !buffer };
+  };
+  /**
+   * Records a replay's video. The save dialog comes first (a browser shows it only straight after
+   * a press); the replay is then loaded and recorded behind the wipe.
+   */
+  const recordVideo = (meta: ReplayMeta, video: VideoExportSettings, format: VideoFormat) => {
+    const fileName = videoFileName(
+      meta.title,
+      meta.artist,
+      `${PART_LABEL[meta.part]} ${DIFFICULTY_LABEL[meta.difficulty]}`,
+      meta.date,
+      format.ext,
+    );
+    // Back to where the export was asked for: a replay starts over, the list stays as it was.
+    const back: View = view.name === 'replay' ? { ...view, key: Date.now() } : view;
+    void chooseSaveTarget(fileName, format.ext === 'mp4' ? 'video-mp4' : 'video-webm')
+      .then((target) => {
+        if (!target) return;
+        setExportAsk(null);
+        menuPulse('launch');
+        void wipeTo(async () => {
+          const { data, buffer } = await loadReplay(meta);
+          return { name: 'export', meta, data, buffer, video, format, target, fileName, back, key: Date.now() };
+        });
+      })
+      .catch((e) => toast(`The video could not be saved: ${(e as Error).message}`));
+  };
+  const replayActions = {
+    watch: watchReplay,
+    exportVideo: (meta: ReplayMeta) => setExportAsk(meta),
+    keep: async (meta: ReplayMeta, kept: boolean) => {
+      try {
+        await updateReplay(meta.id, { kept });
+      } catch {
+        toast('The replay could not be changed: the library is unavailable.');
+      }
+      await refreshReplays();
+    },
+    remove: async (list: ReplayMeta[]) => {
+      try {
+        await deleteReplays(list.map((r) => r.id));
+      } catch {
+        toast('The replay could not be deleted: the library is unavailable.');
+      }
+      await refreshReplays();
+    },
+  };
+  // A lower number of replays to keep takes effect once the settings are left, so trying the
+  // slider out removes nothing.
+  const inSettings = view.name === 'settings' || songSettings;
+  useEffect(() => {
+    if (inSettings || !loaded.songs) return;
+    void pruneReplays(settings.replayLimit)
+      .then((n) => (n ? refreshReplays() : undefined))
+      .catch(() => {});
+  }, [settings.replayLimit, inSettings, loaded.songs, refreshReplays]);
 
   const start = async (lobby: LobbyView) => {
     if (launchRef.current) return;
@@ -646,7 +786,37 @@ export function App() {
     return { ...run, results };
   };
 
-  const finish = async (run: Run, results: Results) => {
+  /** Saves a finished song's run as a replay, with every note of the chart it was played on. */
+  const saveReplay = async (song: SongMeta, chart: Chart, results: Results, inputs: ReplayInputs, best: number | undefined) => {
+    const date = Date.now();
+    const id = newReplayId(date);
+    try {
+      await putReplay(
+        {
+          meta: {
+            id,
+            date,
+            songId: song.id,
+            title: song.title,
+            artist: song.artist,
+            part: chart.part,
+            difficulty: chart.difficulty,
+            results,
+            best: results.score > 0 && (best === undefined || results.score > best),
+            kept: false,
+            duration: song.duration || chart.duration,
+          },
+          data: { id, chart, inputs },
+        },
+        settingsRef.current.replayLimit,
+      );
+      await refreshReplays();
+    } catch {
+      toast('This replay could not be saved: the library is out of room or unavailable.');
+    }
+  };
+
+  const finish = async (run: Run, results: Results, inputs?: ReplayInputs) => {
     const song = run.songs[run.index];
     let best: number | undefined;
     try {
@@ -663,6 +833,7 @@ export function App() {
     } catch {
       /* scores are best-effort */
     }
+    if (inputs && settingsRef.current.replays) void saveReplay(song, run.charts[run.index], results, inputs, best);
     setView({ name: 'results', run: withResult(run, { song, results, best }) });
   };
 
@@ -823,11 +994,51 @@ export function App() {
       }
       case 'summary':
         return showScene({ details: 'Finished a set', state: count(view.run.songs.length) });
+      case 'export':
+        return showScene({
+          details: view.meta.artist ? `${view.meta.title} — ${view.meta.artist}` : view.meta.title,
+          state: 'Recording a video',
+        });
+      case 'replay':
+        return showScene({
+          details: view.meta.artist ? `${view.meta.title} — ${view.meta.artist}` : view.meta.title,
+          state: 'Watching a replay',
+        });
     }
   }, [view, songs.length]);
 
   let content: React.ReactNode;
-  if (view.name === 'play') {
+  if (view.name === 'export') {
+    content = (
+      <VideoExportScreen
+        key={view.key}
+        replay={view.meta}
+        chart={view.data.chart}
+        inputs={view.data.inputs}
+        buffer={view.buffer}
+        settings={settings}
+        video={view.video}
+        format={view.format}
+        target={view.target}
+        fileName={view.fileName}
+        onDone={() => setView(view.back)}
+      />
+    );
+  } else if (view.name === 'replay') {
+    content = (
+      <ReplayScreen
+        key={view.key}
+        replay={view.meta}
+        chart={view.data.chart}
+        inputs={view.data.inputs}
+        buffer={view.buffer}
+        silent={view.silent}
+        settings={settings}
+        onBack={() => setView(view.back)}
+        onExport={() => setExportAsk(view.meta)}
+      />
+    );
+  } else if (view.name === 'play') {
     const { run } = view;
     const song = run.songs[run.index];
     const more = run.index + 1 < run.songs.length;
@@ -850,7 +1061,7 @@ export function App() {
         }}
         onSkip={more ? () => void playAt(withResult(run, { song, results: null }), run.index + 1) : undefined}
         // A test play keeps no score: it goes back to the editor with how it went.
-        onFinish={(r) => (run.test ? setView({ ...run.test.back, tested: r }) : void finish(run, r))}
+        onFinish={(r, inputs) => (run.test ? setView({ ...run.test.back, tested: r }) : void finish(run, r, inputs))}
       />
     );
   } else {
@@ -868,7 +1079,14 @@ export function App() {
       );
     } else if (view.name === 'settings') {
       screen = (
-        <SettingsScreen settings={settings} model={model} device={device} onChange={updateSettings} onBack={() => setView(view.back)} />
+        <SettingsScreen
+          settings={settings}
+          model={model}
+          device={device}
+          onChange={updateSettings}
+          onBack={() => setView(view.back)}
+          onReplaysDeleted={() => void refreshReplays()}
+        />
       );
     } else if (view.name === 'library') {
       screen = (
@@ -954,6 +1172,8 @@ export function App() {
             onOpen: (song) => setView({ name: 'editor', song, back: view }),
             toast,
           }}
+          replays={replays}
+          replayActions={replayActions}
           onSettings={() => setView({ name: 'settings', back: view })}
           onExit={canExit() ? () => setExitAsk(true) : undefined}
           update={update.state === 'available' ? update.version : undefined}
@@ -1016,10 +1236,21 @@ export function App() {
               device={device}
               onChange={updateSettings}
               onBack={() => setSongSettings(false)}
+              onReplaysDeleted={() => void refreshReplays()}
               inSong
             />
           </div>
         </div>
+      )}
+      {exportAsk && (
+        <ExportVideoDialog
+          replay={exportAsk}
+          silent={!byId.has(exportAsk.songId)}
+          settings={settings.videoExport}
+          onChange={(v) => updateSettings({ ...settings, videoExport: v })}
+          onStart={(v, format) => recordVideo(exportAsk, v, format)}
+          onClose={() => setExportAsk(null)}
+        />
       )}
       {exitAsk && (
         <Dialog title="Close the game" variant="card" closeLabel="Stay" onClose={() => setExitAsk(false)}>

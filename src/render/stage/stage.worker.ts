@@ -7,7 +7,10 @@ import { createStageHost } from './stageHost';
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 // Where a worker cannot fetch the game's files itself (the macOS app), the page fetches them.
 const fetched = proxyWorkerFetch((m) => scope.postMessage(m));
-const host = createStageHost((m: FromStage) => scope.postMessage(m));
+const host = createStageHost(
+  (m: FromStage) => scope.postMessage(m),
+  (m: FromStage, list: Transferable[]) => scope.postMessage(m, list),
+);
 self.onmessage = (e: MessageEvent<ToStage>) => {
   if (!fetched(e.data)) host.handle(e.data);
 };

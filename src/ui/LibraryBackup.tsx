@@ -184,11 +184,12 @@ export function useLibraryBackup(settings: Settings): LibraryBackup {
                 <p className="hint">
                   {made ? `Backed up ${made}: ` : 'This backup holds '}
                   {songs(b.songs.length)}, {count(b.scores.length, 'best score')}
+                  {b.replays.length ? `, ${count(b.replays.length, 'replay')}` : ''}
                   {Object.keys(b.preferences).length ? ' and settings' : ''}.
                 </p>
                 <p className="hint">
-                  Songs you already have stay as they are; the others are added with their charts. Better scores are kept, and your settings
-                  are replaced by the backup’s. The game restarts afterwards.
+                  Songs you already have stay as they are; the others are added with their charts. Better scores are kept, replays are
+                  added, and your settings are replaced by the backup’s. The game restarts afterwards.
                 </p>
                 <button type="button" className="btn wide" data-autofocus data-sfx="back" onClick={close}>
                   Cancel
@@ -220,7 +221,8 @@ export function useLibraryBackup(settings: Settings): LibraryBackup {
             <p className="hint" role="status">
               {done.added ? `${capital(songs(done.added))} added` : 'No new songs'}
               {done.kept ? `, ${songs(done.kept)} already here` : ''}
-              {done.failed ? `, ${songs(done.failed)} could not be read` : ''}. The game restarts to load them and the backup’s settings.
+              {done.failed ? `, ${songs(done.failed)} could not be read` : ''}
+              {done.replays ? `, ${count(done.replays, 'replay')} added` : ''}. The game restarts to load them and the backup’s settings.
             </p>
             <button type="button" className="btn primary wide" data-autofocus onClick={() => location.reload()}>
               Restart
@@ -240,8 +242,8 @@ export function useLibraryBackup(settings: Settings): LibraryBackup {
               <h2 className="display">Delete everything?</h2>
               <p className="hint">
                 {state.kind === 'askDelete' && state.songs !== null ? `${capital(songs(state.songs))} ` : 'Every song '}
-                in your library will be deleted, with their charts, the charts you edited by hand, and all best scores. Every setting goes
-                back to how the game came, key and controller bindings included.
+                in your library will be deleted, with their charts, the charts you edited by hand, all best scores and every replay. Every
+                setting goes back to how the game came, key and controller bindings included.
               </p>
               <p className="hint">This cannot be undone. To keep a copy, export your library first.</p>
               {/* First, so it has the focus: keeping everything is the safe answer. */}

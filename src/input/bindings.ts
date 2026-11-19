@@ -13,7 +13,7 @@
 import type { PadInput } from './pads';
 
 /** Where a shortcut works. */
-export type Area = 'menus' | 'home' | 'library' | 'lobby' | 'results' | 'settings' | 'song' | 'editor';
+export type Area = 'menus' | 'home' | 'library' | 'lobby' | 'results' | 'settings' | 'song' | 'replay' | 'editor';
 
 export const AREAS: { id: Area; label: string }[] = [
   { id: 'menus', label: 'Every menu' },
@@ -23,6 +23,7 @@ export const AREAS: { id: Area; label: string }[] = [
   { id: 'results', label: 'After a song' },
   { id: 'settings', label: 'Settings' },
   { id: 'song', label: 'Playing a song' },
+  { id: 'replay', label: 'Watching a replay' },
   { id: 'editor', label: 'Track editor' },
 ];
 
@@ -63,6 +64,10 @@ export const COMMANDS: Command[] = [
     { id: 'home.search', label: 'Search tracks', key: 'Slash' },
     { id: 'home.update', label: 'Update the game', key: 'KeyU' },
     { id: 'home.install', label: 'Get the app', key: 'KeyI' },
+    { id: 'home.replayOptions', label: 'Replay options', key: 'KeyO', pad: 'b2', mouse: 'm1' },
+    { id: 'home.replayKeep', label: 'Keep a replay', key: 'KeyK' },
+    { id: 'home.replayDelete', label: 'Delete a replay', key: 'Delete', key2: 'Backspace' },
+    { id: 'home.replayExport', label: 'Export a replay’s video', key: 'KeyV' },
   ]),
   ...cmd('library', [
     { id: 'library.options', label: 'Song options', key: 'KeyO', pad: 'b2', mouse: 'm1' },
@@ -91,6 +96,15 @@ export const COMMANDS: Command[] = [
   ]),
   ...cmd('settings', [{ id: 'settings.reset', label: 'Restore defaults', key: 'KeyR', pad: 'b3' }]),
   ...cmd('song', [{ id: 'song.pause', label: 'Pause', key: 'KeyP', pad: 'b9' }]),
+  // The speed is changed with the tab buttons (Q and E, the shoulder buttons).
+  ...cmd('replay', [
+    { id: 'replay.play', label: 'Play or pause', key: 'Space', pad: 'b3' },
+    { id: 'replay.back', label: 'Back 10 seconds', key: 'KeyJ', pad: 'b6' },
+    { id: 'replay.forward', label: 'Forward 10 seconds', key: 'KeyL', pad: 'b7' },
+    { id: 'replay.restart', label: 'From the start', key: 'Home', pad: 'b8' },
+    { id: 'replay.controls', label: 'Show or hide the controls', key: 'KeyH', pad: 'b2' },
+    { id: 'replay.export', label: 'Export a video', key: 'KeyV' },
+  ]),
   ...cmd('editor', [
     { id: 'editor.play', label: 'Play or pause', key: 'Space', pad: 'b3' },
     { id: 'editor.mark', label: 'Mark a stretch', key: 'KeyX', pad: 'b2' },
