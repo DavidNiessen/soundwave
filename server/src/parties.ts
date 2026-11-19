@@ -111,6 +111,8 @@ export class Parties {
     const fail = (message: string) => this.send(player.id, { type: 'error', message });
     const party = this.partyOf.get(player.id);
     switch (msg.type) {
+      case 'status':
+        return;
       case 'party-create': {
         if (party) this.leave(player.id);
         const p = new Party(this.newCode(), player);

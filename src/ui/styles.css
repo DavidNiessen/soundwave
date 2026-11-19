@@ -6857,3 +6857,82 @@ a.btn {
     font-size: 0.8rem;
   }
 }
+
+/* The connected main menu: a sidebar while signed in to a server. */
+.home-body[data-tab='play'] {
+  position: relative;
+}
+.online-side {
+  float: right;
+  width: clamp(14rem, 20vw, 18rem);
+  margin-left: clamp(0.8rem, 1.6vw, 1.4rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.online-you {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--r-m);
+  background: var(--panel);
+}
+.online-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--ink-3);
+  flex: none;
+}
+.online-dot.on {
+  background: var(--ok);
+}
+.online-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.3rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: var(--r-m);
+  background: var(--panel);
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}
+.online-card .label svg {
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.12em;
+}
+.online-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.9rem;
+}
+.online-list li {
+  display: grid;
+  grid-template-columns: 1.4rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.4rem;
+}
+.online-list li.me {
+  color: var(--pink-2);
+}
+.online-list svg {
+  width: 1rem;
+  height: 1rem;
+  color: var(--gold);
+}
+@media (max-width: 900px) {
+  .online-side {
+    float: none;
+    width: auto;
+    margin: 0 0 0.8rem;
+  }
+}

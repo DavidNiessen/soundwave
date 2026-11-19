@@ -84,6 +84,8 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     if (ws && ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
   };
   const parties = new Parties(send, clock);
+  /** What each player online says they are doing. */
+  const activity = new Map<string, string>();
   const authLimit = new RateLimit(10, 10);
   const writeLimit = new RateLimit(30, 30);
 
@@ -122,6 +124,13 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     },
     'GET /songs': (req) => (me(req), songs.list(new URL(req.url ?? '/', 'http://x').searchParams.get('q') ?? '')),
     'GET /mod/reports': (req) => songs.reports(me(req)),
+    'GET /presence': (req) => {
+      me(req);
+      return [...sockets.keys()]
+        .map((id) => ({ name: store.userById(id)?.name ?? '', activity: activity.get(id) ?? 'Online' }))
+        .filter((p) => p.name)
+        .sort((a, b) => a.name.localeCompare(b.name));
+    },
     'POST /auth/signup': (_req, body, ip) => {
       if (!authLimit.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
       return accounts.signUp(body);
@@ -391,12 +400,14 @@ export async function startServer(config: Config, store: Store, log: (line: stri
         return;
       }
       if (msg.type === 'hello') return;
+      if (msg.type === 'status') return void activity.set(user.id, msg.activity);
       parties.handle({ id: user.id, name: user.name }, msg);
     });
     ws.on('close', () => {
       clearTimeout(helloTimer);
       if (user && sockets.get(user.id) === ws) {
         sockets.delete(user.id);
+        activity.delete(user.id);
         parties.disconnected(user.id);
       }
     });

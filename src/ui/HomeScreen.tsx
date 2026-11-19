@@ -31,6 +31,7 @@ import { menuPulse } from '../input/rumble';
 import { useGlyphStyle } from '../input/usePads';
 import { Hint, useActions } from './actions';
 import { Mosaic } from './Cover';
+import { OnlineSidebar } from './OnlineSidebar';
 import { ICON_STROKE } from './icons';
 import { TrackPicker, type TrackPickerProps } from './TrackPicker';
 import { ReplaysPanel, type ReplayActions, type ReplayCommands } from './ReplaysPanel';
@@ -55,6 +56,8 @@ interface Props {
   onAdd(): void;
   /** Opens playing together (on a server). */
   onTogether(): void;
+  /** Opens the server's leaderboards (from the connected sidebar). */
+  onBoards(): void;
   /** Where the player stands online, for the Play together tile ("In party KITE-42"); absent offline. */
   together?: string;
   /** What the Edit tab's list of tracks needs to bring songs in and open them in the editor. */
@@ -104,6 +107,7 @@ export function HomeScreen({
   onSet,
   onAdd,
   onTogether,
+  onBoards,
   together,
   tracks,
   replays,
@@ -303,6 +307,7 @@ export function HomeScreen({
         ) : tab === 'play' ? (
           <>
             <h2 className="page-title">Pick a set</h2>
+            <OnlineSidebar onTogether={onTogether} onBoards={onBoards} />
             <div className="tiles" data-nav-group="tiles">
               {/* The feature: the player's own set, with its covers, and its songs in order. */}
               <button

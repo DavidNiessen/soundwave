@@ -1285,6 +1285,20 @@ export function App() {
 
   // The player's Discord profile shows where they are and what they play (desktop app; src/app/discord.ts).
   useEffect(() => setDiscordEnabled(settings.discordStatus), [settings.discordStatus]);
+  // The server's other players see the same line in their menus (only while signed in).
+  useEffect(() => {
+    const what =
+      view.name === 'play'
+        ? `Playing ${view.run.songs[view.run.index].title} · ${PART_LABEL[view.run.charts[view.run.index].part]}`
+        : view.name === 'party'
+          ? 'In a party lobby'
+          : view.name === 'editor'
+            ? 'Editing a chart'
+            : view.name === 'replay'
+              ? 'Watching a replay'
+              : 'In the menus';
+    if (onlineState.status === 'online') online.setStatus(what);
+  }, [view, onlineState.status]);
   useEffect(() => {
     const named = (s: SongMeta) => (s.artist ? `${s.title} — ${s.artist}` : s.title);
     const count = (n: number) => `${n} ${n === 1 ? 'song' : 'songs'}`;
@@ -1551,6 +1565,7 @@ export function App() {
           onLibrary={() => setView({ name: 'library' })}
           onSet={(ids) => setView({ name: 'lobby', ids, from: 'home' })}
           onTogether={() => setView({ name: 'party' })}
+          onBoards={() => setView({ name: 'boards' })}
           together={
             onlineState.party
               ? `In party ${onlineState.party.code}`

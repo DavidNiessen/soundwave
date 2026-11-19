@@ -19,6 +19,7 @@ import {
   type Run,
   type ScoreSubmission,
   type SharedSong,
+  type Online,
   type Weekly,
   type ClientMessage,
   type Difficulty,
@@ -424,6 +425,16 @@ class OnlineClient {
     return `${server}/covers/${songId}`;
   }
 
+  /** Tells the server what the player is doing, for the others' menus (sent again after a reconnect). */
+  setStatus(activity: string) {
+    this.activity = activity;
+    this.send({ type: 'status', activity });
+  }
+  private activity = '';
+  presence() {
+    return this.request<Online[]>('/presence', { auth: true });
+  }
+
   /** Asks the party's host for one of the set's songs this player lacks. */
   requestSong(songId: string) {
     this.send({ type: 'request-song', songId });
@@ -520,6 +531,7 @@ class OnlineClient {
         this.retry = 0;
         this.set({ status: 'online', account: msg.you, error: null });
         for (const m of this.pending.splice(0)) this.send(m);
+        if (this.activity) this.send({ type: 'status', activity: this.activity });
         this.sync();
         clearInterval(this.syncTimer);
         this.syncTimer = window.setInterval(() => this.sync(), SYNC_EVERY_MS);

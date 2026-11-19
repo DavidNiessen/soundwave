@@ -134,6 +134,8 @@ export function clientMessage(raw: unknown): ClientMessage | undefined {
       return Number.isInteger(raw.songIndex) ? { type: 'quit', songIndex: raw.songIndex as number } : undefined;
     case 'kick':
       return str(raw.id, 64) ? { type: 'kick', id: raw.id } : undefined;
+    case 'status':
+      return typeof raw.activity === 'string' ? { type: 'status', activity: raw.activity.slice(0, 120) } : undefined;
     case 'request-song':
       return str(raw.songId, 64) && SONG_ID.test(raw.songId) ? { type: 'request-song', songId: raw.songId } : undefined;
     case 'song-sent':

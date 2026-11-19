@@ -45,6 +45,12 @@ export interface ServerInfo {
 
 export type SongSharing = 'off' | 'charts' | 'songs';
 
+/** `GET /presence`: who is online, and what they are doing. */
+export interface Online {
+  name: string;
+  activity: string;
+}
+
 /** A song in a server's library. */
 export interface SharedSong {
   id: string;
@@ -215,6 +221,8 @@ export type ClientMessage =
   | { type: 'kick'; id: string }
   /** A player without one of the set's songs asks the host for it (they chose to get it). */
   | { type: 'request-song'; songId: string }
+  /** What the player is doing, in a line for others ("In the menus", "Playing Song · Lead"). */
+  | { type: 'status'; activity: string }
   /** The host shared the song to the server's library for that player (or `ok: false`: they won't). */
   | { type: 'song-sent'; songId: string; to: string; ok: boolean };
 
