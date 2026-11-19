@@ -1,6 +1,7 @@
 import type { BandLevels } from '../../audio/bands';
 import type { GraphicsSettings } from '../../game/graphics';
-import type { StageOptions } from '../aurora/AuroraStage';
+import type { Part } from '../../chart/types';
+import type { Avatars, StageOptions } from '../aurora/AuroraStage';
 
 /** What the music is doing, as the page last heard it. The stage reads the latest on each of its frames. */
 export interface StageInput {
@@ -40,6 +41,10 @@ export type ToStage =
   | { type: 'rate'; id: number; rate: StageRate }
   | { type: 'overdrive'; id: number }
   | { type: 'finale'; id: number; seconds: number }
+  /** Dresses the band as the players on its parts. */
+  | { type: 'avatars'; id: number; avatars: Avatars }
+  /** Keeps the camera on one part's band member, or lets it roam again (null). */
+  | { type: 'look'; id: number; part: Part | null }
   | { type: 'debug'; id: number }
   /** Sends a copy of every frame drawn (`frame`) while on: for recording a video. */
   | { type: 'capture'; id: number; on: boolean }

@@ -145,6 +145,18 @@ export interface ShowdownOptions {
   rotation: boolean;
 }
 
+/**
+ * A player's look on the stage (spec 4.2): at their part stands that part's band member, in their
+ * colours. Colours are `#rrggbb`.
+ */
+export interface Avatar {
+  top: string;
+  bottom: string;
+  /** The instrument's painted body. */
+  finish: string;
+}
+export const AVATAR_COLOR = /^#[0-9a-f]{6}$/;
+
 export interface Member {
   id: string;
   name: string;
@@ -159,6 +171,8 @@ export interface Member {
   calibrated: boolean;
   /** Showdown: knocked out of this set; they watch the rest. */
   eliminated?: boolean;
+  /** Their look on the stage, if they made one. */
+  avatar?: Avatar;
 }
 
 /** How one player's song went: the score of record, judged again from their inputs. */

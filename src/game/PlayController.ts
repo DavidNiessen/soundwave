@@ -3,6 +3,7 @@ import { AudioEngine } from '../audio/AudioEngine';
 import { BandMeter } from '../audio/bands';
 import { Highway } from '../render/Highway';
 import { StageView } from '../render/stage/StageView';
+import type { Avatars } from '../render/aurora/AuroraStage';
 import { barAt, barIntensity } from '../render/stage/LightShow';
 import { resolveGraphics } from './graphics';
 import { GameSession, PHRASE_REWARD, type Results } from './GameSession';
@@ -186,6 +187,7 @@ export class PlayController {
    * an overdrive, as in any song.
    */
   strike: ((charge: number) => boolean) | null = null;
+  private readonly avatars: Avatars | undefined;
   /** Showdown's hits on this player, in song time: Drain caps the multiplier, Fog hazes the far highway. */
   private hits: { from: number; to: number; drain: boolean; started: boolean; over?: boolean }[] = [];
 
@@ -199,10 +201,14 @@ export class PlayController {
     stageHost?: HTMLElement,
     /** A recorded run to play back instead of taking input. */
     replay?: ReplayInputs,
-    /** `graphClock`: follow the audio graph's clock instead of what the speakers play (recording a video). */
-    options: { graphClock?: boolean } = {},
+    /**
+     * `graphClock`: follow the audio graph's clock instead of what the speakers play (recording a
+     * video). `avatars`: the players' looks for the band on stage.
+     */
+    options: { graphClock?: boolean; avatars?: Avatars } = {},
   ) {
     this.graphClock = !!options.graphClock;
+    this.avatars = options.avatars;
     engine.load(buffer);
     engine.offset = settings.offsetMs / 1000;
     engine.volume = settings.volume;
@@ -435,7 +441,11 @@ export class PlayController {
   private buildStage() {
     const pending = this.stage !== this.shownStage ? this.stage : null;
     pending?.dispose();
-    const stage = new StageView(this.stageHost!, JSON.parse(this.graphicsKey), { mode: 'play', part: this.chart.part });
+    const stage = new StageView(this.stageHost!, JSON.parse(this.graphicsKey), {
+      mode: 'play',
+      part: this.chart.part,
+      avatars: this.avatars,
+    });
     if (this.isFrozen) stage.setRate('frozen');
     this.stage = stage;
     if (this.stageTaker) stage.capture(this.stageTaker);

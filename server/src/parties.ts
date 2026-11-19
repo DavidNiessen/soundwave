@@ -29,6 +29,7 @@ import {
   SHOWDOWN_FINAL,
   START_LEAD_MS,
   STRIKE_MIN_CHARGE,
+  type Avatar,
   type BoardLine,
   type ClientMessage,
   type Member,
@@ -92,6 +93,8 @@ const WORDS = [
 export interface Player {
   id: string;
   name: string;
+  /** Their look on the stage, which the party shows at their part. */
+  avatar?: Avatar;
 }
 
 type Send = (to: string, msg: ServerMessage) => void;
@@ -478,6 +481,16 @@ export class Parties {
     this.share(party);
   }
 
+  /** A player changed their avatar: the party sees it at once. */
+  setAvatar(player: string, avatar: Avatar | undefined) {
+    const party = this.partyOf.get(player);
+    const m = party?.member(player);
+    if (!party || !m) return;
+    if (avatar) m.avatar = avatar;
+    else delete m.avatar;
+    this.share(party);
+  }
+
   /** A player signed in again: back into their party, if they still have one. */
   reconnected(player: string) {
     const party = this.partyOf.get(player);
@@ -510,6 +523,7 @@ export class Parties {
       id: player.id,
       name: player.name,
       part: party.state.showdown?.part ?? 'lead',
+      ...(player.avatar ? { avatar: player.avatar } : {}),
       difficulty: 'medium',
       ready: false,
       calibrated: false,

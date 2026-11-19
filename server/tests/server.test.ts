@@ -229,6 +229,30 @@ describe('parties over the network', () => {
     ]);
   });
 
+  it('keep a player’s avatar, and show it to their party as soon as it changes', async () => {
+    const hostS = await signUp('Host');
+    const guestS = await signUp('Guest');
+    const look = { top: '#ff5a72', bottom: '#1a1a2e', finish: '#ffd23d' };
+    expect((await api('PUT', '/me/profile', { avatar: { ...look, top: 'red' } }, hostS.access)).status).toBe(400);
+    expect((await api('PUT', '/me/profile', { avatar: look }, hostS.access)).status).toBe(200);
+    expect((await api<{ avatar: unknown }>('GET', '/me/profile', undefined, hostS.access)).body.avatar).toEqual(look);
+
+    const host = await connect(hostS);
+    const guest = await connect(guestS);
+    host.send({ type: 'party-create' });
+    const made = await host.next('party', (m) => !!m.party);
+    expect(made.party!.members[0].avatar).toEqual(look);
+    guest.send({ type: 'party-join', code: made.party!.code });
+    await guest.next('party', (m) => m.party?.members.length === 2);
+    const theirs = { top: '#5df2d6', bottom: '#ffffff', finish: '#000000' };
+    const shown = host.next('party', (m) => !!m.party?.members.find((x) => x.name === 'Guest')?.avatar);
+    await api('PUT', '/me/profile', { avatar: theirs }, guestS.access);
+    const seen = await shown;
+    expect(seen.party!.members.find((x) => x.name === 'Guest')!.avatar).toEqual(theirs);
+    const exp = await api<{ avatar: unknown }>('GET', '/me/export', undefined, guestS.access);
+    expect(exp.body.avatar).toEqual(theirs);
+  });
+
   it('end for everyone when the host leaves, and refuse what only the host may do', async () => {
     const hostS = await signUp('Host');
     const guestS = await signUp('Guest');

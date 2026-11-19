@@ -1,5 +1,7 @@
 import type { GraphicsSettings } from '../../game/graphics';
 import { StageView } from '../stage/StageView';
+import type { Part } from '../../chart/types';
+import type { Avatars } from './AuroraStage';
 
 /**
  * The menus' stage, kept alive across remounts.
@@ -21,6 +23,19 @@ interface Held {
 /** How long an unused stage is kept before its GPU memory is freed, ms. */
 const LINGER = 1500;
 let held: Held | null = null;
+/** How the menu's band is dressed: as the signed-in player (and their party), or as themselves. */
+let dressed: Avatars = {};
+
+/** Keeps the menu stage's camera on one part's band member, or lets it roam again (null). */
+export function setMenuLook(part: Part | null) {
+  held?.stage.lookAt(part);
+}
+
+/** Dresses the menu stage's band, now and for any menu stage built later. */
+export function setMenuAvatars(avatars: Avatars) {
+  dressed = avatars;
+  held?.stage.setAvatars(avatars);
+}
 
 function drop(h: Held) {
   if (h.timer) clearTimeout(h.timer);
@@ -35,7 +50,7 @@ export function acquireMenuStage(host: HTMLElement, g: GraphicsSettings): StageV
     held = null;
   }
   if (!held) {
-    const mine: Held = { key, users: 0, timer: null, stage: new StageView(host, g, { mode: 'menu' }) };
+    const mine: Held = { key, users: 0, timer: null, stage: new StageView(host, g, { mode: 'menu', avatars: dressed }) };
     mine.stage.ready.catch(() => {
       if (held === mine) held = null;
     });

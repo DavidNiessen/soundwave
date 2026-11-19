@@ -12,6 +12,7 @@ import {
   PROTOCOL_VERSION,
   type Account,
   type ApiError,
+  type Avatar,
   type Board,
   type BoardLine,
   type RankLine,
@@ -61,6 +62,8 @@ export interface OnlineState {
   error: string | null;
   /** An invite's code, from a link the player opened or pasted, waiting for the sign-up it lets in. */
   invite: string | null;
+  /** The signed-in player's look on the stage, once loaded (null: they have none). */
+  avatar: Avatar | null;
 }
 
 /** A party's song changing hands (see `onSong`). */
@@ -135,7 +138,16 @@ export function parseInvite(text: string): { server: string; invite: string } | 
 }
 
 class OnlineClient {
-  private state: OnlineState = { status: 'off', server: null, info: null, account: null, party: null, error: null, invite: null };
+  private state: OnlineState = {
+    status: 'off',
+    server: null,
+    info: null,
+    account: null,
+    party: null,
+    error: null,
+    invite: null,
+    avatar: null,
+  };
   private readonly listeners = new Set<() => void>();
   /**
    * The live board of the song the party plays. Apart from the rest, as it changes ten times a
@@ -328,7 +340,7 @@ class OnlineClient {
     this.pending = [];
     clearTimeout(this.retryTimer);
     clearInterval(this.syncTimer);
-    this.set({ status: this.state.server ? 'signed-out' : 'off', account: null, party: null });
+    this.set({ status: this.state.server ? 'signed-out' : 'off', account: null, party: null, avatar: null });
     this.setBoard(null);
   }
 
@@ -526,6 +538,10 @@ class OnlineClient {
       case 'welcome':
         this.retry = 0;
         this.set({ status: 'online', account: msg.you, error: null });
+        void this.request<{ avatar: Avatar | null }>('/me/profile', { auth: true }).then(
+          (r) => this.set({ avatar: r.avatar }),
+          () => {},
+        );
         for (const m of this.pending.splice(0)) this.send(m);
         if (this.activity) this.send({ type: 'status', activity: this.activity });
         this.sync();
@@ -645,6 +661,11 @@ class OnlineClient {
   /** A player watching cheers the others on. */
   cheer() {
     this.send({ type: 'cheer' });
+  }
+  /** Stores the player's look on the server (null: the band member's own); the party sees it at once. */
+  async saveAvatar(avatar: Avatar | null) {
+    const r = await this.request<{ avatar: Avatar | null }>('/me/profile', { method: 'PUT', body: { avatar }, auth: true });
+    this.set({ avatar: r.avatar });
   }
   showdownRotation() {
     return this.request<SetSong[]>('/showdown/rotation', { auth: true });

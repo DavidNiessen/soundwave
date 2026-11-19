@@ -1,5 +1,5 @@
 import { detectGpu } from '../../game/graphics';
-import { AuroraStage } from '../aurora/AuroraStage';
+import { AuroraStage, type Avatars } from '../aurora/AuroraStage';
 import { loadVenue, watchVenue } from '../aurora/assets';
 import type { Beat, FromStage, StageInput, StageRate, ToStage } from './protocol';
 
@@ -26,6 +26,8 @@ interface Slot {
   copying: boolean;
   /** A video is being made frame by frame (see `step`): the loop leaves this stage alone. */
   stepped: boolean;
+  /** The players' looks, kept for a stage still being built. */
+  avatars?: Avatars;
 }
 
 /**
@@ -115,6 +117,7 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
     await stage.prepare();
     if (slot.disposed) return stage.dispose();
     slot.stage = stage;
+    if (slot.avatars) stage.setAvatars(slot.avatars);
     // The first frame right away, even in a hidden window: it compiles the shaders, and the loading
     // screen waits for it.
     draw(slot);
@@ -160,6 +163,13 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
         break;
       case 'finale':
         slot.stage?.finale(m.seconds);
+        break;
+      case 'avatars':
+        slot.avatars = m.avatars;
+        slot.stage?.setAvatars(m.avatars);
+        break;
+      case 'look':
+        slot.stage?.lookAt(m.part);
         break;
       case 'capture':
         slot.capture = m.on;

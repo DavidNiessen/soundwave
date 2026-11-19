@@ -13,6 +13,7 @@ import { Accounts, Refusal } from './accounts.ts';
 import type { Config } from './config.ts';
 import type { Store, UserRow } from './db.ts';
 import { Parties } from './parties.ts';
+import { Profiles } from './profiles.ts';
 import { Rotation } from './rotation.ts';
 import { Scores } from './scores.ts';
 import { joinPage } from './joinPage.ts';
@@ -78,6 +79,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
   const scores = new Scores(store);
   const songs = new Songs(store, config);
   const rotation = new Rotation(store);
+  const profiles = new Profiles(store);
   /** Each signed-in player's socket (one per player: signing in elsewhere replaces it). */
   const sockets = new Map<string, WebSocket>();
   const clock = () => performance.now();
@@ -154,7 +156,14 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     },
     'GET /me/export': (req) => {
       const u = me(req);
-      return { ...accounts.export(u), runs: scores.exportOf(u), songsShared: songs.exportOf(u) };
+      return { ...accounts.export(u), avatar: profiles.avatarOf(u.id) ?? null, runs: scores.exportOf(u), songsShared: songs.exportOf(u) };
+    },
+    'GET /me/profile': (req) => ({ avatar: profiles.avatarOf(me(req).id) ?? null }),
+    'PUT /me/profile': (req, body) => {
+      const u = me(req);
+      const a = profiles.setAvatar(u, body.avatar ?? null);
+      parties.setAvatar(u.id, a ?? undefined);
+      return { avatar: a };
     },
     'POST /scores': (req, body, ip) => {
       if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many scores at once. Wait a minute.');
@@ -272,7 +281,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     // site can do nothing with it that it could not do without the browser.
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Max-Age', '86400');
     // The game's page is cross-origin isolated (for analysis threads): answers must say they may be read there.
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
@@ -304,7 +313,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     try {
       let body: Record<string, unknown> = {};
       let raw = Buffer.alloc(0);
-      if (req.method === 'POST') {
+      if (req.method === 'POST' || req.method === 'PUT') {
         const chunks: Buffer[] = [];
         let size = 0;
         for await (const c of req) {
@@ -398,7 +407,9 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       }
       if (msg.type === 'hello') return;
       if (msg.type === 'status') return void activity.set(user.id, msg.activity);
-      parties.handle({ id: user.id, name: user.name }, msg);
+      // The avatar is only needed when the player comes into a party.
+      const joining = msg.type === 'party-create' || msg.type === 'party-join';
+      parties.handle({ id: user.id, name: user.name, avatar: joining ? profiles.avatarOf(user.id) : undefined }, msg);
     });
     ws.on('close', () => {
       clearTimeout(helloTimer);

@@ -1,5 +1,6 @@
 import { gpuFound, type GraphicsSettings } from '../../game/graphics';
-import type { StageOptions } from '../aurora/AuroraStage';
+import type { Part } from '../../chart/types';
+import type { Avatars, StageOptions } from '../aurora/AuroraStage';
 import { serveWorkerFetch } from '../../app/workerFetch';
 import type { Beat, FromStage, StageInput, StageRate, ToStage } from './protocol';
 
@@ -285,6 +286,16 @@ export class StageView {
 
   finale(seconds: number) {
     this.send({ type: 'finale', id: this.id, seconds });
+  }
+
+  /** Dresses the band as the players on its parts. */
+  setAvatars(avatars: Avatars) {
+    this.send({ type: 'avatars', id: this.id, avatars });
+  }
+
+  /** Keeps the camera on one part's band member, or lets it roam again (null). */
+  lookAt(part: Part | null) {
+    this.send({ type: 'look', id: this.id, part });
   }
 
   /**

@@ -17,6 +17,7 @@ import { hudRefs, PlayHud } from './PlayHud';
 import { ICON_STROKE } from './icons';
 import { BOARD_INTERVAL_MS } from '../net/protocol';
 import { online } from '../net/client';
+import type { Avatars } from '../render/aurora/AuroraStage';
 
 interface Props {
   title: string;
@@ -37,6 +38,8 @@ interface Props {
   onSettings(): void;
   settingsOpen: boolean;
   onQuit(): void;
+  /** The band on stage dressed as the players on its parts. */
+  avatars?: Avatars;
   /**
    * Played with a party: the song starts at the party's moment `at` (performance.now ms), the
    * score goes out ten times a second, and the party's board stands beside the highway. Nobody
@@ -76,9 +79,13 @@ export function PlayScreen({
   onSettings,
   settingsOpen,
   onQuit,
+  avatars,
   together,
 }: Props) {
   const togetherRef = useRef(together);
+  // The band is dressed once, as the song is set up.
+  const avatarsRef = useRef(avatars);
+  avatarsRef.current = avatars;
   togetherRef.current = together;
   // The song is set up with the settings it starts with; the ones that can change mid-song are
   // handed over as they change (see applySettings), so opening the settings never restarts it.
@@ -113,6 +120,8 @@ export function PlayScreen({
       hwRef.current!,
       hudRefs(hudRef.current!),
       stageRef.current!,
+      undefined,
+      { avatars: avatarsRef.current },
     );
     let prev: PlayPhase = 'countdown';
     // Discord shows the time left, or that the song is paused or over (src/app/discord.ts). The

@@ -156,10 +156,28 @@ export class Director {
     if (mode === 'fixed') this.cut(this.shots.find((s) => s.name === 'front') ?? this.shots[0]);
   }
 
+  /** A shot the camera stays on (a band member being dressed), or null to cut freely again. */
+  private held: string | null = null;
+
+  /** Stays on the named shot, moving to and fro, until called with null. */
+  hold(name: string | null) {
+    this.held = name;
+    const s = name ? this.shots.find((x) => x.name === name) : undefined;
+    if (s) this.cut(s);
+  }
+
   /** Advance; returns true when this frame cut to a new shot. */
   update(dt: number, downbeat: boolean, level: ShowLevel, barSeconds: number): boolean {
     this.shotTime += dt;
     if (this.mode === 'fixed') return false;
+    if (this.held) {
+      // Held: the move runs back and forth instead of cutting away.
+      if (this.shotTime >= MENU_SHOT) {
+        this.shotTime = 0;
+        this.reverse = !this.reverse;
+      }
+      return false;
+    }
     let due: boolean;
     if (this.menu) due = this.shotTime >= MENU_SHOT;
     else {

@@ -21,6 +21,7 @@ import {
   LogOut,
   Megaphone,
   PartyPopper,
+  Shirt,
   SkipForward,
   Swords,
   Undo2,
@@ -62,6 +63,8 @@ interface Props {
   onBoards(): void;
   /** Opens the server's shared songs. */
   onSongs(): void;
+  /** Opens the player's look on the stage. */
+  onAvatar(): void;
   /** Gets one of the party's songs this player lacks (from the server, or asked of the host). */
   onGetSong(id: string): void;
   /** Changes settings (the audio offset, calibrated from the lobby). */
@@ -92,7 +95,17 @@ export function PartyScreen(props: Props) {
         <Connect s={s} settings={settings} onBack={onBack} />
       );
   } else if (!s.party)
-    body = <NoParty s={s} settings={settings} setlist={props.setlist} onBack={onBack} onBoards={props.onBoards} onSongs={props.onSongs} />;
+    body = (
+      <NoParty
+        s={s}
+        settings={settings}
+        setlist={props.setlist}
+        onBack={onBack}
+        onBoards={props.onBoards}
+        onSongs={props.onSongs}
+        onAvatar={props.onAvatar}
+      />
+    );
   else if (s.party.phase === 'results')
     body = <PartyResults party={s.party} s={s} settings={settings} onBack={onBack} onStartSong={props.onStartSong} />;
   else body = <Lobby {...props} s={s} party={s.party} />;
@@ -320,6 +333,7 @@ function NoParty({
   onBack,
   onBoards,
   onSongs,
+  onAvatar,
 }: {
   s: OnlineState;
   settings: Settings;
@@ -327,6 +341,7 @@ function NoParty({
   onBack(): void;
   onBoards(): void;
   onSongs(): void;
+  onAvatar(): void;
 }) {
   const hints = useHints(settings);
   const [admin, setAdmin] = useState(false);
@@ -367,6 +382,7 @@ function NoParty({
     { id: 'party-export', label: 'Save my data', icon: Download, ...keysOf('party.export'), bar: false, run: () => void saveData() },
     { id: 'party-boards', label: 'Leaderboards', icon: Trophy, ...keysOf('party.boards'), run: onBoards },
     { id: 'party-songs', label: 'Shared songs', icon: Music, ...keysOf('party.songs'), bar: false, run: onSongs },
+    { id: 'party-avatar', label: 'Your look', icon: Shirt, ...keysOf('party.avatar'), bar: false, run: onAvatar },
     ...(mod
       ? [{ id: 'party-admin', label: 'Run the server', icon: Gavel, ...keysOf('party.admin'), bar: false, run: () => setAdmin((a) => !a) }]
       : []),
@@ -449,6 +465,11 @@ function NoParty({
             <Hint {...keysOf('party.boards')} {...hints} />
             <Trophy strokeWidth={ICON_STROKE} aria-hidden />
             Leaderboards
+          </button>
+          <button type="button" className="btn" data-action="party-avatar" onClick={onAvatar}>
+            <Hint {...keysOf('party.avatar')} {...hints} />
+            <Shirt strokeWidth={ICON_STROKE} aria-hidden />
+            Your look
           </button>
           <button type="button" className="btn" data-action="party-songs" onClick={onSongs}>
             <Hint {...keysOf('party.songs')} {...hints} />

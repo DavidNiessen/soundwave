@@ -83,6 +83,9 @@ import { SongSheet } from './SongSheet';
 import { MetadataSheet } from './MetadataSheet';
 import { Toasts, useToasts } from './Toasts';
 import { PartyBoard, PartyScreen } from './PartyScreen';
+import { AvatarScreen } from './AvatarScreen';
+import { setMenuAvatars } from '../render/aurora/menuStage';
+import type { Avatars } from '../render/aurora/AuroraStage';
 import { BoardsScreen } from './Boards';
 import { SongsScreen } from './SongsScreen';
 import { hashBytes } from '../storage/hash';
@@ -125,6 +128,8 @@ type View =
   | { name: 'boards'; from?: 'home' }
   /** The server's library of shared songs. */
   | { name: 'songs' }
+  /** The player's look on the stage. */
+  | { name: 'avatar' }
   | { name: 'settings'; back: View }
   | EditorView
   | { name: 'play'; run: Run; buffer: AudioBuffer; key: number }
@@ -160,6 +165,7 @@ const DEPTH: Record<View['name'], number> = {
   party: 2,
   boards: 3,
   songs: 3,
+  avatar: 3,
   editor: 2,
   play: 3,
   replay: 3,
@@ -1065,6 +1071,27 @@ export function App() {
     if (partyNext && byId.has(partyNext)) void loadSongBuffer(partyNext).catch(() => {});
   }, [partyNext, byId]);
 
+  /**
+   * The band on stage dressed as the players: in a party each member at their part, else the
+   * signed-in player at `part` (the part they play, or would).
+   */
+  const avatarsFor = (part: Part): Avatars => {
+    const out: Avatars = {};
+    const party = onlineState.party;
+    if (party)
+      for (const m of party.members) {
+        const at = m.id === onlineState.account?.id ? part : m.part;
+        if (m.avatar && !out[at]) out[at] = m.avatar;
+      }
+    else if (onlineState.account && onlineState.avatar) out[part] = onlineState.avatar;
+    return out;
+  };
+  const menuLook = JSON.stringify(avatarsFor(pick.part));
+  // The menu's band is dressed the same way; the look editor dresses it itself while it is open.
+  useEffect(() => {
+    if (view.name !== 'avatar') setMenuAvatars(JSON.parse(menuLook) as Avatars);
+  }, [menuLook, view.name]);
+
   /* Shared songs ---------------------------------------------------------------------------- */
 
   /** Downloads a whole shared song into the library. */
@@ -1289,6 +1316,8 @@ export function App() {
         return showScene({ details: 'Looking at the leaderboards' });
       case 'songs':
         return showScene({ details: 'Browsing shared songs' });
+      case 'avatar':
+        return showScene({ details: 'Choosing a look' });
       case 'editor':
         return showScene({ details: named(view.song), state: 'Editing the chart' });
       case 'play': {
@@ -1386,6 +1415,7 @@ export function App() {
         onFinish={(r, inputs) =>
           partyRun ? finishPartySong(run, r, inputs) : run.test ? setView({ ...run.test.back, tested: r }) : void finish(run, r, inputs)
         }
+        avatars={avatarsFor(run.charts[run.index].part)}
         together={
           partyRun
             ? {
@@ -1471,10 +1501,13 @@ export function App() {
           onBack={goHome}
           onBoards={() => setView({ name: 'boards' })}
           onSongs={() => setView({ name: 'songs' })}
+          onAvatar={() => setView({ name: 'avatar' })}
           onGetSong={getPartySong}
           onSettings={(patch) => updateSettings({ ...settings, ...patch })}
         />
       );
+    } else if (view.name === 'avatar') {
+      screen = <AvatarScreen part={pick.part} settings={settings} onBack={() => setView({ name: 'party' })} />;
     } else if (view.name === 'songs') {
       screen = (
         <SongsScreen

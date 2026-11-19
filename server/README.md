@@ -74,6 +74,11 @@ cheat to use. Boards are per song, chart (a hash of its notes), part and difficu
 this week. Any run on a board can be watched, and players can share runs to the server's replay
 list. The owner and moderators remove cheated runs.
 
+## Profiles
+
+A player's look on the stage is three colours (`GET` and `PUT /me/profile`, body `{ avatar: { top, bottom, finish } }`,
+`null` for none). Their party sees it at once.
+
 ## Showdown
 
 A party's host can make it a Showdown: scores count as a share of each chart's par, the lowest

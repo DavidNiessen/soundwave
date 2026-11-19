@@ -5,6 +5,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import type { BandLevels } from '../../audio/bands';
 import type { Part } from '../../chart/types';
+import type { Avatar } from '../../net/protocol';
 import { LEVEL_SHARE, type GraphicsSettings, type Level } from '../../game/graphics';
 import { Director, buildShots } from '../stage/Director';
 import { LightShow, PALETTES, type Rgb, type ShowState } from '../stage/LightShow';
@@ -23,7 +24,12 @@ export interface StageOptions {
   mode: 'play' | 'menu';
   /** The part being played: that band member gets the close-ups. */
   part?: Part;
+  /** Players' looks: each part's band member in the colours of the player on it. */
+  avatars?: Avatars;
 }
+
+/** The look of the player on each part (a part without one keeps the band member's own). */
+export type Avatars = Partial<Record<Part, Avatar>>;
 
 export interface StageFrame {
   beat: 'none' | 'beat' | 'downbeat';
@@ -94,6 +100,8 @@ export class AuroraStage {
   private readonly beams: Beams;
   private readonly crowd: Figures;
   private readonly band: Figures;
+  /** The band members, by part, for dressing them as the players. */
+  private players: Person[] = [];
   /**
    * The lake, and the picture it mirrors: the scene above it, drawn once more each frame from the
    * camera's reflection below the surface.
@@ -236,6 +244,8 @@ export class AuroraStage {
     const focus = opts.part === 'vocals' ? 'vox' : opts.part;
     const players = makeBand(this.data, assets.band.data.band ?? {}, focus);
     this.band.add(players, true);
+    this.players = players;
+    if (opts.avatars) this.setAvatars(opts.avatars);
     for (const lift of this.lifts) lift.person = players.find((p) => p.part === lift.part);
     PLAYERS.forEach((key, i) => {
       const p = this.data.band[key];
@@ -336,6 +346,20 @@ export class AuroraStage {
 
   overdriveStart() {
     this.show.overdriveStart();
+  }
+
+  /** Keeps the camera on one part's band member (while a player dresses them), or lets it roam again (null). */
+  lookAt(part: Part | null) {
+    this.director.hold(part ? `band-${part}` : null);
+  }
+
+  /** Dresses each part's band member as the player on that part, or as themselves where nobody is. */
+  setAvatars(avatars: Avatars) {
+    for (const p of this.players) {
+      const a = avatars[(p.part === 'vox' ? 'vocals' : p.part) as Part];
+      Object.assign(p, { top: a?.top, bottom: a?.bottom, finish: a?.finish, recolor: a ? 1 : 0 });
+      this.band.restyle(p);
+    }
   }
 
   /**
