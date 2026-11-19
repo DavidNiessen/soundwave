@@ -9,6 +9,7 @@
 import {
   ArrowLeft,
   Check,
+  Crosshair,
   Crown,
   Download,
   Gavel,
@@ -18,8 +19,10 @@ import {
   ListMusic,
   LogIn,
   LogOut,
+  Megaphone,
   PartyPopper,
   SkipForward,
+  Swords,
   Undo2,
   UserPlus,
   Users,
@@ -34,7 +37,7 @@ import { keysOf } from '../input/bindings';
 import { PadGlyph } from '../input/glyphs';
 import { confirmInput } from '../input/pads';
 import { online, parseInvite, type OnlineState } from '../net/client';
-import type { BoardLine, Member, PartyState, ResultLine, SetSong, SongResults } from '../net/protocol';
+import type { BoardLine, Member, PartyState, ResultLine, SetSong, ShowdownOptions, SongResults } from '../net/protocol';
 import type { SongMeta } from '../storage/db';
 import { Hint, useActions, useHints, type Action } from './actions';
 import { Cover } from './Cover';
@@ -88,7 +91,8 @@ export function PartyScreen(props: Props) {
       ) : (
         <Connect s={s} settings={settings} onBack={onBack} />
       );
-  } else if (!s.party) body = <NoParty s={s} settings={settings} onBack={onBack} onBoards={props.onBoards} onSongs={props.onSongs} />;
+  } else if (!s.party)
+    body = <NoParty s={s} settings={settings} setlist={props.setlist} onBack={onBack} onBoards={props.onBoards} onSongs={props.onSongs} />;
   else if (s.party.phase === 'results')
     body = <PartyResults party={s.party} s={s} settings={settings} onBack={onBack} onStartSong={props.onStartSong} />;
   else body = <Lobby {...props} s={s} party={s.party} />;
@@ -312,12 +316,14 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
 function NoParty({
   s,
   settings,
+  setlist,
   onBack,
   onBoards,
   onSongs,
 }: {
   s: OnlineState;
   settings: Settings;
+  setlist: SongMeta[];
   onBack(): void;
   onBoards(): void;
   onSongs(): void;
@@ -459,7 +465,7 @@ function NoParty({
         </div>
       </section>
       {(s.info?.mode === 'invite' || mod) && <InvitePanel mod={mod} />}
-      {mod && admin && <AdminPanel owner={s.account!.role === 'owner'} />}
+      {mod && admin && <AdminPanel owner={s.account!.role === 'owner'} setlist={setlist} />}
     </div>
   );
 }
@@ -517,7 +523,17 @@ function PartyLobby({
     if (!setlist.length) return;
     online.setSet(setlist.map((x): SetSong => ({ id: x.id, title: x.title, artist: x.artist, duration: x.duration })));
   };
-  const nextPart = () => choose(PARTS[(PARTS.indexOf(me.part) + 1) % PARTS.length], me.difficulty);
+  const locked = party.showdown?.part ?? null;
+  const nextPart = () => !locked && choose(PARTS[(PARTS.indexOf(me.part) + 1) % PARTS.length], me.difficulty);
+  // The host's Showdown switches: each changes one option and keeps the rest.
+  const sd = party.showdown;
+  const setShowdown = (o: Partial<ShowdownOptions> | null) =>
+    online.setShowdown(o === null ? null : { hits: true, part: null, rotation: false, ...sd, ...o });
+  const toggleShowdown = () => setShowdown(sd ? null : {});
+  const toggleHits = () => sd && setShowdown({ hits: !sd.hits });
+  const toggleOnePart = () => sd && setShowdown({ part: sd.part ? null : me.part });
+  const toggleRotation = () => sd && setShowdown({ rotation: !sd.rotation });
+  const watching = party.phase === 'playing';
   const nextDifficulty = () => choose(me.part, DIFFICULTIES[(DIFFICULTIES.indexOf(me.difficulty) + 1) % DIFFICULTIES.length]);
   const everyoneReady = party.members.every((m) => m.ready || !m.connected);
   const nextSong = party.set[nextIndex];
@@ -529,7 +545,27 @@ function PartyLobby({
     { id: 'party-part', label: 'Next part', icon: PART_ICON[me.part], ...keysOf('party.part'), bar: false, run: nextPart },
     { id: 'party-difficulty', label: 'Next difficulty', icon: Gauge, ...keysOf('party.difficulty'), bar: false, run: nextDifficulty },
     ...(host
-      ? [{ id: 'party-setlist', label: 'Play my setlist', icon: ListMusic, ...keysOf('party.setlist'), bar: false, run: useSetlist }]
+      ? [
+          { id: 'party-setlist', label: 'Play my setlist', icon: ListMusic, ...keysOf('party.setlist'), bar: false, run: useSetlist },
+          { id: 'party-showdown', label: 'Showdown', icon: Swords, ...keysOf('party.showdown'), bar: false, run: toggleShowdown },
+          ...(sd
+            ? [
+                { id: 'party-hits', label: 'Hits', icon: Crosshair, ...keysOf('party.hits'), bar: false, run: toggleHits },
+                {
+                  id: 'party-one-part',
+                  label: 'One part',
+                  icon: PART_ICON[me.part],
+                  ...keysOf('party.onePart'),
+                  bar: false,
+                  run: toggleOnePart,
+                },
+                { id: 'party-rotation', label: 'Rotation', icon: ListMusic, ...keysOf('party.rotation'), bar: false, run: toggleRotation },
+              ]
+            : []),
+        ]
+      : []),
+    ...(watching
+      ? [{ id: 'party-cheer', label: 'Cheer', icon: Megaphone, ...keysOf('party.cheer'), bar: false, run: () => online.cheer() }]
       : []),
     { id: 'party-leave', label: 'Leave the party', icon: LogOut, ...keysOf('party.leave'), sfx: 'back', run: () => online.leaveParty() },
   ]);
@@ -545,7 +581,7 @@ function PartyLobby({
 
         <h2 className="label party-set-head">
           The set
-          {host && (
+          {host && !sd?.rotation && (
             <button type="button" className="btn small" data-action="party-setlist" disabled={!setlist.length} onClick={useSetlist}>
               <Hint {...keysOf('party.setlist')} {...hints} />
               <ListMusic strokeWidth={ICON_STROKE} aria-hidden />
@@ -595,6 +631,14 @@ function PartyLobby({
             })}
           </ol>
         )}
+
+        <ShowdownPanel
+          party={party}
+          host={host}
+          me={me}
+          settings={settings}
+          on={{ toggleShowdown, toggleHits, toggleOnePart, toggleRotation }}
+        />
       </div>
 
       <section className="ready-panel" data-nav-group="ready" aria-label="Players and your choices">
@@ -641,6 +685,7 @@ function PartyLobby({
                   role="radio"
                   aria-checked={me.part === p}
                   className={`choice part ${me.part === p ? 'on' : ''}`}
+                  disabled={!!locked && p !== locked}
                   onClick={() => choose(p, me.difficulty)}
                 >
                   <Icon strokeWidth={ICON_STROKE} aria-hidden />
@@ -673,7 +718,11 @@ function PartyLobby({
             ))}
           </div>
         </div>
-        <p className="hint">A song without your part is played on one it has.</p>
+        <p className="hint">
+          {locked
+            ? `This Showdown is played on ${PART_LABEL[locked].toLowerCase()} only.`
+            : 'A song without your part is played on one it has.'}
+        </p>
 
         <button type="button" className={`btn wide ${me.ready ? '' : 'primary'}`} data-action="party-ready" onClick={toggleReady}>
           <Hint {...keysOf('party.ready')} {...hints} />
@@ -706,7 +755,7 @@ function PartyLobby({
             song.
           </p>
         )}
-        {party.phase === 'playing' && <PartyBoardPanel s={s} party={party} />}
+        {watching && <PartyBoardPanel s={s} party={party} hints={hints} />}
         <button type="button" className="btn wide" data-action="party-leave" data-sfx="back" onClick={() => online.leaveParty()}>
           <Hint kbd={keysOf('party.leave').kbd} {...hints} />
           <LogOut strokeWidth={ICON_STROKE} aria-hidden />
@@ -714,6 +763,77 @@ function PartyLobby({
         </button>
       </section>
     </div>
+  );
+}
+
+/** The Showdown's switches for the host, or what they chose for everyone else. */
+function ShowdownPanel({
+  party,
+  host,
+  me,
+  settings,
+  on,
+}: {
+  party: PartyState;
+  host: boolean;
+  me: Member;
+  settings: Settings;
+  on: { toggleShowdown(): void; toggleHits(): void; toggleOnePart(): void; toggleRotation(): void };
+}) {
+  const hints = useHints(settings);
+  const sd = party.showdown;
+  const left = party.members.filter((m) => !m.eliminated).length;
+  const part = sd?.part ? `${PART_LABEL[sd.part]} only` : 'Any part';
+  const switchButton = (id: string, binding: string, label: string, run: () => void) => (
+    <button type="button" className="btn small" data-action={id} onClick={run}>
+      <Hint {...keysOf(binding)} {...hints} />
+      {label}
+    </button>
+  );
+  return (
+    <section className="ready-panel showdown-panel" aria-label="Showdown">
+      <h2 className="label">
+        <Swords strokeWidth={ICON_STROKE} aria-hidden /> Showdown{sd ? ` · ${left} of ${party.members.length} in` : ''}
+      </h2>
+      <p className="hint">
+        {sd
+          ? 'Scores count as a share of each chart’s best, and the lowest players go out after each song.' +
+            (sd.hits ? ' Your overdrive button strikes the player just above you.' : '')
+          : 'A battle over the set: the lowest players go out after each song, and overdrive can strike the player above.'}
+      </p>
+      {host ? (
+        <div className="party-row">
+          {switchButton('party-showdown', 'party.showdown', sd ? 'Make it a plain party' : 'Make it a Showdown', on.toggleShowdown)}
+          {sd && switchButton('party-hits', 'party.hits', sd.hits ? 'Hits: on' : 'Hits: off', on.toggleHits)}
+          {sd &&
+            switchButton(
+              'party-one-part',
+              'party.onePart',
+              sd.part ? `Parts: ${PART_LABEL[sd.part].toLowerCase()} only` : 'Parts: any',
+              on.toggleOnePart,
+            )}
+          {sd &&
+            switchButton(
+              'party-rotation',
+              'party.rotation',
+              sd.rotation ? 'Set: the server’s rotation' : 'Set: the host’s',
+              on.toggleRotation,
+            )}
+        </div>
+      ) : (
+        sd && (
+          <p className="dim">
+            Hits {sd.hits ? 'on' : 'off'} · {part} · {sd.rotation ? 'the server’s rotation' : 'the host’s set'}
+          </p>
+        )
+      )}
+      {host && sd && !sd.part && <p className="dim">One part only plays everyone on your part, {PART_LABEL[me.part].toLowerCase()}.</p>}
+      {sd?.hits && (
+        <p className="dim">
+          Hits reach you as {settings.showdownHits === 'drain' ? 'Drain (calm hits)' : 'Fog'}. Settings → Online changes it.
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -752,38 +872,84 @@ function MemberLine({ m, host, me, setSize }: { m: Member; host: boolean; me: bo
 const nameOf = (party: PartyState | null, id: string) => party?.members.find((m) => m.id === id)?.name ?? 'Left';
 
 /** The party's board beside the highway: every player's score and streak, live. */
+/** A share of par as a percentage, one decimal. */
+const percent = (share: number) => `${(share * 100).toFixed(1)}%`;
+
 export function PartyBoard({ me }: { me: string }) {
   const s = useOnline();
   const board = useSyncExternalStore(online.subscribeBoard, online.board);
-  const lines = [...(board?.lines ?? [])].filter((l) => !l.out || l.score > 0).sort((a, b) => b.score - a.score);
-  if (!lines.length) return null;
+  const showdown = !!s.party?.showdown;
+  const all = [...(board?.lines ?? [])]
+    .filter((l) => !l.out || l.score > 0)
+    .sort((a, b) => (showdown ? (b.share ?? 0) - (a.share ?? 0) : b.score - a.score));
+  if (!all.length) return null;
+  const mine = all.find((l) => l.id === me);
+  // A Showdown's board keeps to the top five and the players around you, and says how many play.
+  const at = all.findIndex((l) => l.id === me);
+  const lines = showdown ? all.filter((_, i) => i < 5 || (at >= 0 && Math.abs(i - at) <= 1)) : all;
   return (
     <ol className="party-board" aria-label="Scores">
-      {lines.map((l, i) => (
-        <BoardRow key={l.id} l={l} rank={i + 1} name={nameOf(s.party, l.id)} me={l.id === me} />
+      {lines.map((l) => (
+        <BoardRow
+          key={l.id}
+          l={l}
+          rank={all.indexOf(l) + 1}
+          name={nameOf(s.party, l.id)}
+          me={l.id === me}
+          showdown={showdown}
+          target={!!mine?.aim && mine.aim === l.id}
+          threat={l.aim === me}
+        />
       ))}
+      {showdown && <li className="party-board-left dim">{all.filter((l) => !l.out).length} playing</li>}
     </ol>
   );
 }
 
-function BoardRow({ l, rank, name, me }: { l: BoardLine; rank: number; name: string; me: boolean }) {
+function BoardRow({
+  l,
+  rank,
+  name,
+  me,
+  showdown,
+  target,
+  threat,
+}: {
+  l: BoardLine;
+  rank: number;
+  name: string;
+  me: boolean;
+  showdown: boolean;
+  /** Showdown: your Strike would hit this player. */
+  target: boolean;
+  /** Showdown: this player's Strike would hit you. */
+  threat: boolean;
+}) {
   return (
-    <li className={`party-board-row ${me ? 'me' : ''} ${l.out ? 'out' : ''}`}>
+    <li className={`party-board-row ${me ? 'me' : ''} ${l.out ? 'out' : ''} ${l.hit ? 'hit' : ''}`}>
       <span className="num rank">{rank}</span>
-      <span className="party-name">{name}</span>
-      <span className="num">{l.score.toLocaleString()}</span>
-      <span className="dim num">{l.done ? 'done' : l.out ? 'left' : `×${l.streak}`}</span>
+      <span className="party-name">
+        {target && <Crosshair className="aim" strokeWidth={ICON_STROKE} aria-label="Your Strike would hit them" />}
+        {threat && <Swords className="aim" strokeWidth={ICON_STROKE} aria-label="Their Strike would hit you" />} {name}
+      </span>
+      <span className="num">{showdown ? percent(l.share ?? 0) : l.score.toLocaleString()}</span>
+      <span className="dim num">{l.done ? 'done' : l.out ? 'left' : l.hit ? 'hit' : `×${l.streak}`}</span>
     </li>
   );
 }
 
-/** The board in the lobby, for a player sitting the song out. */
-function PartyBoardPanel({ s, party }: { s: OnlineState; party: PartyState }) {
+/** The board in the lobby, for a player sitting the song out or out of the Showdown: they watch, and can cheer. */
+function PartyBoardPanel({ s, party, hints }: { s: OnlineState; party: PartyState; hints: ReturnType<typeof useHints> }) {
   const song = party.set[party.songIndex];
   return (
     <div className="party-watch">
       <h2 className="label">Playing now: {song?.title ?? `song ${party.songIndex + 1}`}</h2>
       <PartyBoard me={s.account!.id} />
+      <button type="button" className="btn small" data-action="party-cheer" onClick={() => online.cheer()}>
+        <Hint {...keysOf('party.cheer')} {...hints} />
+        <Megaphone strokeWidth={ICON_STROKE} aria-hidden />
+        Cheer them on
+      </button>
     </div>
   );
 }
@@ -806,7 +972,9 @@ function PartyResults({
   const hints = useHints(settings);
   const host = party.host === s.account!.id;
   const results = party.results.find((r) => r.songIndex === party.songIndex);
-  const last = party.songIndex + 1 >= party.set.length;
+  // A Showdown is over at the end of the set, or once one player is left.
+  const decided = !!party.showdown && party.members.filter((m) => !m.eliminated).length <= 1;
+  const last = party.songIndex + 1 >= party.set.length || decided;
   const song = party.set[party.songIndex];
   const next = () => onStartSong(party.songIndex + 1);
   const lobby = () => online.backToLobby();
@@ -827,7 +995,13 @@ function PartyResults({
           Song {party.songIndex + 1} of {party.set.length}: {song?.title}
         </h2>
         {results && <ResultTable lines={results.lines} me={s.account!.id} />}
-        {last && party.results.length > 1 && (
+        {party.showdown && (
+          <>
+            <h2 className="label">The Showdown</h2>
+            <ShowdownStandings party={party} me={s.account!.id} />
+          </>
+        )}
+        {!party.showdown && last && party.results.length > 1 && (
           <>
             <h2 className="label">The set</h2>
             <Standings party={party} me={s.account!.id} />
@@ -874,7 +1048,10 @@ function ResultTable({ lines, me }: { lines: ResultLine[]; me: string }) {
         >
           <span className="slot-num">{l.result ? i + 1 : '–'}</span>
           <span className="song-text">
-            <span className="song-title">{l.name}</span>
+            <span className="song-title">
+              {l.name}
+              {l.eliminated && <span className="dim"> · out</span>}
+            </span>
             <span className="song-artist">
               {l.result
                 ? `${Math.round(l.result.accuracy * 100)}% · best streak ${l.result.bestStreak}${l.result.fullCombo ? ' · full combo' : ''}`
@@ -887,9 +1064,10 @@ function ResultTable({ lines, me }: { lines: ResultLine[]; me: string }) {
             {l.result && (
               <>
                 <Stars n={l.result.stars} />
-                <span className="num">{l.result.score.toLocaleString()}</span>
+                <span className="num">{l.share !== undefined ? percent(l.share) : l.result.score.toLocaleString()}</span>
               </>
             )}
+            {!l.result && l.share !== undefined && <span className="num">{percent(l.share)}</span>}
           </span>
         </li>
       ))}
@@ -926,6 +1104,43 @@ function Standings({ party, me }: { party: PartyState; me: string }) {
           </span>
         </li>
       ))}
+    </ol>
+  );
+}
+
+/**
+ * A Showdown so far: the players still in first (the winner, once one is left), then those out,
+ * the latest out first. Each with the share of their last song.
+ */
+function ShowdownStandings({ party, me }: { party: PartyState; me: string }) {
+  const outAt = new Map<string, number>();
+  const lastShare = new Map<string, number>();
+  for (const r of [...party.results].sort((a, b) => a.songIndex - b.songIndex))
+    for (const l of r.lines) {
+      if (l.eliminated) outAt.set(l.id, r.songIndex);
+      if (l.share !== undefined) lastShare.set(l.id, l.share);
+    }
+  const rows = [...party.members].sort(
+    (a, b) => (outAt.get(b.id) ?? Infinity) - (outAt.get(a.id) ?? Infinity) || (lastShare.get(b.id) ?? 0) - (lastShare.get(a.id) ?? 0),
+  );
+  const left = party.members.filter((m) => !m.eliminated).length;
+  return (
+    <ol className="set-cards party-results">
+      {rows.map((m, i) => {
+        const out = outAt.get(m.id);
+        return (
+          <li key={m.id} className={`set-card party-result ${m.id === me ? 'me' : ''}`} style={{ ['--i' as string]: i }}>
+            <span className="slot-num">{i === 0 && left === 1 ? <Crown strokeWidth={ICON_STROKE} aria-label="Winner" /> : i + 1}</span>
+            <span className="song-text">
+              <span className="song-title">{m.name}</span>
+              <span className="song-artist">
+                {out === undefined ? (left === 1 ? 'Won the Showdown' : 'Still in') : `Out after song ${out + 1}`}
+              </span>
+            </span>
+            <span className="set-best">{lastShare.has(m.id) && <span className="num">{percent(lastShare.get(m.id)!)}</span>}</span>
+          </li>
+        );
+      })}
     </ol>
   );
 }

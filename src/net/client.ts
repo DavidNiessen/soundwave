@@ -28,6 +28,7 @@ import {
   type ServerMessage,
   type Session,
   type SetSong,
+  type ShowdownOptions,
   type SignUp,
   type SongScore,
   type WireChart,
@@ -64,6 +65,8 @@ export interface OnlineState {
 
 /** A party's song changing hands (see `onSong`). */
 export type SongEvent = Extract<ServerMessage, { type: 'song-request' | 'song-ready' }>;
+/** Showdown during a song: a Strike's answer, a hit coming (`at` on this machine's performance.now), a cheer. */
+export type ShowdownEvent = Extract<ServerMessage, { type: 'struck' | 'hit' | 'cheer' }>;
 
 /** A song the party starts: when (performance.now ms on this machine) and on which chart (null: sit it out). */
 export interface PartyStart {
@@ -142,6 +145,7 @@ class OnlineClient {
   private readonly boardListeners = new Set<() => void>();
   private readonly startListeners = new Set<(s: PartyStart) => void>();
   private readonly songListeners = new Set<(e: SongEvent) => void>();
+  private readonly showdownListeners = new Set<(e: ShowdownEvent) => void>();
   private ws: WebSocket | null = null;
   private access: string | null = null;
   private refreshToken: string | null = null;
@@ -195,6 +199,12 @@ class OnlineClient {
   onSong(fn: (e: SongEvent) => void) {
     this.songListeners.add(fn);
     return () => void this.songListeners.delete(fn);
+  }
+
+  /** Called for Showdown's Strikes, hits and cheers during a song. */
+  onShowdown(fn: (e: ShowdownEvent) => void) {
+    this.showdownListeners.add(fn);
+    return () => void this.showdownListeners.delete(fn);
   }
 
   private set(change: Partial<OnlineState>) {
@@ -554,6 +564,13 @@ class OnlineClient {
       case 'song-ready':
         for (const l of this.songListeners) l(msg);
         return;
+      case 'hit':
+      case 'struck':
+      case 'cheer': {
+        const e: ShowdownEvent = msg.type === 'hit' ? { ...msg, at: msg.at - this.offset } : msg;
+        for (const l of this.showdownListeners) l(e);
+        return;
+      }
       case 'bye':
         this.closing = true;
         this.set({ error: msg.reason, party: null, status: 'signed-out' });
@@ -616,6 +633,24 @@ class OnlineClient {
   }
   backToLobby() {
     this.send({ type: 'lobby' });
+  }
+  /** The host makes the party a Showdown with these options, or a plain party (null). */
+  setShowdown(options: ShowdownOptions | null) {
+    this.send({ type: 'showdown', options });
+  }
+  /** Showdown: spends the charge on a hit against the player above (the server picks whom). */
+  strike(songIndex: number, charge: number) {
+    this.send({ type: 'strike', songIndex, charge });
+  }
+  /** A player watching cheers the others on. */
+  cheer() {
+    this.send({ type: 'cheer' });
+  }
+  showdownRotation() {
+    return this.request<SetSong[]>('/showdown/rotation', { auth: true });
+  }
+  setShowdownRotation(songs: SetSong[]) {
+    return this.request<SetSong[]>('/showdown/rotation', { body: { songs }, auth: true });
   }
   kick(id: string) {
     this.send({ type: 'kick', id });

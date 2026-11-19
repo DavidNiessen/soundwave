@@ -74,6 +74,14 @@ cheat to use. Boards are per song, chart (a hash of its notes), part and difficu
 this week. Any run on a board can be watched, and players can share runs to the server's replay
 list. The owner and moderators remove cheated runs.
 
+## Showdown
+
+A party's host can make it a Showdown: scores count as a share of each chart's par, the lowest
+players go out after each song, and (with hits on) the overdrive button strikes the player above.
+The server decides whom a Strike hits and for how long. The host can play the server's Showdown
+rotation instead of their own set: the owner and moderators set it under **Play together → Run
+the server** (`GET` and `POST /showdown/rotation`, body `{ songs }`).
+
 ## Shared songs
 
 Off by default. Sharing music with others can infringe copyright, and you answer for what your

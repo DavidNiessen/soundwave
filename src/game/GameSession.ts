@@ -76,8 +76,10 @@ export class GameSession {
   private readonly drain: number;
   private readonly phraseFailed = new Set<number>();
   private readonly phraseLast = new Map<number, number>();
-  /** The score of a flawless run without overdrive: what the stars are measured against. */
-  private readonly par: number;
+  /** The score of a flawless run without overdrive: what the stars (and Showdown's shares) are measured against. */
+  readonly par: number;
+  /** Showdown's Drain: the multiplier is held at or below this while a hit lasts (0: no cap). */
+  private cap = 0;
   /** The share of par that turns the stars gold on this chart (it depends on how much overdrive the chart offers). */
   private readonly goldAt: number;
   private listeners: ((e: GameEvent) => void)[] = [];
@@ -129,7 +131,8 @@ export class GameSession {
   }
 
   get multiplier() {
-    return multiplierFor(this.streak) * (this.overdriveActive ? OVERDRIVE_FACTOR : 1);
+    const m = multiplierFor(this.streak) * (this.overdriveActive ? OVERDRIVE_FACTOR : 1);
+    return this.cap > 0 ? Math.min(this.cap, m) : m;
   }
 
   press(lane: number, t: number) {
@@ -228,6 +231,24 @@ export class GameSession {
     this.overdriveActivations++;
     this.emit({ type: 'overdrive-start' });
     return true;
+  }
+
+  /**
+   * Showdown's Strike: the whole charge is spent at song time t, on a hit against another player.
+   * Gives the charge spent (0 when there is not enough of it, or overdrive is running).
+   */
+  spendCharge(t = this.now): number {
+    this.reach(t);
+    if (this.overdriveActive || this.meter < PHRASE_REWARD) return 0;
+    const spent = this.meter;
+    this.meter = 0;
+    return spent;
+  }
+
+  /** Showdown's Drain: from song time t the multiplier is capped at `cap` (0 lifts the cap). */
+  capMultiplier(cap: number, t = this.now) {
+    this.reach(t);
+    this.cap = Math.max(0, cap);
   }
 
   /**

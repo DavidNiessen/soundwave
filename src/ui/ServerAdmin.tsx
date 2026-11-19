@@ -3,10 +3,11 @@
  * remove and ban players, name moderators, reset a forgotten password, and read
  * the log of every moderation action. And, for everyone, invite links.
  */
-import { Copy, Gavel, ScrollText, UserPlus } from 'lucide-react';
+import { Copy, Gavel, ListMusic, ScrollText, Swords, UserPlus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { online } from '../net/client';
-import type { Invite } from '../net/protocol';
+import type { Invite, SetSong } from '../net/protocol';
+import type { SongMeta } from '../storage/db';
 import { ICON_STROKE } from './icons';
 
 /** Saves text as a file the player keeps (their data from the server). */
@@ -79,7 +80,7 @@ export function InvitePanel({ mod }: { mod: boolean }) {
   );
 }
 
-export function AdminPanel({ owner }: { owner: boolean }) {
+export function AdminPanel({ owner, setlist }: { owner: boolean; setlist: SongMeta[] }) {
   const [name, setName] = useState('');
   const [reason, setReason] = useState('');
   const [hours, setHours] = useState('');
@@ -98,6 +99,14 @@ export function AdminPanel({ owner }: { owner: boolean }) {
     );
 
   const h = Number(hours);
+  // The Showdown rotation: the songs a Showdown plays when its host picks the server's set.
+  const [rotation, setRotation] = useState<SetSong[] | null>(null);
+  useEffect(() => void online.showdownRotation().then(setRotation, () => {}), []);
+  const useSetlistAsRotation = () =>
+    void online.setShowdownRotation(setlist.map((x) => ({ id: x.id, title: x.title, artist: x.artist, duration: x.duration }))).then(
+      (r) => (setRotation(r), setNote(r.length ? 'The Showdown rotation is your setlist now.' : 'The Showdown rotation is empty now.')),
+      (e) => setNote((e as Error).message),
+    );
   return (
     <section className="ready-panel admin">
       <h2 className="label">
@@ -155,6 +164,18 @@ export function AdminPanel({ owner }: { owner: boolean }) {
         )}
       </div>
       {note && <p className="hint">{note}</p>}
+      <h2 className="label">
+        <Swords strokeWidth={ICON_STROKE} aria-hidden /> Showdown rotation
+      </h2>
+      <p className="hint">
+        {rotation?.length
+          ? rotation.map((x) => x.title).join(' · ')
+          : 'None yet. A Showdown whose host picks the server’s set plays these songs.'}
+      </p>
+      <button type="button" className="btn small" onClick={useSetlistAsRotation}>
+        <ListMusic strokeWidth={ICON_STROKE} aria-hidden />
+        {setlist.length ? 'Make my setlist the rotation' : 'Clear the rotation'}
+      </button>
       <h2 className="label">
         <ScrollText strokeWidth={ICON_STROKE} aria-hidden /> What moderators did
       </h2>

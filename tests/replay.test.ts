@@ -37,7 +37,7 @@ function chart(): Chart {
  * `fps`: the frame rate it plays at; `late`: inputs reach the session only at the frame after
  * them, as they do in the game, instead of before the frame that passes their time.
  */
-function play(c: Chart, seed = 7, { fps = 60, late = false } = {}) {
+function play(c: Chart, seed = 7, { fps = 60, late = false, showdown = false } = {}) {
   let s = seed;
   const rand = () => (s = (s * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
   const session = new GameSession(c);
@@ -56,6 +56,8 @@ function play(c: Chart, seed = 7, { fps = 60, late = false } = {}) {
     evs.push({ t: at, run: () => rec.press(3, at) }, { t: at + 0.03, run: () => rec.release(3, at + 0.03) });
   }
   for (const at of [12, 25, 33]) evs.push({ t: at, run: () => void rec.overdrive(at) });
+  // Showdown: a Strike spends the charge, and a Drain hit caps the multiplier for a while.
+  if (showdown) evs.push({ t: 8, run: () => void rec.strike(8) }, { t: 4, run: () => rec.cap(1, 4) }, { t: 40, run: () => rec.cap(0, 40) });
   evs.sort((a, b) => a.t - b.t);
   // Frames at an uneven rate, as a real one runs; a pause at 20 s rewinds the song 1.5 s.
   let t = -3;
@@ -203,6 +205,36 @@ const meta = (over: Partial<ReplayMeta> = {}): ReplayMeta => ({
   kept: false,
   duration: 45,
   ...over,
+});
+
+describe('Showdown in a run', () => {
+  it('judges a Strike and a Drain hit the same at any frame rate, from the run alone', () => {
+    const c = chart();
+    const live = play(c, 7, { showdown: true });
+    const result = live.session.results();
+    expect(replayResults(c, live.inputs)).toEqual(result);
+    for (const fps of [30, 144]) expect(play(c, 7, { fps, late: true, showdown: true }).session.results()).toEqual(result);
+    // The capped multiplier costs points against the same run without hits.
+    expect(result.score).toBeLessThan(play(c).session.results().score);
+  });
+
+  it('spends the whole charge on a Strike, and none without a quarter meter', () => {
+    const c = chart();
+    const session = new GameSession(c);
+    expect(session.spendCharge(0)).toBe(0);
+    const rec = new ReplayRecorder(session);
+    // Every note of the first phrase hit, in order of time: a quarter meter.
+    const inputs = c.notes
+      .filter((x) => x.phrase === 0)
+      .flatMap((n) => [
+        { t: n.t, run: () => rec.press(n.lane, n.t) },
+        { t: n.t + n.dur + 0.01, run: () => rec.release(n.lane, n.t + n.dur + 0.01) },
+      ]);
+    for (const i of inputs.sort((a, b) => a.t - b.t)) i.run();
+    expect(session.overdrive).toBeCloseTo(0.25);
+    expect(rec.strike(c.notes[8].t)).toBeCloseTo(0.25);
+    expect(session.overdrive).toBe(0);
+  });
 });
 
 describe('replay files', () => {

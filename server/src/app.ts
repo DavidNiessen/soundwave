@@ -13,6 +13,7 @@ import { Accounts, Refusal } from './accounts.ts';
 import type { Config } from './config.ts';
 import type { Store, UserRow } from './db.ts';
 import { Parties } from './parties.ts';
+import { Rotation } from './rotation.ts';
 import { Scores } from './scores.ts';
 import { joinPage } from './joinPage.ts';
 import { Songs } from './songs.ts';
@@ -76,6 +77,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
   const accounts = new Accounts(store, config);
   const scores = new Scores(store);
   const songs = new Songs(store, config);
+  const rotation = new Rotation(store);
   /** Each signed-in player's socket (one per player: signing in elsewhere replaces it). */
   const sockets = new Map<string, WebSocket>();
   const clock = () => performance.now();
@@ -83,7 +85,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     const ws = sockets.get(to);
     if (ws && ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
   };
-  const parties = new Parties(send, clock);
+  const parties = new Parties(send, clock, () => rotation.songs());
   /** What each player online says they are doing. */
   const activity = new Map<string, string>();
   const authLimit = new RateLimit(10, 10);
@@ -159,6 +161,8 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       return scores.submit(me(req), body);
     },
     'GET /boards/top': (req) => (me(req), scores.topThisWeek()),
+    'GET /showdown/rotation': (req) => (me(req), rotation.songs()),
+    'POST /showdown/rotation': (req, body) => rotation.set(me(req), body.songs),
     'GET /replays': (req) => {
       me(req);
       const song = new URL(req.url ?? '/', 'http://x').searchParams.get('song') ?? undefined;

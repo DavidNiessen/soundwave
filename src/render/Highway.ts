@@ -175,6 +175,23 @@ const highwayFragment = /* glsl */ `
  * Overdrive's light: a soft light-blue glow lying along the outside of both edges of the lane,
  * brightest at the edge, with slow swells running down it toward the player and a fine shimmer.
  */
+/**
+ * Showdown's Fog: a haze lying over the far part of the deck, thick at the horizon and thinning to
+ * nothing well before the strike line, so notes come out of it later but nothing that has to be hit
+ * now is hidden. It drifts a little, slowly.
+ */
+const fogFragment = /* glsl */ `
+  uniform float uLevel;
+  uniform float uTime;
+  varying vec2 vUv;
+  void main() {
+    float drift = 0.5 + 0.5 * sin(vUv.x * 7.0 + uTime * 0.6) * sin(vUv.y * 5.0 - uTime * 0.4);
+    float edge = smoothstep(0.0, 0.08, vUv.x) * smoothstep(1.0, 0.92, vUv.x);
+    float thick = smoothstep(0.0, 0.3, vUv.y) * (0.9 + 0.08 * drift) * edge;
+    gl_FragColor = vec4(mix(vec3(0.08, 0.05, 0.18), vec3(0.24, 0.18, 0.4), drift * 0.4), thick * uLevel);
+  }
+`;
+
 const glowFragment = /* glsl */ `
   uniform float uTime;
   uniform float uLevel;
@@ -637,6 +654,17 @@ export class Highway {
   private readonly root = new THREE.Group();
   private readonly trackMat: THREE.ShaderMaterial;
   private readonly glowMats: THREE.ShaderMaterial[] = [];
+  /** Showdown's Fog: 1 while a hit hazes the far highway, 0 otherwise (it fades between). */
+  fog = 0;
+  private readonly fogMat = new THREE.ShaderMaterial({
+    vertexShader: highwayVertex,
+    fragmentShader: fogFragment,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    uniforms: { uLevel: { value: 0 }, uTime: { value: 0 } },
+  });
+  private fogMesh: THREE.Mesh | null = null;
   private readonly glow = new THREE.Group();
   private lip!: THREE.MeshBasicMaterial;
   /** The motes of light beside the rails (see floatMotes). */
@@ -765,6 +793,16 @@ export class Highway {
     this.lip = lip.material as THREE.MeshBasicMaterial;
     track.renderOrder = -2;
     this.root.add(track);
+
+    // Showdown's Fog: over the far two thirds of the deck, never the third nearest the strike line.
+    const fogLen = (LENGTH * 2) / 3;
+    const fog = new THREE.Mesh(new THREE.PlaneGeometry(this.width + 0.8, fogLen), this.fogMat);
+    fog.rotation.x = -Math.PI / 2;
+    fog.position.set(0, 0.4, -LENGTH / 3 - fogLen / 2);
+    fog.renderOrder = 5;
+    fog.visible = false;
+    this.fogMesh = fog;
+    this.root.add(fog);
 
     // Overdrive's light: a strip of glow lying flat along the outside of each edge.
     const glowWidth = 1.1;
@@ -1253,6 +1291,10 @@ export class Highway {
     u.uTime.value = (now / 1000) % 1000;
     // The facets move with the notes; 16 units is a whole number of their repeats.
     u.uTravel.value = (t * speed) % 16;
+    const fu = this.fogMat.uniforms;
+    fu.uLevel.value += (this.fog - fu.uLevel.value) * Math.min(1, dt * 4);
+    fu.uTime.value = u.uTime.value;
+    if (this.fogMesh) this.fogMesh.visible = fu.uLevel.value > 0.01;
     this.pulse = Math.max(0, this.pulse - dt * 2);
     // The music's push (beats and bass) is eased before it reaches the deck: it rises over a few
     // hundredths of a second and settles over a few tenths, so the light swells and ebbs with the

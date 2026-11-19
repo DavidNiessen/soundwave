@@ -905,6 +905,8 @@ export function App() {
    */
   const postRun = async (run: Run, results: Results, inputs: ReplayInputs) => {
     if (!online.snapshot().account || !settingsRef.current.postScores) return;
+    // A Showdown's runs are shaped by its hits: they count in the party, not on the boards.
+    if (run.party && online.snapshot().party?.showdown) return;
     const song = run.songs[run.index];
     try {
       const r = await online.postScore({
@@ -1390,6 +1392,9 @@ export function App() {
                 at: partyRun.at,
                 board: <PartyBoard me={onlineState.account?.id ?? ''} />,
                 onProgress: (score, streak, stars) => online.progress(partyRun.songIndex, score, streak, stars),
+                showdown: onlineState.party?.showdown
+                  ? { songIndex: partyRun.songIndex, hits: onlineState.party.showdown.hits, me: onlineState.account?.id ?? '' }
+                  : undefined,
               }
             : undefined
         }

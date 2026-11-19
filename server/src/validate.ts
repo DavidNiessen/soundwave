@@ -138,6 +138,19 @@ export function clientMessage(raw: unknown): ClientMessage | undefined {
       return typeof raw.activity === 'string' ? { type: 'status', activity: raw.activity.slice(0, 120) } : undefined;
     case 'request-song':
       return str(raw.songId, 64) && SONG_ID.test(raw.songId) ? { type: 'request-song', songId: raw.songId } : undefined;
+    case 'showdown': {
+      if (raw.options === null) return { type: 'showdown', options: null };
+      const o = raw.options;
+      if (!isObj(o) || typeof o.hits !== 'boolean' || typeof o.rotation !== 'boolean') return undefined;
+      if (o.part !== null && !PARTS.includes(o.part as Part)) return undefined;
+      return { type: 'showdown', options: { hits: o.hits, part: (o.part as Part | null) ?? null, rotation: o.rotation } };
+    }
+    case 'strike':
+      return Number.isInteger(raw.songIndex) && num(raw.charge)
+        ? { type: 'strike', songIndex: raw.songIndex as number, charge: Math.max(0, Math.min(1, raw.charge)) }
+        : undefined;
+    case 'cheer':
+      return { type: 'cheer' };
     case 'song-sent':
       return str(raw.songId, 64) && SONG_ID.test(raw.songId) && str(raw.to, 64) && typeof raw.ok === 'boolean'
         ? { type: 'song-sent', songId: raw.songId, to: raw.to, ok: raw.ok }

@@ -5,7 +5,7 @@ import { Highway } from '../render/Highway';
 import { StageView } from '../render/stage/StageView';
 import { barAt, barIntensity } from '../render/stage/LightShow';
 import { resolveGraphics } from './graphics';
-import { GameSession, type Results } from './GameSession';
+import { GameSession, PHRASE_REWARD, type Results } from './GameSession';
 import { ReplayPlayback, ReplayRecorder, replayResults, type ReplayInputs } from './replay';
 import { BufferAnalyser } from '../audio/bufferAnalyser';
 import type { StageInput } from '../render/stage/protocol';
@@ -15,6 +15,7 @@ import { GamepadInput, KeyboardInput, TouchInput, type InputHandlers } from './i
 import { WINDOWS } from './judge';
 import { GOLD_STARS, MAX_MULTIPLIER, multiplierFor, STREAK_PER_MULTIPLIER } from './scoring';
 import { highwaySpeed, type Settings } from './settings';
+import { DRAIN_CAP } from '../net/protocol';
 
 export interface HudRefs {
   score: HTMLElement;
@@ -179,6 +180,14 @@ export class PlayController {
   onPhase: (p: PlayPhase, countdown?: number) => void = () => {};
   /** The song is over: how it went, and the run as recorded (absent in a replay). */
   onFinish: (r: Results, inputs?: ReplayInputs) => void = () => {};
+  /**
+   * Showdown: asked when the overdrive button is pressed with charge to spend. True: the press is a
+   * Strike, sent off to be aimed (`spendCharge` or `overdriveNow` follows the answer). False: it is
+   * an overdrive, as in any song.
+   */
+  strike: ((charge: number) => boolean) | null = null;
+  /** Showdown's hits on this player, in song time: Drain caps the multiplier, Fog hazes the far highway. */
+  private hits: { from: number; to: number; drain: boolean; started: boolean; over?: boolean }[] = [];
 
   constructor(
     private readonly engine: AudioEngine,
@@ -252,9 +261,7 @@ export class PlayController {
         if (this.phase !== 'playing') return;
         recorder.release(lane, this.engine.time(ts));
       },
-      overdrive: () => {
-        if (this.phase === 'playing') recorder.overdrive(this.engine.time());
-      },
+      overdrive: () => this.pressOverdrive(),
       pause: () => {
         // With the settings open over the pause menu, Esc and the pause button belong to them.
         if (this.holdPause) return;
@@ -326,8 +333,51 @@ export class PlayController {
 
   private readonly overdrivePress = (e: Event) => {
     e.preventDefault();
-    if (this.phase === 'playing') this.recorder?.overdrive(this.engine.time());
+    this.pressOverdrive();
   };
+
+  /** The overdrive button: overdrive, or in a Showdown a Strike when there is someone to strike. */
+  private pressOverdrive() {
+    if (this.phase !== 'playing' || !this.recorder) return;
+    const s = this.session;
+    if (this.strike && !s.overdriveActive && s.overdrive >= PHRASE_REWARD && this.strike(s.overdrive)) return;
+    this.recorder.overdrive(this.engine.time());
+  }
+
+  /** Showdown: the Strike found its target, so the charge is spent now. */
+  spendCharge() {
+    if (this.phase === 'playing') this.recorder?.strike(this.engine.time());
+  }
+
+  /** Showdown: nobody could be struck, so the press was an overdrive after all. */
+  overdriveNow() {
+    if (this.phase === 'playing') this.recorder?.overdrive(this.engine.time());
+  }
+
+  /** Showdown: a hit on this player from `at` (performance.now ms) for `ms`, as Drain or Fog. */
+  hit(at: number, ms: number, drain: boolean) {
+    if (this.playback) return;
+    const from = this.engine.time(at);
+    this.hits.push({ from, to: from + (ms / 1000) * this.engine.playbackRate, drain, started: false });
+  }
+
+  /** Starts and ends the hits that fall due by song time t. A Drain's cap is part of the run. */
+  private applyHits(t: number) {
+    let fog = false;
+    for (const h of this.hits) {
+      if (!h.started && t >= h.from) {
+        h.started = true;
+        if (h.drain) this.recorder?.cap(DRAIN_CAP, h.from);
+      }
+      if (!h.started) continue;
+      if (t >= h.to) {
+        h.over = true;
+        if (h.drain) this.recorder?.cap(0, h.to);
+      } else if (!h.drain) fog = true;
+    }
+    this.hits = this.hits.filter((h) => !h.over);
+    this.highway.fog = fog ? 1 : 0;
+  }
 
   /** Lays the highway out again after the layout changed without the canvas changing size (another input in use). */
   relayout() {
@@ -584,6 +634,7 @@ export class PlayController {
     if (this.phase === 'playing') {
       if (this.playback) this.playback.advance(t);
       else this.recorder!.update(t);
+      if (this.hits.length) this.applyHits(t);
       if (t > this.chart.duration + 0.5 && t > this.engine.duration) this.finish();
     }
 

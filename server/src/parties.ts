@@ -6,25 +6,61 @@
  * same notes), names the moment it starts on the server's clock, and passes the scores around ten
  * times a second. Each player's hits are judged on their own machine; only scores travel.
  *
+ * A party can be a Showdown (4.1): scores become shares of each chart's par, the overdrive button
+ * strikes the player above, and the lowest players go out after each song. The server decides whom
+ * a Strike hits and how long the hit lasts, by the fairness rules below; the players' games apply
+ * the hits.
+ *
  * This holds no sockets: it is given a way to send a message to a player and a clock, so it can be
  * tested on its own (server/tests).
  */
+import type { Chart } from '../../src/chart/types.ts';
+import { GameSession } from '../../src/game/GameSession.ts';
 import {
   BOARD_INTERVAL_MS,
+  HIT_MAX_MS,
+  HIT_MIN_MS,
+  HIT_PROTECTION_MS,
+  HIT_REPEAT_MS,
+  HIT_WARNING_MS,
+  MAX_ATTACKERS,
   PARTY_MAX,
   RECONNECT_GRACE_MS,
+  SHOWDOWN_FINAL,
   START_LEAD_MS,
+  STRIKE_MIN_CHARGE,
   type BoardLine,
   type ClientMessage,
   type Member,
   type PartyState,
   type ResultLine,
   type ServerMessage,
+  type SetSong,
   type SongScore,
 } from '../../src/net/protocol.ts';
 
 /** How long after a song should have ended its results wait for a player's final score, ms. */
 const FINISH_GRACE_MS = 30_000;
+/** The least time between one watching player's cheers, ms. */
+const CHEER_EVERY_MS = 1_500;
+
+/**
+ * How many players are left after song `songIndex` of a Showdown that `start` players began with:
+ * the field is cut evenly down to a final of four (or fewer, for a small party), and the last song
+ * leaves one. 16 players over 4 songs: 12, 8, 4, 1.
+ */
+export function survivors(start: number, songIndex: number, songs: number): number {
+  if (songIndex >= songs - 1) return 1;
+  const final = Math.min(SHOWDOWN_FINAL, start);
+  return start - Math.round(((songIndex + 1) * (start - final)) / (songs - 1));
+}
+
+/** How long a Strike's hit lasts: 3 s for a quarter meter, 8 s for a full one, half for a repeat. */
+export function hitLength(charge: number, repeat: boolean): number {
+  const k = Math.max(0, Math.min(1, (charge - STRIKE_MIN_CHARGE) / (1 - STRIKE_MIN_CHARGE)));
+  const ms = Math.round(HIT_MIN_MS + k * (HIT_MAX_MS - HIT_MIN_MS));
+  return repeat ? Math.round(ms / 2) : ms;
+}
 
 const WORDS = [
   'KITE',
@@ -67,6 +103,12 @@ interface Song {
   board: Map<string, BoardLine>;
   /** When the results are made even without every final score (server clock, ms). */
   deadline: number;
+  /** Showdown: each player's chart's par, which their score is a share of. */
+  par: Map<string, number>;
+  /** Showdown: the hit each player is under or about to be (server clock, ms). */
+  hits: Map<string, { at: number; until: number }>;
+  /** Showdown: when each player's last hit started. */
+  lastHit: Map<string, number>;
 }
 
 class Party {
@@ -75,9 +117,13 @@ class Party {
   /** When each disconnected member went (server clock, ms). */
   gone = new Map<string, number>();
   lastBoard = 0;
+  /** Showdown: how many players began the set, which the cut after each song is reckoned from. */
+  started = 0;
+  /** When each watching player last cheered. */
+  cheered = new Map<string, number>();
 
   constructor(code: string, host: Player) {
-    this.state = { code, host: host.id, members: [], set: [], phase: 'lobby', songIndex: -1, results: [] };
+    this.state = { code, host: host.id, members: [], set: [], phase: 'lobby', songIndex: -1, results: [], showdown: null };
   }
 
   member(id: string): Member | undefined {
@@ -91,10 +137,13 @@ export class Parties {
 
   private readonly send: Send;
   private readonly now: () => number;
+  /** The server's Showdown rotation: the set a Showdown plays when the host does not pick one. */
+  private readonly rotation: () => SetSong[];
 
-  constructor(send: Send, now: () => number) {
+  constructor(send: Send, now: () => number, rotation: () => SetSong[] = () => []) {
     this.send = send;
     this.now = now;
+    this.rotation = rotation;
   }
 
   /** The party a player is in (for tests and the moderation tools). */
@@ -140,17 +189,24 @@ export class Parties {
       case 'set':
         if (!host) return fail('Only the host picks the set.');
         if (s.phase === 'playing') return fail('The set can be changed once this song is over.');
-        s.set = msg.songs;
-        s.results = [];
-        s.songIndex = -1;
-        s.phase = 'lobby';
-        for (const m of s.members) {
-          m.ready = false;
-          m.have = m.have.filter((id) => s.set.some((song) => song.id === id));
-        }
+        if (s.showdown?.rotation) return fail('This Showdown plays the server’s rotation. Turn that off to pick your own set.');
+        this.newSet(party, msg.songs);
         return this.share(party);
+      case 'showdown': {
+        if (!host) return fail('Only the host sets up a Showdown.');
+        if (s.phase === 'playing') return fail('A Showdown can be set up once this song is over.');
+        const o = msg.options;
+        if (o?.rotation && !this.rotation().length)
+          return fail('This server has no Showdown rotation yet. Its owner or a moderator sets one.');
+        const wasRotation = !!s.showdown?.rotation;
+        s.showdown = o;
+        if (o?.part) for (const m of s.members) m.part = o.part;
+        // The rotation is the set while it is chosen; turned off, the set is the host's to pick again.
+        this.newSet(party, o?.rotation ? this.rotation() : wasRotation ? [] : s.set);
+        return this.share(party);
+      }
       case 'ready':
-        me.part = msg.part;
+        me.part = s.showdown?.part ?? msg.part;
         me.difficulty = msg.difficulty;
         me.ready = msg.ready;
         me.calibrated = msg.calibrated === true;
@@ -164,6 +220,19 @@ export class Parties {
         line.score = msg.score;
         line.streak = msg.streak;
         line.stars = msg.stars;
+        if (s.showdown) line.share = this.shareOf(party.song!, player.id, msg.score);
+        return;
+      }
+      case 'strike':
+        return this.strike(party, player, msg.songIndex, msg.charge);
+      case 'cheer': {
+        // Only a player watching cheers (out of the Showdown, or sitting the song out), and not too often.
+        const song = party.song;
+        if (!song || song.playing.has(player.id)) return;
+        const now = this.now();
+        if (now - (party.cheered.get(player.id) ?? -Infinity) < CHEER_EVERY_MS) return;
+        party.cheered.set(player.id, now);
+        for (const id of song.playing.keys()) this.send(id, { type: 'cheer', from: player.name });
         return;
       }
       case 'finish':
@@ -174,6 +243,7 @@ export class Parties {
         song.playing.set(player.id, result);
         const line = song.board.get(player.id)!;
         if (result) Object.assign(line, { score: result.score, stars: result.stars, done: true });
+        if (result && s.showdown) line.share = this.shareOf(song, player.id, result.score);
         else line.out = true;
         return this.maybeEndSong(party);
       }
@@ -210,19 +280,36 @@ export class Parties {
     if (s.host !== player.id) return fail('Only the host starts a song.');
     if (s.phase === 'playing') return fail('A song is already playing.');
     if (msg.songIndex < 0 || msg.songIndex >= s.set.length) return fail('That song is not in the set.');
+    if (s.showdown) {
+      // A set begins with everyone in it; later songs only with the players still in.
+      if (msg.songIndex === 0) for (const m of s.members) m.eliminated = false;
+      const left = s.members.filter((m) => !m.eliminated).length;
+      if (msg.songIndex > 0 && left <= 1) return fail('This Showdown is decided. Go back to the lobby to play another.');
+      if (msg.songIndex === 0) party.started = left;
+    }
     const songId = s.set[msg.songIndex].id;
     const playing = new Map<string, SongScore | null | undefined>();
     const board = new Map<string, BoardLine>();
+    const par = new Map<string, number>();
     for (const m of s.members) {
       const chart = msg.assign[m.id];
-      const plays = chart !== undefined && m.connected && m.have.includes(songId);
+      const plays = chart !== undefined && m.connected && m.have.includes(songId) && !m.eliminated;
+      if (plays && s.showdown) par.set(m.id, new GameSession(msg.charts[chart] as Chart).par);
       if (plays) playing.set(m.id, undefined);
       board.set(m.id, { id: m.id, score: 0, streak: 0, stars: 0, ...(plays ? {} : { out: true }) });
     }
     if (!playing.size) return fail('Nobody has this song, so it cannot be played.');
     const at = this.now() + START_LEAD_MS;
     const longest = Math.max(...[...playing.keys()].map((id) => msg.charts[msg.assign[id]].duration));
-    party.song = { index: msg.songIndex, playing, board, deadline: at + longest * 1000 + FINISH_GRACE_MS };
+    party.song = {
+      index: msg.songIndex,
+      playing,
+      board,
+      deadline: at + longest * 1000 + FINISH_GRACE_MS,
+      par,
+      hits: new Map(),
+      lastHit: new Map(),
+    };
     s.phase = 'playing';
     s.songIndex = msg.songIndex;
     for (const m of s.members) {
@@ -244,7 +331,8 @@ export class Parties {
       const r = song.playing.get(m.id);
       return r ? { id: m.id, name: m.name, result: r } : { id: m.id, name: m.name, result: null, missing: 'left' };
     });
-    lines.sort((a, b) => (b.result?.score ?? -1) - (a.result?.score ?? -1));
+    if (s.showdown) this.eliminate(party, song, lines);
+    else lines.sort((a, b) => (b.result?.score ?? -1) - (a.result?.score ?? -1));
     this.sendBoard(party);
     party.song = null;
     s.results = [...s.results.filter((r) => r.songIndex !== song.index), { songIndex: song.index, lines }];
@@ -252,10 +340,110 @@ export class Parties {
     this.share(party);
   }
 
+  /**
+   * Showdown, after a song: every player still in gets their share (a result still missing counts
+   * as their last score on the board), and the lowest go out, down to the number the set's cut
+   * leaves. Players level at the cut all stay.
+   */
+  private eliminate(party: Party, song: Song, lines: ResultLine[]) {
+    const s = party.state;
+    const member = (id: string) => s.members.find((m) => m.id === id);
+    for (const l of lines)
+      if (song.playing.has(l.id)) l.share = this.shareOf(song, l.id, l.result?.score ?? song.board.get(l.id)?.score ?? 0);
+    const alive = lines.filter((l) => !member(l.id)?.eliminated);
+    alive.sort((a, b) => (b.share ?? 0) - (a.share ?? 0));
+    const keep = Math.min(alive.length, survivors(party.started || alive.length, song.index, s.set.length));
+    const bar = alive[keep - 1]?.share ?? 0;
+    for (const l of alive)
+      if ((l.share ?? 0) < bar) {
+        l.eliminated = true;
+        member(l.id)!.eliminated = true;
+      }
+    // Still in first, by share; then those out.
+    lines.sort((a, b) => Number(!!member(a.id)?.eliminated) - Number(!!member(b.id)?.eliminated) || (b.share ?? -1) - (a.share ?? -1));
+  }
+
+  /** Showdown: a score as a share of the player's chart's par. */
+  private shareOf(song: Song, id: string, score: number) {
+    const par = song.par.get(id) ?? 0;
+    return par > 0 ? score / par : 0;
+  }
+
+  /** Showdown: whether a player can be hit now (not under a hit, nor protected after one). */
+  private open(song: Song, id: string, now: number) {
+    const h = song.hits.get(id);
+    return !h || now >= h.until + HIT_PROTECTION_MS;
+  }
+
+  /**
+   * Showdown: whom each player's Strike would hit now. Ranked by share, each player aims at the
+   * nearest player above who can be hit and is not already the target of two others; first place
+   * aims at nobody. Players who finished, or are not playing, neither strike nor are struck.
+   */
+  private aims(party: Party): Map<string, string> {
+    const song = party.song;
+    const out = new Map<string, string>();
+    if (!song || !party.state.showdown?.hits) return out;
+    const now = this.now();
+    const ranked = [...song.board.values()]
+      .filter((l) => !l.out && !l.done && song.playing.has(l.id))
+      .sort((a, b) => (b.share ?? 0) - (a.share ?? 0) || (a.id < b.id ? -1 : 1));
+    const count = new Map<string, number>();
+    for (let i = 1; i < ranked.length; i++)
+      for (let j = i - 1; j >= 0; j--) {
+        const t = ranked[j].id;
+        if (!this.open(song, t, now) || (count.get(t) ?? 0) >= MAX_ATTACKERS) continue;
+        out.set(ranked[i].id, t);
+        count.set(t, (count.get(t) ?? 0) + 1);
+        break;
+      }
+    return out;
+  }
+
+  /** Showdown: a player spends their charge. The server picks the target and the hit's length. */
+  private strike(party: Party, player: Player, songIndex: number, charge: number) {
+    const song = party.song;
+    const line =
+      party.state.showdown?.hits && song?.index === songIndex && charge >= STRIKE_MIN_CHARGE ? song.board.get(player.id) : undefined;
+    const target = line && !line.done && !line.out ? this.aims(party).get(player.id) : undefined;
+    this.send(player.id, { type: 'struck', songIndex, target: target ?? null });
+    if (!target || !song) return;
+    const now = this.now();
+    const repeat = now - (song.lastHit.get(target) ?? -Infinity) < HIT_REPEAT_MS;
+    const ms = hitLength(Math.min(1, charge), repeat);
+    const at = now + HIT_WARNING_MS;
+    song.hits.set(target, { at, until: at + ms });
+    song.lastHit.set(target, now);
+    this.send(target, { type: 'hit', songIndex, from: player.name, at, ms });
+    this.sendBoard(party);
+  }
+
+  /** A new set: no results yet, nobody ready, and in a Showdown everyone in again. */
+  private newSet(party: Party, songs: SetSong[]) {
+    const s = party.state;
+    s.set = songs;
+    s.results = [];
+    s.songIndex = -1;
+    s.phase = 'lobby';
+    for (const m of s.members) {
+      m.ready = false;
+      m.eliminated = false;
+      m.have = m.have.filter((id) => s.set.some((song) => song.id === id));
+    }
+  }
+
   private sendBoard(party: Party) {
     const song = party.song;
     if (!song) return;
-    const lines = [...song.board.values()];
+    let lines = [...song.board.values()];
+    if (party.state.showdown?.hits) {
+      const aims = this.aims(party);
+      const now = this.now();
+      lines = lines.map((l) => {
+        const h = song.hits.get(l.id);
+        return { ...l, aim: aims.get(l.id), hit: !!h && now < h.until };
+      });
+    }
     for (const m of party.state.members) if (m.connected) this.send(m.id, { type: 'board', songIndex: song.index, lines });
   }
 
@@ -321,7 +509,7 @@ export class Parties {
     party.state.members.push({
       id: player.id,
       name: player.name,
-      part: 'lead',
+      part: party.state.showdown?.part ?? 'lead',
       difficulty: 'medium',
       ready: false,
       calibrated: false,

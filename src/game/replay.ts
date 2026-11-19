@@ -15,9 +15,9 @@ import type { Chart } from '../chart/types';
 import { GameSession, type Results } from './GameSession';
 
 /** What a recorded operation was (its byte's lower three bits). */
-export const OP = { update: 0, press: 1, release: 2, overdrive: 3, dropHolds: 4, rewind: 5 } as const;
+export const OP = { update: 0, press: 1, release: 2, overdrive: 3, dropHolds: 4, rewind: 5, strike: 6, cap: 7 } as const;
 /** The highest operation byte's lower bits a run may hold. */
-export const LAST_OP = OP.rewind;
+export const LAST_OP = OP.cap;
 
 /** A recorded run: one byte and one song time per operation. */
 export interface ReplayInputs {
@@ -93,6 +93,20 @@ export class ReplayRecorder {
     this.session.dropHolds(at);
   }
 
+  /** Showdown: the charge spent on a Strike. Gives what was spent. */
+  strike(t: number) {
+    const at = Math.fround(t);
+    this.tape.push(OP.strike, at);
+    return this.session.spendCharge(at);
+  }
+
+  /** Showdown's Drain: the multiplier capped at `cap` (in the byte's upper bits; 0 lifts it). */
+  cap(cap: number, t: number) {
+    const at = Math.fround(t);
+    this.tape.push(OP.cap | (cap << 3), at);
+    this.session.capMultiplier(cap, at);
+  }
+
   /** The song was wound back to `t` (resuming from a pause). */
   rewind(t: number) {
     const at = Math.fround(t);
@@ -126,6 +140,10 @@ function apply(session: GameSession, op: number, t: number, framed: boolean) {
       return session.dropHolds(t);
     case OP.rewind:
       return session.rewind(t);
+    case OP.strike:
+      return void session.spendCharge(t);
+    case OP.cap:
+      return session.capMultiplier(lane, t);
   }
 }
 

@@ -8,7 +8,7 @@
  */
 
 /** Raised whenever a message changes in a way an older game or server would misread. */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 /** The most players in one party. */
 export const PARTY_MAX = 16;
 /** How long a dropped player keeps their place in a party, ms. */
@@ -21,6 +21,24 @@ export const BOARD_INTERVAL_MS = 100;
 export const MESSAGE_MAX = 4 * 1024 * 1024;
 /** Song ids are SHA-256 hashes of the audio, as hex. */
 export const SONG_ID = /^[0-9a-f]{64}$/;
+
+/* Showdown (docs/specs/online-play.md, 4.1). Starting values, to tune in play. */
+/** The least charge a Strike takes (a quarter meter), and the hit it gives, ms; a full meter gives the longest. */
+export const STRIKE_MIN_CHARGE = 0.25;
+export const HIT_MIN_MS = 3_000;
+export const HIT_MAX_MS = 8_000;
+/** How long before a hit lands its target is warned, with the attacker's name, ms. */
+export const HIT_WARNING_MS = 500;
+/** After a hit ends, its target cannot be hit for this long, ms. */
+export const HIT_PROTECTION_MS = 6_000;
+/** A second hit on the same player within this long of the first lasts half as long, ms. */
+export const HIT_REPEAT_MS = 30_000;
+/** The most players who can have one player as their next target. */
+export const MAX_ATTACKERS = 2;
+/** Drain: the multiplier a hit caps the score's multiplier at. */
+export const DRAIN_CAP = 2;
+/** The fewest players in the last song of a Showdown: a final of four. */
+export const SHOWDOWN_FINAL = 4;
 
 export type Part = 'vocals' | 'lead' | 'bass' | 'drums';
 export type Difficulty = 'easy' | 'medium' | 'hard' | 'expert';
@@ -117,6 +135,16 @@ export interface SetSong {
   duration: number;
 }
 
+/** A party's Showdown, chosen by the host in the lobby; a party without one plays for scores alone. */
+export interface ShowdownOptions {
+  /** Strikes and hits; off for a pure race of shares. */
+  hits: boolean;
+  /** Everyone plays this part, or any part when null. */
+  part: Part | null;
+  /** The set is the server's Showdown rotation instead of the host's own. */
+  rotation: boolean;
+}
+
 export interface Member {
   id: string;
   name: string;
@@ -129,6 +157,8 @@ export interface Member {
   connected: boolean;
   /** Their audio offset was calibrated on the output they play through (a hint: scores are compared). */
   calibrated: boolean;
+  /** Showdown: knocked out of this set; they watch the rest. */
+  eliminated?: boolean;
 }
 
 /** How one player's song went: the score of record, judged again from their inputs. */
@@ -148,6 +178,10 @@ export interface ResultLine {
   result: SongScore | null;
   /** Why there is no result. */
   missing?: 'sat-out' | 'left';
+  /** Showdown: the share of their chart's par they scored (0..1, past 1 with overdrive). */
+  share?: number;
+  /** Showdown: knocked out by this song. */
+  eliminated?: boolean;
 }
 
 export interface SongResults {
@@ -167,6 +201,8 @@ export interface PartyState {
   songIndex: number;
   /** Every finished song's results, by song index. */
   results: SongResults[];
+  /** The party plays a Showdown, with these options; null for a plain party. */
+  showdown: ShowdownOptions | null;
 }
 
 /** A chart as it is sent: the same shape as the game's own (src/chart/types.ts). */
@@ -191,6 +227,12 @@ export interface BoardLine {
   done?: boolean;
   /** Not playing this song (no song, or left it). */
   out?: boolean;
+  /** Showdown: the share of their chart's par so far, which ranks the board. */
+  share?: number;
+  /** Showdown: the player their Strike would hit now (who is above them and can be hit). */
+  aim?: string;
+  /** Showdown: under a hit now, or about to be. */
+  hit?: boolean;
 }
 
 /* WebSocket messages ------------------------------------------------------------------------ */
@@ -224,7 +266,13 @@ export type ClientMessage =
   /** What the player is doing, in a line for others ("In the menus", "Playing Song · Lead"). */
   | { type: 'status'; activity: string }
   /** The host shared the song to the server's library for that player (or `ok: false`: they won't). */
-  | { type: 'song-sent'; songId: string; to: string; ok: boolean };
+  | { type: 'song-sent'; songId: string; to: string; ok: boolean }
+  /** The host makes the party a Showdown, changes its options, or makes it a plain party again (null). */
+  | { type: 'showdown'; options: ShowdownOptions | null }
+  /** Showdown: the player spends their charge (0..1) on a hit against the player above them. */
+  | { type: 'strike'; songIndex: number; charge: number }
+  /** A player who is not playing this song cheers the others on. */
+  | { type: 'cheer' };
 
 export type ServerMessage =
   | { type: 'welcome'; you: Account; server: string; protocol: number }
@@ -239,7 +287,16 @@ export type ServerMessage =
   /** To the host: a player asks for one of the set's songs. */
   | { type: 'song-request'; songId: string; from: string; name: string }
   /** To that player: the song is in the server's library to download (or the host could not send it). */
-  | { type: 'song-ready'; songId: string; ok: boolean };
+  | { type: 'song-ready'; songId: string; ok: boolean }
+  /**
+   * Showdown, to the striker: whom their Strike hits, or null when nobody above can be hit (then
+   * their press is an overdrive, and the charge stays theirs).
+   */
+  | { type: 'struck'; songIndex: number; target: string | null }
+  /** Showdown, to the target: a hit from `from` (a name) lands at `at` (the server's clock) and lasts `ms`. */
+  | { type: 'hit'; songIndex: number; from: string; at: number; ms: number }
+  /** A player watching cheers the players on. */
+  | { type: 'cheer'; from: string };
 
 /* Leaderboards ------------------------------------------------------------------------------ */
 

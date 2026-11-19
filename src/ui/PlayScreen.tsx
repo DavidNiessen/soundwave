@@ -16,6 +16,7 @@ import { Dialog } from './Dialog';
 import { hudRefs, PlayHud } from './PlayHud';
 import { ICON_STROKE } from './icons';
 import { BOARD_INTERVAL_MS } from '../net/protocol';
+import { online } from '../net/client';
 
 interface Props {
   title: string;
@@ -41,7 +42,21 @@ interface Props {
    * score goes out ten times a second, and the party's board stands beside the highway. Nobody
    * can restart or skip a song the others are playing.
    */
-  together?: { at: number; board: React.ReactNode; onProgress(score: number, streak: number, stars: number): void };
+  together?: {
+    at: number;
+    board: React.ReactNode;
+    onProgress(score: number, streak: number, stars: number): void;
+    /** A Showdown: the overdrive button strikes the player above (with hits on), and hits land here. */
+    showdown?: { songIndex: number; hits: boolean; me: string };
+  };
+}
+
+/** A Showdown hit on this player: who struck, when it lands (performance.now ms) and for how long. */
+interface HitNote {
+  from: string;
+  at: number;
+  ms: number;
+  drain: boolean;
 }
 
 /** What the pause menu asks about before it throws the run away. */
@@ -83,6 +98,8 @@ export function PlayScreen({
   const [phase, setPhase] = useState<PlayPhase>('countdown');
   const [count, setCount] = useState(3);
   const [run, setRun] = useState(0);
+  const [hit, setHit] = useState<HitNote | null>(null);
+  const [note, setNote] = useState<{ text: string; key: number } | null>(null);
   const finishRef = useRef(onFinish);
   finishRef.current = onFinish;
   const mode = useInputMode();
@@ -134,6 +151,7 @@ export function PlayScreen({
           togetherRef.current?.onProgress(Math.round(s.score), s.streak, s.progressStars);
         }, BOARD_INTERVAL_MS)
       : 0;
+    const unShowdown = party?.showdown ? showdown(ctrl, party.showdown) : () => {};
     // A song that loses the window (a call, another app) pauses instead of running on unseen.
     const hidden = () => document.hidden && ctrl.pause();
     document.addEventListener('visibilitychange', hidden);
@@ -141,11 +159,50 @@ export function PlayScreen({
       document.removeEventListener('visibilitychange', hidden);
       clearTimeout(finishTimer);
       clearInterval(progress);
+      unShowdown();
       ctrl.dispose();
       ctrlRef.current = null;
       showSong(null);
     };
   }, [buffer, chart, startAt, run]);
+
+  /**
+   * Showdown: the overdrive button asks the server whom to strike when this player has someone to
+   * aim at (the board says so); the answer spends the charge, or makes the press an overdrive after
+   * all. Hits land on the controller as Fog or Drain, as the player chose, with a warning first.
+   */
+  function showdown(ctrl: PlayController, sd: { songIndex: number; hits: boolean; me: string }) {
+    let asking = false;
+    const name = (id: string) => online.snapshot().party?.members.find((m) => m.id === id)?.name ?? 'the player above';
+    if (sd.hits)
+      ctrl.strike = (charge) => {
+        if (asking) return true;
+        if (!online.board()?.lines.find((l) => l.id === sd.me)?.aim) return false;
+        asking = true;
+        online.strike(sd.songIndex, charge);
+        return true;
+      };
+    return online.onShowdown((e) => {
+      if (e.type === 'cheer') return setNote({ text: `${e.from} cheers you on`, key: performance.now() });
+      if (e.songIndex !== sd.songIndex) return;
+      if (e.type === 'struck') {
+        asking = false;
+        if (!e.target) return ctrl.overdriveNow();
+        ctrl.spendCharge();
+        setNote({ text: `Strike on ${name(e.target)}`, key: performance.now() });
+        return;
+      }
+      const drain = settingsRef.current.showdownHits === 'drain';
+      ctrl.hit(e.at, e.ms, drain);
+      setHit({ from: e.from, at: e.at, ms: e.ms, drain });
+    });
+  }
+
+  useEffect(() => {
+    if (!note) return;
+    const timer = window.setTimeout(() => setNote(null), 2500);
+    return () => clearTimeout(timer);
+  }, [note]);
 
   useEffect(() => ctrlRef.current?.applySettings(settings), [settings]);
   useEffect(() => {
@@ -257,6 +314,12 @@ export function PlayScreen({
         />
       </div>
       {together?.board}
+      {hit && <HitBanner hit={hit} onOver={() => setHit(null)} />}
+      {note && (
+        <p className="showdown-note" key={note.key} role="status">
+          {note.text}
+        </p>
+      )}
       {phase === 'countdown' && count > 0 && (
         <div className="countdown" key={count}>
           {count}
@@ -323,5 +386,34 @@ export function PlayScreen({
         </Dialog>
       )}
     </div>
+  );
+}
+
+/**
+ * A Showdown hit, said in words: a warning with the striker's name before it lands, then what it
+ * does and how long it has left. A Drain hit also draws a still, coloured edge around the screen.
+ */
+function HitBanner({ hit, onOver }: { hit: HitNote; onOver(): void }) {
+  const [now, setNow] = useState(() => performance.now());
+  const over = useRef(onOver);
+  over.current = onOver;
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const t = performance.now();
+      setNow(t);
+      if (t >= hit.at + hit.ms) over.current();
+    }, 100);
+    return () => clearInterval(timer);
+  }, [hit]);
+  const coming = now < hit.at;
+  const left = Math.max(0, Math.ceil((hit.at + hit.ms - now) / 1000));
+  const what = hit.drain ? 'Drain: your multiplier is held at ×2' : 'Fog over the far highway';
+  return (
+    <>
+      {hit.drain && !coming && <div className="showdown-edge" aria-hidden />}
+      <p className={`showdown-hit ${coming ? 'coming' : ''}`} role="alert">
+        {coming ? `${hit.from} strikes you!` : `${what} · ${hit.from} · ${left} s`}
+      </p>
+    </>
   );
 }
