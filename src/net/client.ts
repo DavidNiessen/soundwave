@@ -12,6 +12,7 @@ import {
   PROTOCOL_VERSION,
   type Account,
   type ApiError,
+  type BandBoard,
   type Avatar,
   type Board,
   type BoardLine,
@@ -68,8 +69,11 @@ export interface OnlineState {
 
 /** A party's song changing hands (see `onSong`). */
 export type SongEvent = Extract<ServerMessage, { type: 'song-request' | 'song-ready' }>;
-/** Showdown during a song: a Strike's answer, a hit coming (`at` on this machine's performance.now), a cheer. */
-export type ShowdownEvent = Extract<ServerMessage, { type: 'struck' | 'hit' | 'cheer' }>;
+/**
+ * What happens to a player during a party's song: a Showdown Strike's answer or a hit coming, band
+ * overdrive or being brought back in a band, a cheer. Times (`at`) are this machine's performance.now.
+ */
+export type PlayEvent = Extract<ServerMessage, { type: 'struck' | 'hit' | 'cheer' | 'band-overdrive' | 'revive' }>;
 
 /** A song the party starts: when (performance.now ms on this machine) and on which chart (null: sit it out). */
 export interface PartyStart {
@@ -157,7 +161,7 @@ class OnlineClient {
   private readonly boardListeners = new Set<() => void>();
   private readonly startListeners = new Set<(s: PartyStart) => void>();
   private readonly songListeners = new Set<(e: SongEvent) => void>();
-  private readonly showdownListeners = new Set<(e: ShowdownEvent) => void>();
+  private readonly playListeners = new Set<(e: PlayEvent) => void>();
   private ws: WebSocket | null = null;
   private access: string | null = null;
   private refreshToken: string | null = null;
@@ -213,10 +217,10 @@ class OnlineClient {
     return () => void this.songListeners.delete(fn);
   }
 
-  /** Called for Showdown's Strikes, hits and cheers during a song. */
-  onShowdown(fn: (e: ShowdownEvent) => void) {
-    this.showdownListeners.add(fn);
-    return () => void this.showdownListeners.delete(fn);
+  /** Called for what happens to the player during a party's song (see PlayEvent). */
+  onPlayEvent(fn: (e: PlayEvent) => void) {
+    this.playListeners.add(fn);
+    return () => void this.playListeners.delete(fn);
   }
 
   private set(change: Partial<OnlineState>) {
@@ -582,9 +586,11 @@ class OnlineClient {
         return;
       case 'hit':
       case 'struck':
-      case 'cheer': {
-        const e: ShowdownEvent = msg.type === 'hit' ? { ...msg, at: msg.at - this.offset } : msg;
-        for (const l of this.showdownListeners) l(e);
+      case 'cheer':
+      case 'band-overdrive':
+      case 'revive': {
+        const e: PlayEvent = msg.type === 'hit' || msg.type === 'band-overdrive' ? { ...msg, at: msg.at - this.offset } : msg;
+        for (const l of this.playListeners) l(e);
         return;
       }
       case 'bye':
@@ -637,8 +643,28 @@ class OnlineClient {
   progress(songIndex: number, score: number, streak: number, stars: number) {
     this.send({ type: 'progress', songIndex, score, streak, stars });
   }
-  finish(songIndex: number, result: SongScore) {
-    this.sendOrKeep({ type: 'finish', songIndex, result });
+  /** `run`: in band mode, the run itself, so the band's score can be checked for its board. */
+  finish(songIndex: number, result: SongScore, run?: { ops: string; times: string }) {
+    this.sendOrKeep({ type: 'finish', songIndex, result, ...(run ? { run } : {}) });
+  }
+  /** The host makes the party a band, or not. */
+  setBand(on: boolean) {
+    this.send({ type: 'band', on });
+  }
+  /** Band mode: this player started overdrive (two in one bar make band overdrive). */
+  overdriveStarted(songIndex: number, bar: number, seconds: number) {
+    this.send({ type: 'overdrive', songIndex, bar, seconds });
+  }
+  /** Band mode: this player dropped out, or is back in. */
+  dropped(songIndex: number, out: boolean) {
+    this.send({ type: 'dropped', songIndex, out });
+  }
+  /** Band mode: this player completed an overdrive phrase, which brings dropped-out bandmates back. */
+  revive(songIndex: number) {
+    this.send({ type: 'revive', songIndex });
+  }
+  bandBoard(songId: string) {
+    return this.request<BandBoard>(`/bands/${songId}`, { auth: true });
   }
   quit(songIndex: number) {
     this.sendOrKeep({ type: 'quit', songIndex });

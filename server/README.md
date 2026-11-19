@@ -79,6 +79,12 @@ list. The owner and moderators remove cheated runs.
 A player's look on the stage is three colours (`GET` and `PUT /me/profile`, body `{ avatar: { top, bottom, finish } }`,
 `null` for none). Their party sees it at once.
 
+## Bands
+
+A party's host can make it a band: up to four players, one on each part, for one band score. At the end of a
+song every player's game sends its run along, and the server judges each again; only a band whose runs all
+check out goes on the song's band boards (`GET /bands/:songId`, one board per line-up of charts).
+
 ## Showdown
 
 A party's host can make it a Showdown: scores count as a share of each chart's par, the lowest

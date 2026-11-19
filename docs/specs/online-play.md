@@ -1,6 +1,6 @@
 # Spec: playing together
 
-Status: **being built** (#16). Built: judging by time (milestone 0), the server, parties, leaderboards, Showdown, avatars,
+Status: **being built** (#16). Built: judging by time (milestone 0), the server, parties, leaderboards, Showdown, avatars, band mode,
 shared songs and the connected main menu. Still to do: Showdown, avatars, band mode, join from Discord.
 
 Decisions made while building, which override what follows:
@@ -21,6 +21,11 @@ Decisions made while building, which override what follows:
   player does not pick a character: at the part they play stands that part's band member, in the player's colours
   (top, trousers and skirt, instrument finish). The look editor (Play together → Your look) shows it on the menu stage,
   at any part. Stored as `{ top, bottom, finish }` (`GET`/`PUT /me/profile`). The profile's line of text is not built.
+- **Band mode, as built:** band overdrive doubles every member's multiplier for as long as the shortest of the
+  overdrives that made it; a player drops out after 15 misses in a row (their notes score nothing) until a bandmate
+  completes an overdrive phrase; when every player is out the song still plays to its end. Band boards are per song,
+  one per line-up (the set of charts), and take a band only when every member's run, judged again, gives its score.
+  Band and Showdown runs are not posted to the song boards. Only in parties on a server (level 1 is not built).
 - **Later, not now:** the in-game server list (3.2b), local sessions hosted by the desktop app (level 1), and its
   STUN fallback.
 

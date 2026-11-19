@@ -911,8 +911,10 @@ export function App() {
    */
   const postRun = async (run: Run, results: Results, inputs: ReplayInputs) => {
     if (!online.snapshot().account || !settingsRef.current.postScores) return;
-    // A Showdown's runs are shaped by its hits: they count in the party, not on the boards.
-    if (run.party && online.snapshot().party?.showdown) return;
+    // A Showdown's or a band's runs are shaped by the others: they count in the party (and on the
+    // band boards), not on the song's boards.
+    const party = online.snapshot().party;
+    if (run.party && (party?.showdown || party?.band)) return;
     const song = run.songs[run.index];
     try {
       const r = await online.postScore({
@@ -1008,11 +1010,20 @@ export function App() {
       const charts: WireChart[] = [];
       const slot = new Map<Chart, number>();
       const assign: Record<string, number> = {};
-      for (const m of party.members) {
+      // In a band each part is played once: players whose own part the song has choose first, the
+      // others get a part nobody has taken.
+      const own = songParts(song.id, thin);
+      const taken = new Set<Part>();
+      const members = party.band
+        ? [...party.members].sort((a, b) => Number(!own.includes(a.part)) - Number(!own.includes(b.part)))
+        : party.members;
+      for (const m of members) {
         if (!m.connected || !m.have.includes(song.id)) continue;
-        for (const p of [m.part, ...songParts(song.id, thin).filter((x) => x !== m.part)]) {
+        for (const p of [m.part, ...own.filter((x) => x !== m.part)]) {
+          if (party.band && taken.has(p)) continue;
           const c = await chartFor(p, m.difficulty);
           if (!c) continue;
+          taken.add(p);
           if (!slot.has(c)) slot.set(c, charts.push(c) - 1);
           assign[m.id] = slot.get(c)!;
           break;
@@ -1147,13 +1158,18 @@ export function App() {
   /** A party's song is over: the score is kept here as any other, and the party gets it. */
   const finishPartySong = (run: Run, results: Results, inputs?: ReplayInputs) => {
     void keepScore(run, results, inputs);
-    online.finish(run.party!.songIndex, {
-      score: results.score,
-      stars: results.stars,
-      accuracy: results.accuracy,
-      bestStreak: results.bestStreak,
-      fullCombo: results.fullCombo,
-    });
+    const band = !!online.snapshot().party?.band;
+    online.finish(
+      run.party!.songIndex,
+      {
+        score: results.score,
+        stars: results.stars,
+        accuracy: results.accuracy,
+        bestStreak: results.bestStreak,
+        fullCombo: results.fullCombo,
+      },
+      band && inputs ? encodeRun(inputs) : undefined,
+    );
     setView({ name: 'party' });
   };
 
@@ -1425,6 +1441,7 @@ export function App() {
                 showdown: onlineState.party?.showdown
                   ? { songIndex: partyRun.songIndex, hits: onlineState.party.showdown.hits, me: onlineState.account?.id ?? '' }
                   : undefined,
+                band: onlineState.party?.band ? { songIndex: partyRun.songIndex, me: onlineState.account?.id ?? '' } : undefined,
               }
             : undefined
         }

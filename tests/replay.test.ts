@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Chart, Note } from '../src/chart/types';
-import { GameSession } from '../src/game/GameSession';
+import { GameSession, RULE } from '../src/game/GameSession';
 import { OP, ReplayPlayback, ReplayRecorder, replayMisses, replayResults } from '../src/game/replay';
 import { readReplay, replaysToPrune, writeReplay, ReplayFileError, type ReplayMeta } from '../src/storage/replays';
 
@@ -57,7 +57,8 @@ function play(c: Chart, seed = 7, { fps = 60, late = false, showdown = false } =
   }
   for (const at of [12, 25, 33]) evs.push({ t: at, run: () => void rec.overdrive(at) });
   // Showdown: a Strike spends the charge, and a Drain hit caps the multiplier for a while.
-  if (showdown) evs.push({ t: 8, run: () => void rec.strike(8) }, { t: 4, run: () => rec.cap(1, 4) }, { t: 40, run: () => rec.cap(0, 40) });
+  if (showdown)
+    evs.push({ t: 8, run: () => void rec.strike(8) }, { t: 4, run: () => rec.rule(1, 4) }, { t: 40, run: () => rec.rule(0, 40) });
   evs.sort((a, b) => a.t - b.t);
   // Frames at an uneven rate, as a real one runs; a pause at 20 s rewinds the song 1.5 s.
   let t = -3;
@@ -216,6 +217,31 @@ describe('Showdown in a run', () => {
     for (const fps of [30, 144]) expect(play(c, 7, { fps, late: true, showdown: true }).session.results()).toEqual(result);
     // The capped multiplier costs points against the same run without hits.
     expect(result.score).toBeLessThan(play(c).session.results().score);
+  });
+
+  it('doubles the multiplier in band overdrive, scores nothing while dropped out, and replays both exactly', () => {
+    const c = chart();
+    const plain = new GameSession(c);
+    const session = new GameSession(c);
+    const rec = new ReplayRecorder(session);
+    const hits = c.notes.slice(0, 40);
+    const press = (r: { press(l: number, t: number): void; release(l: number, t: number): void }, n: (typeof hits)[number]) => {
+      r.press(n.lane, n.t);
+      r.release(n.lane, n.t + n.dur + 0.01);
+    };
+    for (const [i, n] of hits.entries()) {
+      // Band overdrive over notes 10..19, dropped out over notes 25..29.
+      if (i === 10) rec.rule(RULE.boost, n.t - 0.1);
+      if (i === 20) rec.rule(0, n.t - 0.1);
+      if (i === 25) rec.rule(RULE.out, n.t - 0.1);
+      if (i === 30) rec.rule(0, n.t - 0.1);
+      press(rec, n);
+      press(plain, n);
+    }
+    rec.end();
+    plain.update(Infinity);
+    expect(session.results().score).not.toBe(plain.results().score);
+    expect(replayResults(c, rec.take())).toEqual(session.results());
   });
 
   it('spends the whole charge on a Strike, and none without a quarter meter', () => {

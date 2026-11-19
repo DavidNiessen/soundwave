@@ -38,7 +38,17 @@ import { keysOf } from '../input/bindings';
 import { PadGlyph } from '../input/glyphs';
 import { confirmInput } from '../input/pads';
 import { online, parseInvite, type OnlineState } from '../net/client';
-import type { BoardLine, Member, PartyState, ResultLine, SetSong, ShowdownOptions, SongResults } from '../net/protocol';
+import {
+  BAND_MAX,
+  DROP_MISSES,
+  type BoardLine,
+  type Member,
+  type PartyState,
+  type ResultLine,
+  type SetSong,
+  type ShowdownOptions,
+  type SongResults,
+} from '../net/protocol';
 import type { SongMeta } from '../storage/db';
 import { Hint, useActions, useHints, type Action } from './actions';
 import { Cover } from './Cover';
@@ -554,6 +564,7 @@ function PartyLobby({
   const toggleHits = () => sd && setShowdown({ hits: !sd.hits });
   const toggleOnePart = () => sd && setShowdown({ part: sd.part ? null : me.part });
   const toggleRotation = () => sd && setShowdown({ rotation: !sd.rotation });
+  const toggleBand = () => online.setBand(!party.band);
   const watching = party.phase === 'playing';
   const nextDifficulty = () => choose(me.part, DIFFICULTIES[(DIFFICULTIES.indexOf(me.difficulty) + 1) % DIFFICULTIES.length]);
   const everyoneReady = party.members.every((m) => m.ready || !m.connected);
@@ -569,6 +580,7 @@ function PartyLobby({
       ? [
           { id: 'party-setlist', label: 'Play my setlist', icon: ListMusic, ...keysOf('party.setlist'), bar: false, run: useSetlist },
           { id: 'party-showdown', label: 'Showdown', icon: Swords, ...keysOf('party.showdown'), bar: false, run: toggleShowdown },
+          { id: 'party-band', label: 'Band', icon: Users, ...keysOf('party.band'), bar: false, run: toggleBand },
           ...(sd
             ? [
                 { id: 'party-hits', label: 'Hits', icon: Crosshair, ...keysOf('party.hits'), bar: false, run: toggleHits },
@@ -653,6 +665,7 @@ function PartyLobby({
           </ol>
         )}
 
+        <BandPanel party={party} host={host} settings={settings} onToggle={toggleBand} />
         <ShowdownPanel
           party={party}
           host={host}
@@ -787,6 +800,40 @@ function PartyLobby({
   );
 }
 
+/** The band switch for the host, what it means, and a word when two players are on one part. */
+function BandPanel({ party, host, settings, onToggle }: { party: PartyState; host: boolean; settings: Settings; onToggle(): void }) {
+  const hints = useHints(settings);
+  const parts = party.members.map((m) => m.part);
+  const twice = PARTS.filter((p) => parts.filter((x) => x === p).length > 1);
+  return (
+    <section className="ready-panel" aria-label="Band">
+      <h2 className="label">
+        <Users strokeWidth={ICON_STROKE} aria-hidden /> Band{party.band ? ' · on' : ''}
+      </h2>
+      <p className="hint">
+        Up to four, one on each part, for one band score. Two overdrives in one bar double everyone’s multiplier, and a player who misses{' '}
+        {DROP_MISSES} notes in a row drops out until a bandmate completes an overdrive phrase.
+      </p>
+      {party.band && party.members.length > BAND_MAX && (
+        <p className="warn">A band has {BAND_MAX} players at most: the others can watch.</p>
+      )}
+      {party.band && twice.length > 0 && (
+        <p className="warn">
+          Two of you are on {twice.map((p) => PART_LABEL[p].toLowerCase()).join(' and ')}: each needs a part of their own.
+        </p>
+      )}
+      {host && (
+        <div className="party-row">
+          <button type="button" className="btn small" data-action="party-band" onClick={onToggle}>
+            <Hint {...keysOf('party.band')} {...hints} />
+            {party.band ? 'Make it a plain party' : 'Make it a band'}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 /** The Showdown's switches for the host, or what they chose for everyone else. */
 function ShowdownPanel({
   party,
@@ -900,6 +947,7 @@ export function PartyBoard({ me }: { me: string }) {
   const s = useOnline();
   const board = useSyncExternalStore(online.subscribeBoard, online.board);
   const showdown = !!s.party?.showdown;
+  const band = !!s.party?.band;
   const all = [...(board?.lines ?? [])]
     .filter((l) => !l.out || l.score > 0)
     .sort((a, b) => (showdown ? (b.share ?? 0) - (a.share ?? 0) : b.score - a.score));
@@ -910,6 +958,14 @@ export function PartyBoard({ me }: { me: string }) {
   const lines = showdown ? all.filter((_, i) => i < 5 || (at >= 0 && Math.abs(i - at) <= 1)) : all;
   return (
     <ol className="party-board" aria-label="Scores">
+      {band && (
+        <li className="party-board-row band">
+          <span className="num rank" />
+          <span className="party-name">Band</span>
+          <span className="num">{all.reduce((sum, l) => sum + l.score, 0).toLocaleString()}</span>
+          <span />
+        </li>
+      )}
       {lines.map((l) => (
         <BoardRow
           key={l.id}
@@ -954,7 +1010,7 @@ function BoardRow({
         {threat && <Swords className="aim" strokeWidth={ICON_STROKE} aria-label="Their Strike would hit you" />} {name}
       </span>
       <span className="num">{showdown ? percent(l.share ?? 0) : l.score.toLocaleString()}</span>
-      <span className="dim num">{l.done ? 'done' : l.out ? 'left' : l.hit ? 'hit' : `×${l.streak}`}</span>
+      <span className="dim num">{l.done ? 'done' : l.out ? 'left' : l.hit ? 'hit' : l.dropped ? 'out' : `×${l.streak}`}</span>
     </li>
   );
 }
@@ -1015,6 +1071,21 @@ function PartyResults({
         <h2 className="label">
           Song {party.songIndex + 1} of {party.set.length}: {song?.title}
         </h2>
+        {results?.band && (
+          <div className="set-card party-result band-total">
+            <span className="slot-num">
+              <Users strokeWidth={ICON_STROKE} aria-hidden />
+            </span>
+            <span className="song-text">
+              <span className="song-title">The band</span>
+              <span className="song-artist">Everyone’s score added up</span>
+            </span>
+            <span className="set-best">
+              <Stars n={results.band.stars} />
+              <span className="num">{results.band.score.toLocaleString()}</span>
+            </span>
+          </div>
+        )}
         {results && <ResultTable lines={results.lines} me={s.account!.id} />}
         {party.showdown && (
           <>

@@ -16,7 +16,10 @@
  */
 import type { Chart } from '../../src/chart/types.ts';
 import { GameSession } from '../../src/game/GameSession.ts';
+import { starsFor } from '../../src/game/scoring.ts';
+import type { BandRun } from './bands.ts';
 import {
+  BAND_MAX,
   BOARD_INTERVAL_MS,
   HIT_MAX_MS,
   HIT_MIN_MS,
@@ -38,6 +41,7 @@ import {
   type ServerMessage,
   type SetSong,
   type SongScore,
+  type WireChart,
 } from '../../src/net/protocol.ts';
 
 /** How long after a song should have ended its results wait for a player's final score, ms. */
@@ -112,6 +116,14 @@ interface Song {
   hits: Map<string, { at: number; until: number }>;
   /** Showdown: when each player's last hit started. */
   lastHit: Map<string, number>;
+  /** The chart each player plays. */
+  charts: Map<string, WireChart>;
+  /** Band mode: each player's run, sent with their final score, for the band boards. */
+  runs: Map<string, { ops: string; times: string }>;
+  /** Band mode: who started overdrive in each bar, and for how long (seconds). */
+  overdrives: Map<number, Map<string, number>>;
+  /** Band mode: the bars that already made band overdrive. */
+  bandBars: Set<number>;
 }
 
 class Party {
@@ -126,7 +138,7 @@ class Party {
   cheered = new Map<string, number>();
 
   constructor(code: string, host: Player) {
-    this.state = { code, host: host.id, members: [], set: [], phase: 'lobby', songIndex: -1, results: [], showdown: null };
+    this.state = { code, host: host.id, members: [], set: [], phase: 'lobby', songIndex: -1, results: [], showdown: null, band: false };
   }
 
   member(id: string): Member | undefined {
@@ -142,11 +154,14 @@ export class Parties {
   private readonly now: () => number;
   /** The server's Showdown rotation: the set a Showdown plays when the host does not pick one. */
   private readonly rotation: () => SetSong[];
+  /** Band mode: a band finished a song, every player with a final score (for the band boards). */
+  private readonly onBand: (run: BandRun) => void;
 
-  constructor(send: Send, now: () => number, rotation: () => SetSong[] = () => []) {
+  constructor(send: Send, now: () => number, rotation: () => SetSong[] = () => [], onBand: (run: BandRun) => void = () => {}) {
     this.send = send;
     this.now = now;
     this.rotation = rotation;
+    this.onBand = onBand;
   }
 
   /** The party a player is in (for tests and the moderation tools). */
@@ -203,6 +218,7 @@ export class Parties {
           return fail('This server has no Showdown rotation yet. Its owner or a moderator sets one.');
         const wasRotation = !!s.showdown?.rotation;
         s.showdown = o;
+        if (o) s.band = false;
         if (o?.part) for (const m of s.members) m.part = o.part;
         // The rotation is the set while it is chosen; turned off, the set is the host's to pick again.
         this.newSet(party, o?.rotation ? this.rotation() : wasRotation ? [] : s.set);
@@ -244,11 +260,39 @@ export class Parties {
         if (!song || song.index !== msg.songIndex || !song.playing.has(player.id) || song.playing.get(player.id) !== undefined) return;
         const result = msg.type === 'finish' ? msg.result : null;
         song.playing.set(player.id, result);
+        if (msg.type === 'finish' && msg.run) song.runs.set(player.id, msg.run);
         const line = song.board.get(player.id)!;
-        if (result) Object.assign(line, { score: result.score, stars: result.stars, done: true });
-        if (result && s.showdown) line.share = this.shareOf(song, player.id, result.score);
-        else line.out = true;
+        if (result) {
+          Object.assign(line, { score: result.score, stars: result.stars, done: true });
+          if (s.showdown) line.share = this.shareOf(song, player.id, result.score);
+        } else line.out = true;
         return this.maybeEndSong(party);
+      }
+      case 'band':
+        if (!host) return fail('Only the host makes the party a band.');
+        if (s.phase === 'playing') return fail('The party can become a band once this song is over.');
+        s.band = msg.on;
+        if (msg.on) s.showdown = null;
+        for (const m of s.members) m.ready = false;
+        return this.share(party);
+      case 'overdrive':
+        return this.bandOverdrive(party, player, msg.songIndex, msg.bar, msg.seconds);
+      case 'dropped': {
+        const line = s.band && party.song?.index === msg.songIndex ? party.song.board.get(player.id) : undefined;
+        if (line && !line.done && !line.out) line.dropped = msg.out;
+        return;
+      }
+      case 'revive': {
+        // A player who is in brings back every bandmate who dropped out.
+        const song = party.song;
+        const line = s.band && song?.index === msg.songIndex ? song.board.get(player.id) : undefined;
+        if (!song || !line || line.dropped || line.out || line.done) return;
+        for (const l of song.board.values())
+          if (l.dropped && l.id !== player.id) {
+            l.dropped = false;
+            this.send(l.id, { type: 'revive', songIndex: song.index, by: player.name });
+          }
+        return;
       }
       case 'lobby':
         if (!host) return fail('Only the host can take the party back to the lobby.');
@@ -294,14 +338,25 @@ export class Parties {
     const playing = new Map<string, SongScore | null | undefined>();
     const board = new Map<string, BoardLine>();
     const par = new Map<string, number>();
+    const charts = new Map<string, WireChart>();
     for (const m of s.members) {
       const chart = msg.assign[m.id];
       const plays = chart !== undefined && m.connected && m.have.includes(songId) && !m.eliminated;
-      if (plays && s.showdown) par.set(m.id, new GameSession(msg.charts[chart] as Chart).par);
-      if (plays) playing.set(m.id, undefined);
+      if (plays && (s.showdown || s.band)) par.set(m.id, new GameSession(msg.charts[chart] as Chart).par);
+      if (plays) {
+        playing.set(m.id, undefined);
+        charts.set(m.id, msg.charts[chart]);
+      }
       board.set(m.id, { id: m.id, score: 0, streak: 0, stars: 0, ...(plays ? {} : { out: true }) });
     }
     if (!playing.size) return fail('Nobody has this song, so it cannot be played.');
+    if (s.band) {
+      // A band is up to four, one on each part.
+      if (playing.size > BAND_MAX) return fail(`A band has ${BAND_MAX} players at most: one on each part.`);
+      const parts = [...charts.values()].map((c) => c.part);
+      if (new Set(parts).size !== parts.length)
+        return fail('Two players would play the same part. In a band, each plays a part of their own.');
+    }
     const at = this.now() + START_LEAD_MS;
     const longest = Math.max(...[...playing.keys()].map((id) => msg.charts[msg.assign[id]].duration));
     party.song = {
@@ -312,6 +367,10 @@ export class Parties {
       par,
       hits: new Map(),
       lastHit: new Map(),
+      charts,
+      runs: new Map(),
+      overdrives: new Map(),
+      bandBars: new Set(),
     };
     s.phase = 'playing';
     s.songIndex = msg.songIndex;
@@ -336,11 +395,47 @@ export class Parties {
     });
     if (s.showdown) this.eliminate(party, song, lines);
     else lines.sort((a, b) => (b.result?.score ?? -1) - (a.result?.score ?? -1));
+    const band = s.band ? this.bandResult(party, song) : undefined;
     this.sendBoard(party);
     party.song = null;
-    s.results = [...s.results.filter((r) => r.songIndex !== song.index), { songIndex: song.index, lines }];
+    s.results = [...s.results.filter((r) => r.songIndex !== song.index), { songIndex: song.index, lines, ...(band ? { band } : {}) }];
     s.phase = 'results';
     this.share(party);
+  }
+
+  /**
+   * Band mode, after a song: one band score, everyone's added up, and its stars against the parts'
+   * pars added up. Handed on for the band boards (which check every run first).
+   */
+  private bandResult(party: Party, song: Song) {
+    let score = 0;
+    let par = 0;
+    for (const [id, r] of song.playing) {
+      score += r?.score ?? 0;
+      par += song.par.get(id) ?? 0;
+    }
+    const stars = starsFor(score, par);
+    const players = [...song.playing].map(([id, r]) => ({ id, chart: song.charts.get(id)!, result: r!, run: song.runs.get(id) }));
+    if (players.every((p) => p.result)) this.onBand({ songId: party.state.set[song.index].id, players, score, stars });
+    return { score, stars };
+  }
+
+  /**
+   * Band mode: a player started overdrive. Two or more in one bar make band overdrive: everyone's
+   * multiplier doubles for as long as the shortest of theirs lasts. Once per bar.
+   */
+  private bandOverdrive(party: Party, player: Player, songIndex: number, bar: number, seconds: number) {
+    const song = party.song;
+    const line = party.state.band && song?.index === songIndex ? song.board.get(player.id) : undefined;
+    if (!song || !line || line.out || line.done || song.bandBars.has(bar)) return;
+    const inBar = song.overdrives.get(bar) ?? new Map<string, number>();
+    song.overdrives.set(bar, inBar);
+    inBar.set(player.id, seconds);
+    if (inBar.size < 2) return;
+    song.bandBars.add(bar);
+    const ms = Math.round(Math.min(...inBar.values()) * 1000);
+    const at = this.now();
+    for (const id of song.playing.keys()) this.send(id, { type: 'band-overdrive', songIndex, at, ms });
   }
 
   /**

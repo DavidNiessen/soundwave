@@ -20,6 +20,15 @@ const NoteState = { Pending: 0, Hit: 1, Missed: 2 } as const;
 
 /** How early a sustain may be released and still count as complete. */
 const SUSTAIN_RELEASE_GRACE = 0.12;
+/**
+ * Playing together changes the multiplier by a rule, a few bits: Showdown's Drain caps it (the
+ * cap, 0..3, in the low bits), band overdrive doubles it, and a band member who dropped out
+ * scores nothing. The rule is part of a run (replay.ts), so a re-judged score includes it.
+ */
+export const RULE = { cap: 3, boost: 4, out: 8 } as const;
+/** Band overdrive: the multiplier of every band member doubles while it lasts. */
+export const BAND_FACTOR = 2;
+
 /** Fraction of the overdrive meter a completed phrase awards. */
 export const PHRASE_REWARD = 0.25;
 /** Beats of overdrive per PHRASE_REWARD of meter. */
@@ -78,8 +87,11 @@ export class GameSession {
   private readonly phraseLast = new Map<number, number>();
   /** The score of a flawless run without overdrive: what the stars (and Showdown's shares) are measured against. */
   readonly par: number;
-  /** Showdown's Drain: the multiplier is held at or below this while a hit lasts (0: no cap). */
-  private cap = 0;
+  /**
+   * What playing together does to the multiplier now (see `RULE`): Showdown's Drain caps it, band
+   * overdrive doubles it, and a band member who dropped out scores nothing until they are brought back.
+   */
+  private rule = 0;
   /** The share of par that turns the stars gold on this chart (it depends on how much overdrive the chart offers). */
   private readonly goldAt: number;
   private listeners: ((e: GameEvent) => void)[] = [];
@@ -131,8 +143,10 @@ export class GameSession {
   }
 
   get multiplier() {
-    const m = multiplierFor(this.streak) * (this.overdriveActive ? OVERDRIVE_FACTOR : 1);
-    return this.cap > 0 ? Math.min(this.cap, m) : m;
+    if (this.rule & RULE.out) return 0;
+    const m = multiplierFor(this.streak) * (this.overdriveActive ? OVERDRIVE_FACTOR : 1) * (this.rule & RULE.boost ? BAND_FACTOR : 1);
+    const cap = this.rule & RULE.cap;
+    return cap > 0 ? Math.min(cap, m) : m;
   }
 
   press(lane: number, t: number) {
@@ -245,10 +259,15 @@ export class GameSession {
     return spent;
   }
 
-  /** Showdown's Drain: from song time t the multiplier is capped at `cap` (0 lifts the cap). */
-  capMultiplier(cap: number, t = this.now) {
+  /** From song time t the multiplier follows `rule` (see `RULE`; 0 for none). */
+  setRule(rule: number, t = this.now) {
     this.reach(t);
-    this.cap = Math.max(0, cap);
+    this.rule = rule & 15;
+  }
+
+  /** How long the overdrive running now has left, seconds (0 when none runs). */
+  get overdriveSeconds() {
+    return this.overdriveActive ? this.overdrive / this.drain : 0;
   }
 
   /**

@@ -2,14 +2,14 @@
  * The server's leaderboards (docs/specs/online-play.md, 3.3, 4.4): every song's boards with Watch,
  * and the replays players shared.
  */
-import { ArrowLeft, Eye, Share2, Trash2, Trophy } from 'lucide-react';
+import { ArrowLeft, Eye, Share2, Trash2, Trophy, Users } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { analysisManager } from '../analysis/manager';
 import type { Settings } from '../game/settings';
 import { partAmong, songParts, type Pick, type ThinParts } from '../game/setlist';
 import { DIFFICULTIES, PARTS } from '../chart/types';
 import { online } from '../net/client';
-import type { Board, RankLine } from '../net/protocol';
+import type { BandBoard, Board, RankLine } from '../net/protocol';
 import { chartId } from '../net/runs';
 import type { SongMeta } from '../storage/db';
 import { useActions, useHints } from './actions';
@@ -140,6 +140,7 @@ export function BoardsScreen({ library, playable, setlist, pick, thin, settings,
             )}
             {song && <SongBoard song={song} pick={shown} mod={mod} onWatch={onWatch} onProblem={setProblem} onChange={refresh} />}
           </section>
+          {song && <BandBoards songId={song.id} />}
         </div>
 
         <div className="party-main">
@@ -284,5 +285,49 @@ function SongBoard({
         </div>
       )}
     </>
+  );
+}
+
+/** A song's band boards: one per line-up (the parts and difficulties played), each best first. */
+function BandBoards({ songId }: { songId: string }) {
+  const [board, setBoard] = useState<BandBoard | null>(null);
+  useEffect(() => {
+    let live = true;
+    setBoard(null);
+    online.bandBoard(songId).then(
+      (b) => live && setBoard(b),
+      () => live && setBoard({ lineups: [] }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [songId]);
+  return (
+    <section className="ready-panel" aria-label="Band boards">
+      <h2 className="label">
+        <Users strokeWidth={ICON_STROKE} aria-hidden /> Bands
+      </h2>
+      {!board ? (
+        <p className="hint">Loading the bands…</p>
+      ) : board.lineups.length === 0 ? (
+        <p className="hint">No band has played this song yet. Make a party a band to be the first.</p>
+      ) : (
+        board.lineups.map((l) => (
+          <div key={l.key} className="band-lineup">
+            <span className="dim">{l.parts.map((p) => `${PART_LABEL[p.part]} ${DIFFICULTY_LABEL[p.difficulty]}`).join(' · ')}</span>
+            <ol className="boards-lines">
+              {l.lines.map((line, i) => (
+                <li key={`${line.at}-${i}`} className="boards-line">
+                  <span className="num rank">{i + 1}</span>
+                  <span className="party-name">{line.players.map((p) => p.name).join(', ')}</span>
+                  <Stars n={line.stars} />
+                  <span className="num">{line.score.toLocaleString()}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ))
+      )}
+    </section>
   );
 }

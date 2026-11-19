@@ -6675,6 +6675,11 @@ a.btn {
   outline: 2px solid var(--pink);
   outline-offset: -2px;
 }
+.band-lineup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
 .won {
   color: var(--mint);
   font-weight: 700;
@@ -6971,6 +6976,14 @@ a.btn {
 .party-board-row.me.hit .party-name {
   color: inherit;
   text-decoration: underline;
+}
+.party-board-row.band {
+  border-bottom: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 0;
+}
+.band-total {
+  outline: 2px solid var(--mint);
+  outline-offset: -2px;
 }
 .party-board-left {
   margin: 0.15rem 0.45rem 0;

@@ -13,6 +13,7 @@ import { Accounts, Refusal } from './accounts.ts';
 import type { Config } from './config.ts';
 import type { Store, UserRow } from './db.ts';
 import { Parties } from './parties.ts';
+import { Bands } from './bands.ts';
 import { Profiles } from './profiles.ts';
 import { Rotation } from './rotation.ts';
 import { Scores } from './scores.ts';
@@ -80,6 +81,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
   const songs = new Songs(store, config);
   const rotation = new Rotation(store);
   const profiles = new Profiles(store);
+  const bands = new Bands(store);
   /** Each signed-in player's socket (one per player: signing in elsewhere replaces it). */
   const sockets = new Map<string, WebSocket>();
   const clock = () => performance.now();
@@ -87,7 +89,12 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     const ws = sockets.get(to);
     if (ws && ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
   };
-  const parties = new Parties(send, clock, () => rotation.songs());
+  const parties = new Parties(
+    send,
+    clock,
+    () => rotation.songs(),
+    (run) => void bands.record(run),
+  );
   /** What each player online says they are doing. */
   const activity = new Map<string, string>();
   const authLimit = new RateLimit(10, 10);
@@ -156,7 +163,13 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     },
     'GET /me/export': (req) => {
       const u = me(req);
-      return { ...accounts.export(u), avatar: profiles.avatarOf(u.id) ?? null, runs: scores.exportOf(u), songsShared: songs.exportOf(u) };
+      return {
+        ...accounts.export(u),
+        avatar: profiles.avatarOf(u.id) ?? null,
+        runs: scores.exportOf(u),
+        songsShared: songs.exportOf(u),
+        bands: bands.exportOf(u.id),
+      };
     },
     'GET /me/profile': (req) => ({ avatar: profiles.avatarOf(me(req).id) ?? null }),
     'PUT /me/profile': (req, body) => {
@@ -208,6 +221,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
 
   const ID = '([0-9a-f-]{36})';
   const patterns: [string, RegExp, Handler][] = [
+    ['GET', /^\/bands\/([0-9a-f]{64})$/, (req, _b, _ip, [song]) => (me(req), bands.board(song))],
     [
       'GET',
       /^\/boards\/([0-9a-f]{64})\/([0-9a-f]{64})\/(vocals|lead|bass|drums)\/(easy|medium|hard|expert)$/,
