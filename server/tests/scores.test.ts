@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Chart } from '../../src/chart/types';
 import { GameSession } from '../../src/game/GameSession';
 import { ReplayRecorder, type ReplayInputs } from '../../src/game/replay';
-import type { Board, Challenge, Run, Session, Weekly } from '../../src/net/protocol.ts';
+import type { Board, Run, Session } from '../../src/net/protocol.ts';
 import { startServer, type RunningServer } from '../src/app.ts';
 import { DEFAULTS } from '../src/config.ts';
 import { Store } from '../src/db.ts';
@@ -106,26 +106,8 @@ describe('leaderboards', () => {
     const shared = await api<{ name: string }[]>('GET', `/replays?song=${SONG}`, undefined, owner.access);
     expect(shared.body.map((r) => r.name)).toEqual(['Ana']);
 
-    // Beat my run: Owner sends theirs to Ana, who answers it.
-    const ch = await api<{ id: string }>('POST', '/challenges', { to: 'ana', scoreId: own.body.id }, owner.access);
-    expect(ch.status).toBe(200);
-    const answer = play(7);
-    await api('POST', '/scores', submission(answer.inputs, answer.results, { challenge: ch.body.id }), ana.access);
-    const sent = await api<{ sent: Challenge[] }>('GET', '/me/challenges', undefined, owner.access);
-    expect(sent.body.sent[0]).toMatchObject({ to: 'Ana', score: better.results.score, answer: answer.results.score });
-
-    // The weekly challenge adds up each player's best on its songs.
-    expect((await api('POST', '/weekly', { songs: [{ id: SONG, title: 'Test song' }] }, ana.access)).status).toBe(403);
-    const weekly = await api<Weekly>('POST', '/weekly', { songs: [{ id: SONG, title: 'Test song' }], days: 7 }, owner.access);
-    // Only runs played while it runs count.
-    expect(weekly.body.standings).toEqual([]);
-    const again = await api<{ id: string }>('POST', '/scores', submission(better.inputs, better.results), owner.access);
-    const standings = await api<Weekly>('GET', '/weekly', undefined, ana.access);
-    expect(standings.body.standings[0]).toMatchObject({ name: 'Owner', score: better.results.score, songs: 1 });
-
     // A moderator removes a cheated run everywhere.
-    for (const id of [own.body.id, again.body.id])
-      expect((await api('DELETE', `/scores/${id}?reason=test`, undefined, owner.access)).status).toBe(200);
+    expect((await api('DELETE', `/scores/${own.body.id}?reason=test`, undefined, owner.access)).status).toBe(200);
     const after = await api<Board>('GET', `/boards/${SONG}/${chartId}/lead/hard`, undefined, ana.access);
     expect(after.body.lines.map((l) => l.name)).toEqual(['Ana']);
   });

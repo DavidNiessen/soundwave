@@ -14,13 +14,11 @@ import {
   type ApiError,
   type Board,
   type BoardLine,
-  type Challenge,
   type RankLine,
   type Run,
   type ScoreSubmission,
   type SharedSong,
   type Online,
-  type Weekly,
   type ClientMessage,
   type Difficulty,
   type Invite,
@@ -336,7 +334,7 @@ class OnlineClient {
     return this.request<unknown>('/me/export', { auth: true });
   }
 
-  /* Leaderboards, runs and challenges -------------------------------------------------------- */
+  /* Leaderboards and runs -------------------------------------------------------- */
 
   /** Sends a finished run to the leaderboards; the server judges it again before it takes it. */
   postScore(sub: ScoreSubmission) {
@@ -362,18 +360,6 @@ class OnlineClient {
   }
   topThisWeek() {
     return this.request<{ name: string; score: number }[]>('/boards/top', { auth: true });
-  }
-  challenge(to: string, scoreId: string) {
-    return this.request<{ id: string }>('/challenges', { body: { to, scoreId }, auth: true });
-  }
-  challenges() {
-    return this.request<{ received: Challenge[]; sent: Challenge[] }>('/me/challenges', { auth: true });
-  }
-  weekly() {
-    return this.request<Weekly | null>('/weekly', { auth: true });
-  }
-  setWeekly(songs: SetSong[], days: number) {
-    return this.request<Weekly>('/weekly', { body: { songs, days }, auth: true });
   }
 
   /* Shared songs ------------------------------------------------------------------------------- */

@@ -1,6 +1,5 @@
 /**
- * Leaderboards, shared runs, challenges and the weekly challenge (docs/specs/online-play.md, 3.3,
- * 3.3b and 4.4).
+ * Leaderboards and shared runs (docs/specs/online-play.md, 3.3 and 4.4).
  *
  * A score is taken only with its run: the inputs, which the server plays into the game's own
  * judging (src/game/replay.ts) against the chart. The result must match what the game reported
@@ -14,15 +13,12 @@ import {
   chartKey,
   SONG_ID,
   type Board,
-  type Challenge,
   type Difficulty,
   type Part,
   type RankLine,
   type Run,
   type ScoreSubmission,
-  type SetSong,
   type SongScore,
-  type Weekly,
   type WireChart,
 } from '../../src/net/protocol.ts';
 import { Refusal } from './accounts.ts';
@@ -87,21 +83,6 @@ export class Scores {
       );
       CREATE INDEX IF NOT EXISTS scores_board ON scores (song_id, chart_id, part, difficulty, score DESC);
       CREATE INDEX IF NOT EXISTS scores_at ON scores (at);
-      CREATE TABLE IF NOT EXISTS challenges (
-        id TEXT PRIMARY KEY,
-        from_user TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        to_user TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        score_id TEXT NOT NULL REFERENCES scores(id) ON DELETE CASCADE,
-        created INTEGER NOT NULL,
-        answer_id TEXT REFERENCES scores(id) ON DELETE SET NULL
-      );
-      CREATE TABLE IF NOT EXISTS weekly (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        songs TEXT NOT NULL,
-        start INTEGER NOT NULL,
-        end INTEGER NOT NULL,
-        by TEXT
-      );
     `);
   }
 
@@ -154,7 +135,6 @@ export class Scores {
         ops,
         new Uint8Array(timeBytes),
       );
-    if (typeof body.challenge === 'string') this.answer(user, body.challenge, id);
     const board = this.board(user, body.songId, chartId, chart.part, chart.difficulty, false);
     return { id, rank: board.me?.rank ?? 0, best: before === undefined || judged.score > before };
   }
@@ -285,95 +265,6 @@ export class Scores {
       target: r.user,
       reason: typeof reason === 'string' ? reason.slice(0, 500) : '',
     });
-  }
-
-  /* Challenges --------------------------------------------------------------------------------- */
-
-  /** Beat my run: one of the player's runs, sent to another player to play against. */
-  challenge(from: UserRow, to: unknown, scoreId: unknown): { id: string } {
-    const target = typeof to === 'string' ? this.store.userByName(to.trim()) : undefined;
-    if (!target) throw new Refusal(404, 'There is no player with that name on this server.');
-    if (target.id === from.id) throw new Refusal(409, 'Challenge someone else: that is you.');
-    const r =
-      typeof scoreId === 'string'
-        ? (this.store.db.prepare('SELECT user FROM scores WHERE id = ?').get(scoreId) as { user: string } | undefined)
-        : undefined;
-    if (!r || r.user !== from.id) throw new Refusal(404, 'Only your own runs can be sent as a challenge.');
-    const id = randomUUID();
-    this.store.db
-      .prepare('INSERT INTO challenges (id, from_user, to_user, score_id, created) VALUES (?, ?, ?, ?, ?)')
-      .run(id, from.id, target.id, scoreId as string, this.now());
-    return { id };
-  }
-
-  private answer(user: UserRow, challenge: string, scoreId: string) {
-    this.store.db
-      .prepare('UPDATE challenges SET answer_id = ? WHERE id = ? AND to_user = ? AND answer_id IS NULL')
-      .run(scoreId, challenge, user.id);
-  }
-
-  /** The challenges a player was sent, and the ones they sent, with how they went. */
-  challenges(user: UserRow): { received: Challenge[]; sent: Challenge[] } {
-    const q = (where: string) =>
-      (
-        this.store.db
-          .prepare(
-            `SELECT c.id, f.name AS "from", t.name AS "to", c.score_id AS scoreId, s.song_id AS songId, s.title, s.artist, s.part,
-                    s.difficulty, s.score, c.created, a.score AS answer
-             FROM challenges c JOIN users f ON f.id = c.from_user JOIN users t ON t.id = c.to_user
-             JOIN scores s ON s.id = c.score_id LEFT JOIN scores a ON a.id = c.answer_id
-             WHERE ${where} = ? ORDER BY c.created DESC LIMIT 50`,
-          )
-          .all(user.id) as unknown as Challenge[]
-      ).map((c) => ({ ...c, answer: c.answer ?? null }));
-    return { received: q('c.to_user'), sent: q('c.from_user') };
-  }
-
-  /* The weekly challenge ------------------------------------------------------------------------ */
-
-  /** The owner or a moderator sets the challenge: songs, and how many days it runs from now. */
-  setWeekly(actor: UserRow, songs: unknown, days: unknown) {
-    if (!canModerate(actor)) throw new Refusal(403, 'Only the owner and moderators set the weekly challenge.');
-    if (!Array.isArray(songs) || !songs.length || songs.length > 10) throw new Refusal(400, 'A weekly challenge has 1 to 10 songs.');
-    const list: SetSong[] = songs.map((s) => {
-      const o = (s ?? {}) as Record<string, unknown>;
-      if (typeof o.id !== 'string' || !SONG_ID.test(o.id)) throw new Refusal(400, 'A song of the challenge is not named.');
-      return {
-        id: o.id,
-        title: String(o.title ?? '').slice(0, 200),
-        artist: String(o.artist ?? '').slice(0, 200),
-        duration: Number(o.duration) || 0,
-      };
-    });
-    const d = typeof days === 'number' && days > 0 ? Math.min(days, 60) : 7;
-    const start = this.now();
-    this.store.db
-      .prepare('INSERT INTO weekly (songs, start, end, by) VALUES (?, ?, ?, ?)')
-      .run(JSON.stringify(list), start, start + d * 86_400_000, actor.id);
-    this.store.log({
-      at: start,
-      actor: actor.id,
-      action: 'weekly challenge',
-      target: actor.id,
-      reason: list.map((s) => s.title).join(', '),
-    });
-  }
-
-  /** The challenge running now (or the last one), with its standings: each player's best per song, added up. */
-  weekly(): Weekly | null {
-    const w = this.store.db.prepare('SELECT * FROM weekly ORDER BY id DESC LIMIT 1').get() as
-      { songs: string; start: number; end: number } | undefined;
-    if (!w) return null;
-    const songs = JSON.parse(w.songs) as SetSong[];
-    const marks = songs.map(() => '?').join(',');
-    const standings = this.store.db
-      .prepare(
-        `SELECT u.name AS name, SUM(best) AS score, COUNT(*) AS songs FROM (
-           SELECT user, song_id, MAX(score) AS best FROM scores WHERE at >= ? AND at < ? AND song_id IN (${marks}) GROUP BY user, song_id
-         ) b JOIN users u ON u.id = b.user GROUP BY b.user ORDER BY score DESC LIMIT 50`,
-      )
-      .all(w.start, w.end, ...songs.map((s) => s.id)) as Weekly['standings'];
-    return { songs, start: w.start, end: w.end, standings };
   }
 
   /** What a player's data export carries of their runs. */

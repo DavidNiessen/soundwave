@@ -1,20 +1,18 @@
 /**
  * The connected main menu (docs/specs/online-play.md, 4.3): while signed in to a server, a sidebar
- * beside the Play tab with you and the server, your party, challenges waiting for you, the week's top
- * players and who is online.
+ * beside the Play tab with you and the server, your party, the week's top players and who is online.
  * Offline it is not there, and the menu looks as it always did.
  */
-import { Crown, Swords, Trophy, Users } from 'lucide-react';
+import { Crown, Trophy, Users } from 'lucide-react';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { online } from '../net/client';
-import type { Challenge, Online } from '../net/protocol';
+import type { Online } from '../net/protocol';
 import { ICON_STROKE } from './icons';
 
 export function OnlineSidebar({ onTogether, onBoards }: { onTogether(): void; onBoards(): void }) {
   const s = useSyncExternalStore(online.subscribe, online.snapshot);
   const [top, setTop] = useState<{ name: string; score: number }[]>([]);
   const [people, setPeople] = useState<Online[]>([]);
-  const [waiting, setWaiting] = useState<Challenge[]>([]);
   const signedIn = !!s.account && (s.status === 'online' || s.status === 'reconnecting');
 
   // Asked again every half minute while the menu is open: nothing runs in the background otherwise.
@@ -23,10 +21,6 @@ export function OnlineSidebar({ onTogether, onBoards }: { onTogether(): void; on
     const load = () => {
       void online.topThisWeek().then(setTop, () => {});
       void online.presence().then(setPeople, () => {});
-      void online.challenges().then(
-        (c) => setWaiting(c.received.filter((x) => x.answer === null)),
-        () => {},
-      );
     };
     load();
     const t = window.setInterval(load, 30_000);
@@ -59,22 +53,6 @@ export function OnlineSidebar({ onTogether, onBoards }: { onTogether(): void; on
           <span className="dim">Play together: start a party or join one</span>
         )}
       </button>
-      {waiting.length > 0 && (
-        <button type="button" className="online-card" onClick={onBoards}>
-          <span className="label">
-            <Swords strokeWidth={ICON_STROKE} aria-hidden /> Challenges for you
-          </span>
-          <ul className="online-list">
-            {waiting.slice(0, 3).map((c) => (
-              <li key={c.id}>
-                <span className="party-name">{c.from}</span>
-                <span className="dim">{c.title}</span>
-                <span className="num">{c.score.toLocaleString()}</span>
-              </li>
-            ))}
-          </ul>
-        </button>
-      )}
       <button type="button" className="online-card" onClick={onBoards}>
         <span className="label">
           <Trophy strokeWidth={ICON_STROKE} aria-hidden /> This week

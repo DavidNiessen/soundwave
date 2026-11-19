@@ -152,7 +152,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     },
     'GET /me/export': (req) => {
       const u = me(req);
-      return { ...accounts.export(u), runs: scores.exportOf(u), challenges: scores.challenges(u), songsShared: songs.exportOf(u) };
+      return { ...accounts.export(u), runs: scores.exportOf(u), songsShared: songs.exportOf(u) };
     },
     'POST /scores': (req, body, ip) => {
       if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many scores at once. Wait a minute.');
@@ -163,13 +163,6 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       me(req);
       const song = new URL(req.url ?? '/', 'http://x').searchParams.get('song') ?? undefined;
       return scores.shared(song);
-    },
-    'POST /challenges': (req, body) => scores.challenge(me(req), body.to, body.scoreId),
-    'GET /me/challenges': (req) => scores.challenges(me(req)),
-    'GET /weekly': (req) => (me(req), scores.weekly()),
-    'POST /weekly': (req, body) => {
-      scores.setWeekly(me(req), body.songs, body.days);
-      return scores.weekly();
     },
     'POST /invites': (req, body, ip) => {
       if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many invites at once. Wait a minute.');

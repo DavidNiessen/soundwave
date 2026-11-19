@@ -71,9 +71,8 @@ A finished song comes with its run, the inputs as they were played. The server p
 game's own judging (it runs `src/game/` as it is, so a score is checked by exactly the rules it was
 played by) and takes the score only if it comes out exactly the same: there is no tolerance for a
 cheat to use. Boards are per song, chart (a hash of its notes), part and difficulty, all time and
-this week. Any run on a board can be watched; players can share runs to the server's replay list and
-send one to a friend as a challenge, played against as a ghost. The owner and moderators set the
-weekly challenge and remove cheated runs.
+this week. Any run on a board can be watched, and players can share runs to the server's replay
+list. The owner and moderators remove cheated runs.
 
 ## Shared songs
 

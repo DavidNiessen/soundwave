@@ -261,8 +261,6 @@ export interface ScoreSubmission {
   /** Their song times, float32 little-endian, base64. */
   times: string;
   result: SongScore;
-  /** The challenge this run answers, if it is one. */
-  challenge?: string;
 }
 
 export interface RankLine {
@@ -284,7 +282,7 @@ export interface Board {
   me: RankLine | null;
 }
 
-/** `GET /scores/:id/run`: everything needed to watch a run, or play against it as a ghost. */
+/** `GET /scores/:id/run`: everything needed to watch a run. */
 export interface Run {
   scoreId: string;
   name: string;
@@ -296,28 +294,4 @@ export interface Run {
   times: string;
   result: SongScore;
   at: number;
-}
-
-export interface Challenge {
-  id: string;
-  from: string;
-  to: string;
-  scoreId: string;
-  songId: string;
-  title: string;
-  artist: string;
-  part: Part;
-  difficulty: Difficulty;
-  score: number;
-  created: number;
-  /** The answer's score, once played. */
-  answer: number | null;
-}
-
-/** The server's weekly challenge: a few songs, and the best total over them. */
-export interface Weekly {
-  songs: SetSong[];
-  start: number;
-  end: number;
-  standings: { name: string; score: number; songs: number }[];
 }

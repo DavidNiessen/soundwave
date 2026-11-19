@@ -90,7 +90,7 @@ import { writeSoundwave } from '../storage/soundwaveFile';
 import { decodeRun, encodeRun } from '../net/runs';
 import { replayResults } from '../game/replay';
 import { online, parseInvite, type PartyStart, type SongEvent } from '../net/client';
-import type { Challenge, SharedSong, WireChart } from '../net/protocol';
+import type { SharedSong, WireChart } from '../net/protocol';
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { installUiSounds } from './uiSounds';
 
@@ -112,8 +112,6 @@ interface Run {
   test?: { back: EditorView; startAt: number };
   /** A song played with a party: which of its set, and when it starts (performance.now ms). */
   party?: { songIndex: number; at: number };
-  /** Played against a challenger's run, which runs beside the highway as a ghost. */
-  challenge?: { id: string; name: string; inputs: ReplayInputs; score: number };
 }
 
 type View =
@@ -122,7 +120,7 @@ type View =
   | LobbyView
   /** Playing together on a server: signing in, the party's lobby and its results. */
   | { name: 'party' }
-  /** The server's leaderboards, challenges and shared replays. */
+  /** The server's leaderboards and shared replays. */
   /** `from`: where Back returns to (Play together, unless opened from the main menu). */
   | { name: 'boards'; from?: 'home' }
   /** The server's library of shared songs. */
@@ -922,7 +920,6 @@ export function App() {
           bestStreak: results.bestStreak,
           fullCombo: results.fullCombo,
         },
-        ...(run.challenge ? { challenge: run.challenge.id } : {}),
       });
       if (r.best && r.rank) toast(`Number ${r.rank} on ${online.snapshot().info?.name ?? 'the server'}’s board for this chart.`);
     } catch (e) {
@@ -965,38 +962,8 @@ export function App() {
     });
   };
 
-  /** Beat my run: plays the challenger's chart, with their run beside the highway as a ghost. */
-  const playChallenge = (c: Challenge) => {
-    const meta = byId.get(c.songId);
-    if (!meta) return toast(`You need "${c.title}" in your library to play this challenge.`);
-    menuPulse('launch');
-    void wipeTo(async () => {
-      const r = await online.run(c.scoreId);
-      const chart = cleanChart(r.chart);
-      if (!chart) throw new Error('This run’s chart is damaged.');
-      const run: Run = {
-        songs: [meta],
-        charts: [chart],
-        index: 0,
-        results: [],
-        pick: { part: chart.part, difficulty: chart.difficulty },
-        lobby: { name: 'lobby', ids: [meta.id], from: 'home' },
-        challenge: { id: c.id, name: c.from, inputs: decodeRun(r.ops, r.times), score: c.score },
-      };
-      return { name: 'play', run, buffer: await loadSongBuffer(meta.id), key: Date.now() };
-    });
-  };
-
   const finish = async (run: Run, results: Results, inputs?: ReplayInputs) => {
     const best = await keepScore(run, results, inputs);
-    if (run.challenge) {
-      const d = results.score - run.challenge.score;
-      toast(
-        d > 0
-          ? `You beat ${run.challenge.name}’s run by ${d.toLocaleString()}.`
-          : `${run.challenge.name}’s run stays ahead by ${(-d).toLocaleString()}.`,
-      );
-    }
     setView({ name: 'results', run: withResult(run, { song: run.songs[run.index], results, best }) });
   };
 
@@ -1417,7 +1384,6 @@ export function App() {
         onFinish={(r, inputs) =>
           partyRun ? finishPartySong(run, r, inputs) : run.test ? setView({ ...run.test.back, tested: r }) : void finish(run, r, inputs)
         }
-        ghost={run.challenge ? { name: run.challenge.name, inputs: run.challenge.inputs } : undefined}
         together={
           partyRun
             ? {
@@ -1525,8 +1491,6 @@ export function App() {
           thin={thin}
           settings={settings}
           onWatch={watchRun}
-          onPlayChallenge={playChallenge}
-          onPlaySet={(ids) => setView({ name: 'lobby', ids, from: 'home' })}
           onBack={() => setView(view.from === 'home' ? { name: 'home' } : { name: 'party' })}
         />
       );

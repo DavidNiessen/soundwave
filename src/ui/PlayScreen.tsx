@@ -16,7 +16,6 @@ import { Dialog } from './Dialog';
 import { hudRefs, PlayHud } from './PlayHud';
 import { ICON_STROKE } from './icons';
 import { BOARD_INTERVAL_MS } from '../net/protocol';
-import { GhostBoard } from './Boards';
 
 interface Props {
   title: string;
@@ -43,8 +42,6 @@ interface Props {
    * can restart or skip a song the others are playing.
    */
   together?: { at: number; board: React.ReactNode; onProgress(score: number, streak: number, stars: number): void };
-  /** A challenger's run, played back beside the highway as a ghost to beat. */
-  ghost?: { name: string; inputs: ReplayInputs };
 }
 
 /** What the pause menu asks about before it throws the run away. */
@@ -65,7 +62,6 @@ export function PlayScreen({
   settingsOpen,
   onQuit,
   together,
-  ghost,
 }: Props) {
   const togetherRef = useRef(together);
   togetherRef.current = together;
@@ -261,16 +257,6 @@ export function PlayScreen({
         />
       </div>
       {together?.board}
-      {ghost && (
-        <GhostBoard
-          key={run}
-          chart={chart}
-          inputs={ghost.inputs}
-          name={ghost.name}
-          time={() => ctrlRef.current?.time ?? 0}
-          score={() => ctrlRef.current?.session.score ?? 0}
-        />
-      )}
       {phase === 'countdown' && count > 0 && (
         <div className="countdown" key={count}>
           {count}

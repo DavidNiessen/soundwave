@@ -1,6 +1,6 @@
 # Spec: playing together
 
-Status: **being built** (#16). Built: judging by time (milestone 0), the server, parties, leaderboards, challenges,
+Status: **being built** (#16). Built: judging by time (milestone 0), the server, parties, leaderboards,
 shared songs and the connected main menu. Still to do: Showdown, avatars, band mode, join from Discord.
 
 Decisions made while building, which override what follows:
@@ -9,6 +9,9 @@ Decisions made while building, which override what follows:
 - **Invite links replace key files** (`.soundwave-key` was too technical). An invite is a link to the server's own
   `/join` page, which opens the app (`soundwave://join?…`) or the web game; the join modes are public, password and
   invite. Read "key file" below as "invite link".
+- **No challenges.** Beat my run (a run played against as a ghost) and the weekly server challenge are dropped:
+  3.3b, the challenge endpoints in section 6 and milestone 10 no longer apply. Leaderboards, Watch and shared
+  replays stay.
 - **Later, not now:** the in-game server list (3.2b), local sessions hosted by the desktop app (level 1), and its
   STUN fallback.
 
@@ -282,7 +285,7 @@ score has to be exact.
 long frame, a stall) is judged by its own time in the re-judge, which is the fair answer. But the live HUD may
 briefly have shown something else. To settle while building it.
 
-### 3.3b Challenges
+### 3.3b Challenges (dropped, see the decisions at the top)
 
 **Beat my run (async):** every checked score already comes with its input log (3.3), so a friend can play against
 it whenever they like, without being online at the same time.
