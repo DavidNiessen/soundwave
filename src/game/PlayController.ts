@@ -299,29 +299,10 @@ export class PlayController {
     this.resize();
   }
 
-  /**
-   * The timeline's shape: thick where there are notes to play, a thin line through every longer
-   * stretch without any (the intro, a break, the fade-out).
-   */
+  /** The timeline's shape (see timelineShape). */
   private drawTimeline() {
-    const d = this.chart.duration;
-    if (!(d > 0)) return;
-    const min = Math.max(4, d * 0.02);
-    const pct = (t: number) => `${((Math.min(d, Math.max(0, t)) / d) * 100).toFixed(2)}%`;
-    let css = 'linear-gradient(to right';
-    let free = 0;
-    let from = 0;
-    const quiet = (a: number, b: number) => {
-      if (b - a < min) return;
-      css += `, #000 ${pct(from)} ${pct(a)}, transparent ${pct(a)} ${pct(b)}`;
-      from = b;
-    };
-    for (const n of this.chart.notes) {
-      quiet(free, n.t);
-      free = Math.max(free, n.t + n.dur);
-    }
-    quiet(free, d);
-    this.hud.timeline.style.setProperty('--segments', `${css}, #000 ${pct(from)} 100%)`);
+    const shape = timelineShape(this.chart);
+    if (shape) this.hud.timeline.style.setProperty('--segments', shape);
   }
 
   /** Puts the lane labels on the deck under their lanes and tells the HUD where the highway is. */
@@ -667,6 +648,31 @@ export class PlayController {
     this.stage?.dispose();
     this.shownStage?.dispose();
   }
+}
+
+/**
+ * A song's timeline as a CSS mask: thick where there are notes to play, a thin line through every
+ * longer stretch without any (the intro, a break, the fade-out). Null for a song of no length.
+ */
+export function timelineShape(chart: Chart, length = chart.duration): string | null {
+  const d = length;
+  if (!(d > 0)) return null;
+  const min = Math.max(4, d * 0.02);
+  const pct = (t: number) => `${((Math.min(d, Math.max(0, t)) / d) * 100).toFixed(2)}%`;
+  let css = 'linear-gradient(to right';
+  let free = 0;
+  let from = 0;
+  const quiet = (a: number, b: number) => {
+    if (b - a < min) return;
+    css += `, #000 ${pct(from)} ${pct(a)}, transparent ${pct(a)} ${pct(b)}`;
+    from = b;
+  };
+  for (const n of chart.notes) {
+    quiet(free, n.t);
+    free = Math.max(free, n.t + n.dur);
+  }
+  quiet(free, d);
+  return `${css}, #000 ${pct(from)} 100%)`;
 }
 
 function reducedMotion(): boolean {

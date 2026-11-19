@@ -44,7 +44,8 @@ export function FocusRing() {
 
     const pick = (): HTMLElement | null => {
       const mode = getInputMode();
-      if (mode === 'touch' || document.querySelector('[data-nav-off]')) return null;
+      // (`data-ring-off`: a screen whose controls are hidden for the moment, as a replay's are.)
+      if (mode === 'touch' || document.querySelector('[data-nav-off], [data-ring-off]')) return null;
       const el = usesFocus(mode) ? (document.activeElement as HTMLElement | null) : hovered;
       if (!el || el === document.body || !el.isConnected || el.dataset.ring === 'none') return null;
       // Behind an open dialog nothing is pointed at.
