@@ -201,11 +201,77 @@ an **in-game server list**:
   - The **song id** is the hash of the audio.
   - The **chart id** is a hash of the chart itself (its notes), so an analysis update or a hand-edited chart gets
     a board of its own instead of mixing incomparable scores.
-- **Submission:** at the end of a song the game sends the score plus a compact **input log** (hit times per lane,
-  about 10–40 KB per song).
+- **Submission:** at the end of a song the game sends the score plus its **input log** (see
+  [3.3c](#33c-a-run-is-its-inputs)), about 10–40 KB per song.
 - **Checking:** the server re-judges the log against the chart, using the same judging code as the game (shared
-  TypeScript), and rejects scores that don't match. That stops casual cheating, though not a determined bot.
+  TypeScript), and accepts the score only if it matches **exactly**. There is no tolerance, so a cheater has no
+  margin to use. That stops casual cheating, though not a determined bot. This needs the game's judging to give
+  one result per log, which it doesn't yet: see 3.3c.
 - **Modifiers:** runs with modifiers (if the modifiers idea is built) get their own boards.
+
+### 3.3c A run is its inputs
+
+Leaderboard checks (3.3), ghosts (3.3b) and replays (4.4) all play a run back from its input log and expect the
+score that was played. **This is a requirement on the game, and it doesn't hold today.**
+
+**The problem**, found and measured by AlxcBTW in [the review of this spec](https://github.com/DavidNiessen/soundwave/pull/11):
+the game's judging (`GameSession`) advances frame by frame, so the same inputs give a slightly different result at
+different frame rates. Over 40 test charts, played at 30–1000 updates a second with identical inputs:
+
+- the score differed in **all 40** (by up to 0.56%, usually a few points);
+- hit counts or the best streak differed in 2.
+
+Three things depend on frames:
+
+1. **Sustain points** are added per frame, at the multiplier of that frame, so a hit or miss inside the frame
+   changes the multiplier for the frame's whole share.
+2. **Overdrive** drains per frame and runs out on a frame, so notes hit just after it ended still count double until
+   the next frame. Starting overdrive was also taken at the last frame, not at the press.
+3. **Misses** are noticed on the frame after a note's window closes. A hit on a later note in between adds to the
+   streak first, and is reset after. The other order would start a new streak, which can change the best streak and
+   the multiplier.
+
+A server re-judging at its own pace would reject honest scores, or need a tolerance a cheater can use too.
+
+**The requirement:** the judging advances **by time**, not by frames. Every update walks through what falls due up
+to that moment, in order of time: a note's window closing, a sustain ending, a release window closing, overdrive
+running out. Sustain points and overdrive drain are added between those moments at the multiplier that held then.
+Presses, releases and overdrive activations first advance the session to their own time. A run is then a function
+of its chart and its inputs alone: the same log gives the same score, counts, best streak and events at any frame
+rate, in the game, on a server, and in a replay.
+
+- **Proven possible:** AlxcBTW built this on a branch
+  ([`feat/session-by-time`](https://github.com/AlxcBTW/soundwave/compare/main...AlxcBTW:soundwave:feat/session-by-time):
+  `GameSession` plus two lines in `PlayController`). With it, the same 40 runs give identical results at every rate
+  (0 of 40 differ, before 40 of 40), landing within a point of what 1000 steps a second gave before. The existing
+  session tests pass unchanged, and a new test plays one list of inputs at four frame rates and compares everything.
+- **What changes in play:** nothing a player should notice. A miss breaks the streak at the moment the note's window
+  closes instead of at the next frame, and overdrive ends at the moment it runs out. It still needs to be played
+  before it lands.
+- **A test that keeps it true:** the same-result-at-every-frame-rate test stays in the suite, so the judging can't
+  drift back.
+
+**What the input log holds**, so that it is the whole run:
+
+| Entry     | With                                                                                              |
+| --------- | ------------------------------------------------------------------------------------------------- |
+| Press     | time, lane                                                                                        |
+| Release   | time, lane (sustains and hold-and-release notes)                                                  |
+| Overdrive | time it was activated                                                                             |
+| Pause     | time paused, and the song time play resumed from (a resume rewinds the song and drops held notes) |
+
+Plus the header: song id, chart id, part, difficulty, the game version, and settings that change judging (the
+player's audio/video offset is applied to the times before they're logged, so it isn't needed again).
+
+**The score of record is the re-judged one.** An input's time is the event's own, but a frame may already have moved
+the session past it. Such an input is judged a few milliseconds differently live than in a re-judge. So at the end
+of a song the game re-judges its own log, and that score is the one it shows on the results, stores, and sends. Live
+scores during the song (and on a session's scoreboard) are allowed to differ by those few points. Only the final
+score has to be exact.
+
+**Still open:** how far "late" may go. An input that arrives after the session has already passed its time (a
+long frame, a stall) is judged by its own time in the re-judge, which is the fair answer. But the live HUD may
+briefly have shown something else. To settle while building it.
 
 ### 3.3b Challenges
 
@@ -215,7 +281,7 @@ it whenever they like, without being online at the same time.
 - **Sending a challenge:** from a leaderboard or a friend's profile, **Challenge** sends a run to a friend on the
   server. The friend sees it in the connected main menu.
 - **Playing it:** they play the same chart, and the run is a **ghost** on the scoreboard beside the highway: its
-  score moves as it did when it was played, note for note.
+  score moves as it did when it was played, note for note. That holds because a run is its inputs (3.3c).
 - **Afterwards:** a result card shows both runs, and the challenger is told how it went.
 
 **Server challenges (weekly):** the owner or a moderator sets a weekly challenge: a set of songs, optionally a
@@ -385,6 +451,8 @@ Replays are part of the game itself, offline too, and a server can share them.
 - **On a server:** checked scores already carry their input logs (3.3), so every leaderboard entry has **Watch**.
   A player can also **share** a replay of their own to the server's replay list, and **Beat my run** (3.3b) is a
   replay played as a ghost.
+- **Exact:** a replay re-judges its log as it plays, so it shows the same score as the run did (3.3c), at whatever
+  frame rate it's watched.
 - **Files:** a replay can be saved as a small `.soundwave-replay` file (chart id, song id, inputs, settings that
   affect play) and opened in the game, if the player has the song.
 
@@ -454,7 +522,7 @@ client → host/server
   ready        { part, difficulty, ready }
   progress     { songIndex, score, streak, stars, overdrive }
   strike       { charge }                    // Showdown: spend charge on the player above
-  finish       { songIndex, results, inputLog? }
+  finish       { songIndex, results, inputLog? }   // results re-judged from the log (3.3c)
   request-song { songId }
   resume       { session, player, songIndex, score }   // back after a dropped connection
 
@@ -487,28 +555,34 @@ host/server → client
 
 ## 7. Milestones
 
-| #   | Milestone                 | Done when                                                                                    |
-| --- | ------------------------- | -------------------------------------------------------------------------------------------- |
-| 1   | **Local session MVP**     | Two desktop apps on one network play a set together with live scores and shared results.     |
-| 2   | Song transfer in sessions | A missing song can be fetched from the host with consent.                                    |
-| 3   | **Server MVP**            | Accounts, public/password/invite/key-file joining, parties over the internet.                |
-| 4   | Leaderboards              | Scores submitted, checked from input logs, and shown in the game.                            |
-| 5   | Shared charts and covers  | Charts-only sharing, covers over HTTPS, cover art in the Discord status.                     |
-| 6   | Connected main menu       | Sidebar with you, party, leaderboard and friends.                                            |
-| 7   | Avatars                   | Avatar editor, and avatars on stage at their parts.                                          |
-| 8   | **Showdown**              | The battle mode, playable and tuned.                                                         |
-| 9   | Replays                   | Watch your own runs in the game, offline; then **Watch** on leaderboards and shared replays. |
-| 10  | Challenges                | Beat my run with ghosts, and weekly server challenges.                                       |
-| 11  | Band mode                 | Co-op for up to four, with band overdrive and saves.                                         |
-| 12  | Join from Discord         | The opt-in Join button, never on private sessions.                                           |
+| #   | Milestone                 | Done when                                                                                          |
+| --- | ------------------------- | -------------------------------------------------------------------------------------------------- |
+| 0   | **Judging by time**       | The same input log gives the same result at every frame rate (3.3c), with a test that keeps it so. |
+| 1   | **Local session MVP**     | Two desktop apps on one network play a set together with live scores and shared results.           |
+| 2   | Song transfer in sessions | A missing song can be fetched from the host with consent.                                          |
+| 3   | **Server MVP**            | Accounts, public/password/invite/key-file joining, parties over the internet.                      |
+| 4   | Leaderboards              | Scores submitted, checked from input logs, and shown in the game.                                  |
+| 5   | Shared charts and covers  | Charts-only sharing, covers over HTTPS, cover art in the Discord status.                           |
+| 6   | Connected main menu       | Sidebar with you, party, leaderboard and friends.                                                  |
+| 7   | Avatars                   | Avatar editor, and avatars on stage at their parts.                                                |
+| 8   | **Showdown**              | The battle mode, playable and tuned.                                                               |
+| 9   | Replays                   | Watch your own runs in the game, offline; then **Watch** on leaderboards and shared replays.       |
+| 10  | Challenges                | Beat my run with ghosts, and weekly server challenges.                                             |
+| 11  | Band mode                 | Co-op for up to four, with band overdrive and saves.                                               |
+| 12  | Join from Discord         | The opt-in Join button, never on private sessions.                                                 |
 
 Calibration checks, the host's chart, reconnecting and data export aren't milestones of their own: they belong to
 milestones 1, 1, 1 and 3.
 
-Each milestone is its own PR, and the game ships after every one.
+Each milestone is its own PR, and the game ships after every one. Milestone 0 comes first: leaderboards, ghosts and replays depend on it, and it's useful on its own (a run scores
+the same on every machine).
 
 ---
 
 ## 8. Open questions
 
-None at the moment. Numbers in Showdown (durations, protection, the 2× cap) are tuned in play.
+1. **Late inputs (3.3c):** an input that arrives after the session has passed its time is judged by its own time in
+   the re-judge. Is a short difference between the live HUD and the final score acceptable, or should the live
+   session also re-judge what it has already passed?
+
+Numbers in Showdown (durations, protection, the 2× cap) are tuned in play.
