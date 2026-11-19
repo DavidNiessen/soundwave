@@ -1,7 +1,8 @@
 import { gpuFound, type GraphicsSettings } from '../../game/graphics';
-import type { StageOptions } from '../aurora/AuroraStage';
 import { serveWorkerFetch } from '../../app/workerFetch';
 import { DEFAULT_LOOK, type StageLook } from './look';
+import type { VenueId } from '../venues/catalog';
+import type { StageOptions } from './Stage';
 import type { Beat, FromStage, StageInput, StageRate, ToStage } from './protocol';
 
 /**
@@ -159,10 +160,10 @@ function getPageHost(): Promise<(m: ToStage) => void> {
 if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => postVisible());
 
 /** Starts loading the venue now, ahead of the first stage, so it is there sooner. */
-export function preloadStage() {
+export function preloadStage(venue: VenueId) {
   const w = workerDraws ? getWorker() : null;
-  if (w) w.postMessage({ type: 'preload' } satisfies ToStage);
-  else void getPageHost().then((handle) => handle({ type: 'preload' }));
+  if (w) w.postMessage({ type: 'preload', venue } satisfies ToStage);
+  else void getPageHost().then((handle) => handle({ type: 'preload', venue }));
 }
 
 /** Calls back with how much of the venue has loaded (0..1), now and as more of it arrives. */
@@ -177,8 +178,6 @@ export class StageView {
   readonly ready: Promise<void>;
   private canvas!: HTMLCanvasElement;
   private id = nextId++;
-  /** The venue the stage was built in: a look in another one builds it again. */
-  private venue = '';
   private target: Target = 'page';
   private pageHandle: ((m: ToStage) => void) | null = null;
   /** Messages for the page's host until it has loaded. */
@@ -234,7 +233,6 @@ export class StageView {
     this.lastSize = '';
     const { width, height, dpr } = this.measure();
     const options = { ...this.options, look: currentLook };
-    this.venue = currentLook.venueId;
     const base = { type: 'create' as const, id: this.id, graphics: this.graphics, options, width, height, dpr };
     if (target === 'worker') {
       const offscreen = canvas.transferControlToOffscreen();
@@ -321,18 +319,7 @@ export class StageView {
 
   /** @internal How the stage looks (see setStageLook). */
   setLook(look: StageLook) {
-    if (look.venueId !== this.venue) return this.rebuild();
     this.send({ type: 'look', id: this.id, look });
-  }
-
-  /** Builds the stage again (in another venue): the old one goes, a new canvas takes its place. */
-  private rebuild() {
-    if (this.disposed) return;
-    this.send({ type: 'dispose', id: this.id });
-    views.delete(this.id);
-    this.id = nextId++;
-    views.set(this.id, this);
-    this.start(this.target);
   }
 
   /** @internal A frame of the video on the stage's screens (see sendScreenFrame). */

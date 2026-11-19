@@ -4,7 +4,6 @@
  * kept in the settings, so they travel with a library backup.
  */
 import type { Sky, StageLook } from '../render/stage/look';
-import { DEFAULT_VENUE, findVenue } from '../render/stage/venues';
 
 /** A colour as `#rrggbb`. */
 export type Hex = string;
@@ -33,8 +32,6 @@ export interface StageDef {
   id: string;
   name: string;
   backdrop: Backdrop;
-  /** The 3D venue (see src/render/stage/venues.ts). */
-  venueId: string;
   /** The sky over the 3D stage. */
   sky: Sky;
   /** How much a video, picture or gradient is darkened behind the highway, 0..0.85. */
@@ -74,7 +71,6 @@ export const RANGES = {
 
 const base: Omit<StageDef, 'id' | 'name'> = {
   backdrop: { kind: 'venue' },
-  venueId: DEFAULT_VENUE,
   sky: 'night',
   dim: 0.35,
   screens: null,
@@ -187,7 +183,6 @@ function normalizeDef(raw: unknown): StageDef | null {
     id: d.id,
     name: typeof d.name === 'string' && d.name.trim() ? d.name.trim().slice(0, 32) : 'My stage',
     backdrop: normalizeBackdrop(d.backdrop),
-    venueId: findVenue(typeof d.venueId === 'string' ? d.venueId : undefined).id,
     sky: d.sky === 'aurora' || d.sky === 'black' ? d.sky : 'night',
     dim: clamp(d.dim, RANGES.dim, 0.35),
     screens: typeof d.screens === 'string' && d.screens ? d.screens : null,
@@ -270,7 +265,6 @@ const hexToRgb = (hex: Hex): [number, number, number] => {
 /** The stage as the renderer takes it. */
 export function stageLook(d: StageDef): StageLook {
   return {
-    venueId: d.venueId,
     sky: d.sky,
     colors: d.colors && { key: hexToRgb(d.colors.key), accent: hexToRgb(d.colors.accent), wash: hexToRgb(d.colors.wash) },
     brightness: d.brightness,

@@ -1,3 +1,4 @@
+import { VENUES, type VenueChoice } from '../render/venues/catalog';
 import {
   ArrowLeft,
   ChevronLeft,
@@ -610,7 +611,7 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
     // Auto shows what it picked; touching any option turns that into a custom setup.
     const shown = resolveGraphics(g);
     const setG = (patch: Partial<GraphicsSettings>) => set({ graphics: { ...shown, ...patch, preset: 'custom' } });
-    const level = (id: 'crowd' | 'beams' | 'lights' | 'effects', label: string, help: string): Row => ({
+    const level = (id: 'crowd' | 'beams' | 'lights' | 'effects' | 'textures', label: string, help: string): Row => ({
       kind: 'choice',
       id,
       label,
@@ -691,6 +692,18 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
         rows: [
           {
             kind: 'choice',
+            id: 'venue',
+            label: 'Venue',
+            help: 'Where your sets are played. Also on the Ready up screen.',
+            value: s.venue,
+            options: [
+              ...VENUES.map((v) => ({ value: v.id, label: v.name, help: `${v.blurb}.` })),
+              { value: 'random', label: 'Random', help: 'A different venue for every song.' },
+            ],
+            set: (v) => set({ venue: v as VenueChoice }),
+          },
+          {
+            kind: 'choice',
             id: 'preset',
             label: 'Quality',
             help: 'The highway always runs at full quality. These settings only change the stage behind it.',
@@ -737,6 +750,11 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
           level('beams', 'Beams', 'Moving light beams in the haze.'),
           level('lights', 'Lights and bulbs', 'Washes, bulbs and glowing details.'),
           level('effects', 'Fireworks and smoke', 'Fireworks and smoke jets on big moments.'),
+          level(
+            'textures',
+            'Textures',
+            'Scanned surfaces in the venues: 1K at Low, 2K at Medium, 4K at High. 4K needs a strong graphics card.',
+          ),
         ],
       },
     ];

@@ -41,7 +41,7 @@ import { playSfx } from '../audio/sfx';
 import { menuPulse } from '../input/rumble';
 import { boostMenuStage } from '../render/aurora/menuStage';
 import { setPreviewStage } from '../render/stage/showStage';
-import { findVenue, VENUES } from '../render/stage/venues';
+import { VENUES, type VenueChoice } from '../render/venues/catalog';
 import { deleteMedia, getMedia, mediaIds, mediaUrl, putMedia } from '../storage/stageMedia';
 import { useHints, type Action } from './actions';
 import { Dialog } from './Dialog';
@@ -56,6 +56,8 @@ interface Options {
   /** Whether the browser is on screen (the main menu's Stage tab): only then does it show its stages. */
   on: boolean;
   onChange(next: StageSettings): void;
+  /** The venue sets are played in changed (a setting of its own, whichever stage is in use). */
+  onVenue(venue: VenueChoice): void;
 }
 
 /** The show's own colours, for the cards of stages without colours of their own. */
@@ -166,7 +168,11 @@ function useMediaName(id: string | null): string | null {
  *
  * Returns the tab's content and its actions, which the main menu puts in its action bar.
  */
-export function useStageBrowser({ stages, settings, on, onChange }: Options): { view: ReactNode; actions: Action[]; editing: boolean } {
+export function useStageBrowser({ stages, settings, on, onChange, onVenue }: Options): {
+  view: ReactNode;
+  actions: Action[];
+  editing: boolean;
+} {
   const hints = useHints(settings);
   const touch = hints.mode === 'touch';
   /** The card in focus (its stage shows behind the menu), and the stage open in the editor. */
@@ -394,6 +400,8 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): { 
             onUndo={undo}
             canUndo={history.current.length > 0}
             onDelete={() => remove(editing)}
+            venue={settings.venue}
+            onVenue={onVenue}
           />
         ) : all ? (
           <TemplatePanel
@@ -587,9 +595,25 @@ interface EditorProps {
   onUndo(): void;
   canUndo: boolean;
   onDelete(): void;
+  /** The venue sets are played in: not part of the stage, but picked here too. */
+  venue: VenueChoice;
+  onVenue(venue: VenueChoice): void;
 }
 
-function Editor({ def, actions, onClose, touch, activeRow, setActiveRow, onSave, onUndo, canUndo, onDelete }: EditorProps) {
+function Editor({
+  def,
+  actions,
+  onClose,
+  touch,
+  activeRow,
+  setActiveRow,
+  onSave,
+  onUndo,
+  canUndo,
+  onDelete,
+  venue: venueChoice,
+  onVenue,
+}: EditorProps) {
   const [pickerFor, setPickerFor] = useState<string | null>(null);
   const picker = (label: string) => ({
     label,
@@ -683,31 +707,23 @@ function Editor({ def, actions, onClose, touch, activeRow, setActiveRow, onSave,
       {
         title: 'Venue and sky',
         rows: [
-          VENUES.length > 1
-            ? {
-                kind: 'choice',
-                id: 'venueId',
-                label: 'Venue',
-                help: findVenue(def.venueId).description,
-                value: def.venueId,
-                options: VENUES.map((v) => ({ value: v.id, label: v.name, help: v.description })),
-                set: (v) => set({ venueId: v }),
-              }
-            : {
-                kind: 'choice',
-                id: 'venueId',
-                label: 'Venue',
-                help: `${findVenue(def.venueId).name} is the only venue installed. Other venues show up here once they are added.`,
-                value: def.venueId,
-                options: VENUES.map((v) => ({ value: v.id, label: v.name })),
-                disabled: true,
-                set: () => {},
-              },
+          {
+            kind: 'choice',
+            id: 'venue-choice',
+            label: 'Venue',
+            help: `${venueChoice === 'random' ? 'A different venue for every song' : VENUES.find((v) => v.id === venueChoice)?.blurb}. Not part of the stage: every stage is shown in it, and it is also picked on Ready up and in the settings.`,
+            value: venueChoice,
+            options: [
+              ...VENUES.map((v) => ({ value: v.id, label: v.name, help: `${v.blurb}.` })),
+              { value: 'random', label: 'Random', help: 'A different venue for every song.' },
+            ],
+            set: (v) => onVenue(v as VenueChoice),
+          },
           {
             kind: 'choice',
             id: 'sky',
             label: 'Sky',
-            help: SKIES.map((x) => `${x.label}: ${x.help}`).join(' '),
+            help: `${SKIES.map((x) => `${x.label}: ${x.help}`).join(' ')} Moonrise only: the other venues bring their own sky.`,
             value: def.sky,
             options: SKIES,
             set: (v) => set({ sky: v as StageDef['sky'] }),
@@ -745,7 +761,7 @@ function Editor({ def, actions, onClose, touch, activeRow, setActiveRow, onSave,
             kind: 'choice',
             id: 'screensMode',
             label: 'Screens show',
-            help: 'The big round screen and the screens beside it: the show’s own pictures, or a video of yours.',
+            help: 'Moonrise’s big round screen and the screens beside it: the show’s own pictures, or a video of yours. The other venues keep their own pictures.',
             value: def.screens ? 'video' : 'show',
             options: [
               { value: 'show', label: 'The show' },
@@ -1008,7 +1024,7 @@ function TemplatePanel({
           <h2 className="display meta-heading">{start ? 'Pick a 3D stage' : 'Templates'}</h2>
           <p className="hint">
             {start
-              ? `In the ${findVenue(undefined).name} venue. Point at one to see it, then press it to make it yours.`
+              ? 'Shown in the venue behind the menus. Point at one to see it, then press it to make it yours.'
               : 'Use one as it is, or copy it to make it your own.'}
           </p>
         </div>

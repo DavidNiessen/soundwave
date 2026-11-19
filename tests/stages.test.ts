@@ -11,7 +11,6 @@ import {
   TEMPLATE_INFO,
 } from '../src/game/stages';
 import { normalizeSettings } from '../src/game/settings';
-import { VENUES } from '../src/render/stage/venues';
 
 describe('stages', () => {
   it('starts on the Festival stage with no stages of the player’s own', () => {
@@ -63,16 +62,10 @@ describe('stages', () => {
     for (const d of BUILT_IN) expect(TEMPLATE_INFO[d.id]).toBeTruthy();
   });
 
-  it('keeps a stage’s venue, and falls back to the first one for a venue that is gone', () => {
-    const [d, gone] = normalizeStages({
-      mine: [
-        { id: 'mine-5', venueId: 'moonrise' },
-        { id: 'mine-6', venueId: 'nowhere' },
-      ],
-    }).mine;
-    expect(d.venueId).toBe('moonrise');
-    expect(gone.venueId).toBe(VENUES[0].id);
-    expect(stageLook(d).venueId).toBe('moonrise');
+  it('drops the venue a stage saved before the venue became a setting of its own', () => {
+    const [d] = normalizeStages({ mine: [{ id: 'mine-5', venueId: 'moonrise' }] }).mine;
+    expect('venueId' in d).toBe(false);
+    expect('venueId' in stageLook(d)).toBe(false);
   });
 
   it('falls back to Festival when the stage in use is gone', () => {
