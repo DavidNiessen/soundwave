@@ -7,6 +7,8 @@ import { barAt, barIntensity } from '../render/stage/LightShow';
 import { resolveGraphics } from './graphics';
 import { GameSession, type Results } from './GameSession';
 import { ReplayPlayback, ReplayRecorder, type ReplayInputs } from './replay';
+import { BufferAnalyser } from '../audio/bufferAnalyser';
+import type { StageInput } from '../render/stage/protocol';
 import { Rumbler } from '../input/rumble';
 import { barsLeft, findBreaks, type Break } from './breaks';
 import { GamepadInput, KeyboardInput, TouchInput, type InputHandlers } from './input';
@@ -74,6 +76,10 @@ export class PlayController {
   /** Resolves once the highway can draw and the stage (when there is one) has drawn, or could not be built. */
   readonly ready: Promise<void>;
   private stageSettled: () => void = () => {};
+  /** The clock of the frame being made (performance.now ms, or a video's own while it is made frame by frame). */
+  private clock = performance.now();
+  /** Frames are made one by one for a video (see `beginFrames`): the frame loop does not run. */
+  private frames = false;
   /** Called after every frame is drawn, with its song time: a video takes the highway's picture then. */
   onFrame: ((t: number) => void) | null = null;
   private readonly highway: Highway;
@@ -167,7 +173,7 @@ export class PlayController {
 
   constructor(
     private readonly engine: AudioEngine,
-    buffer: AudioBuffer,
+    private readonly buffer: AudioBuffer,
     private readonly chart: Chart,
     settings: Settings,
     highwayCanvas: HTMLCanvasElement,
@@ -510,7 +516,7 @@ export class PlayController {
   }
 
   private loop = () => {
-    if (this.disposed) return;
+    if (this.disposed || this.frames) return;
     this.raf = requestAnimationFrame(this.loop);
     if (this.frozen && this.phase === 'paused') {
       const now = performance.now();
@@ -518,7 +524,23 @@ export class PlayController {
       this.frozenFrame = now;
     }
     const t = this.now();
+    const f = this.advance(t, performance.now());
+    const stage = this.stage;
+    if (stage && f.stage) {
+      if (f.beat !== 'none') stage.beat(f.beat);
+      stage.input(f.stage);
+    }
+    this.highway.render(t, this.session, f.pulse, this.clock);
+    this.updateHud(t, f.beat);
+    this.onFrame?.(t);
+  };
 
+  /**
+   * Everything one frame moves on, but the drawing: the countdown, the session, the beats, the
+   * rumble and how loud the music is. `now` is the clock it runs on (ms): the real one, or a video's.
+   */
+  private advance(t: number, now: number) {
+    this.clock = now;
     if (this.phase === 'countdown') {
       const n = Math.ceil(this.startAt - t);
       if (t >= this.startAt) this.setPhase('playing');
@@ -538,43 +560,80 @@ export class PlayController {
     let beat: 'none' | 'beat' | 'downbeat' = 'none';
     while (this.lastBeat + 1 < beats.length && beats[this.lastBeat + 1] <= t) {
       this.lastBeat++;
-      this.beatAt = performance.now();
+      this.beatAt = now;
       beat = this.downbeats.has(this.lastBeat) ? 'downbeat' : 'beat';
     }
-    const stage = this.stage;
     if (this.phase === 'playing' && this.session.overdriveActive)
       this.rumble.overdriveTick(this.session.overdrive / this.odMeterAtStart, beat);
-    const now = performance.now();
     // Each beat swells the highway's light in quickly and lets it ebb away softly: a rise of a few
     // hundredths of a second and a long fall, on the clock, so it is the same at any frame rate and
     // dies away during a pause. The curve peaks at 1, about 0.05 s after the beat.
     const since = (now - this.beatAt) / 1000;
     const beatPulse = since >= 0 && since < 1.5 ? ((1 - Math.exp(-since / 0.02)) * Math.exp(-since / 0.2)) / 0.715 : 0;
-    const bands = this.meter.update(Math.min(0.1, (now - this.meterAt) / 1000));
+    const bands = this.meter.update(Math.min(0.1, Math.max(0, now - this.meterAt) / 1000));
     this.meterAt = now;
     const low = bands.low;
-    if (stage) {
+    let stage: StageInput | null = null;
+    if (this.stage) {
       const bar = barAt(this.barTimes, t);
       const busy = bar >= 0 ? (this.barLevels[bar] ?? 0.3) : 0.15;
-      if (beat !== 'none') stage.beat(beat);
-      stage.input({
+      stage = {
         intensity: busy * 0.75 + low * 0.25,
         overdrive: this.session.overdriveActive,
         barSeconds: this.chart.secondsPerBeat * 4,
         bands,
-      });
+      };
     }
-    this.highway.render(t, this.session, beatPulse * 0.5 + low * 0.5);
-    this.updateHud(t, beat);
-    this.onFrame?.(t);
-  };
+    return { beat, stage, pulse: beatPulse * 0.5 + low * 0.5 };
+  }
+
+  /**
+   * Makes a replay's video frame by frame, as fast as the frames can be drawn rather than as the
+   * song plays: the song is not played, its loudness is read from its samples, and everything moves
+   * on the video's clock. Call once, before the first `renderFrame`.
+   */
+  beginFrames(clock: number) {
+    if (!this.playback) return;
+    this.frames = true;
+    cancelAnimationFrame(this.raf);
+    this.meter.setAnalyser(this.bufferBands() as unknown as AnalyserNode);
+    this.meterAt = clock;
+    this.beatAt = -Infinity;
+    this.seekTo(REPLAY_START);
+    this.setPhase('playing');
+  }
+
+  /**
+   * Draws the frame of song time `t` at the video's clock `now` (ms), then hands `draw` the stage's
+   * picture of it (null without a stage) while the highway's is still on its canvas.
+   */
+  async renderFrame(t: number, now: number, draw: (stage: ImageBitmap | null) => void) {
+    if (this.disposed) return;
+    this.bands?.at(t);
+    const f = this.advance(t, now);
+    const picture = this.stage && f.stage ? await this.stage.step(now, f.stage, f.beat) : null;
+    if (this.disposed) return void picture?.close();
+    this.highway.render(t, this.session, f.pulse, now);
+    this.updateHud(t, f.beat);
+    draw(picture);
+  }
+
+  private bands: BufferAnalyser | null = null;
+  private bufferBands() {
+    const b = this.buffer;
+    this.bands ??= new BufferAnalyser({
+      sampleRate: b.sampleRate,
+      channels: Array.from({ length: b.numberOfChannels }, (_, i) => b.getChannelData(i)),
+    });
+    return this.bands;
+  }
 
   /**
    * Shows how the last note went on the tag beside the strike line. `delta` (seconds, negative =
    * early) moves the bar in the tag's little target above or below its middle.
    */
   private flashFeedback(text: string, kind: string, delta?: number) {
-    this.lastFeedback = { text, kind, at: performance.now() };
+    this.lastFeedback = { text, kind, at: this.clock };
     const el = this.hud.feedback;
     this.hud.feedbackWord.textContent = text;
     el.dataset.kind = kind;

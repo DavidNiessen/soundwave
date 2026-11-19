@@ -43,6 +43,11 @@ export type ToStage =
   | { type: 'debug'; id: number }
   /** Sends a copy of every frame drawn (`frame`) while on: for recording a video. */
   | { type: 'capture'; id: number; on: boolean }
+  /**
+   * Draws one frame of a video now, on the video's clock (`now`, ms), and sends it back (`frame`
+   * with the same `seq`). From the first step on the stage draws only when asked.
+   */
+  | { type: 'step'; id: number; seq: number; now: number; input: StageInput; beat: Beat | 'none' }
   | { type: 'dispose'; id: number };
 
 /** From the stage host to the page. */
@@ -56,5 +61,7 @@ export type FromStage =
   /** The stage could not be built (no WebGL on this canvas, say). */
   | { type: 'failed'; id: number; message: string; webgl: boolean }
   | { type: 'debug'; id: number; info: Record<string, unknown> }
-  /** A frame just drawn, while capture is on. */
-  | { type: 'frame'; id: number; frame: ImageBitmap };
+  /** A frame just drawn, while capture is on, or the one a `step` asked for (its `seq`). */
+  | { type: 'frame'; id: number; frame: ImageBitmap; seq?: number }
+  /** A `step` could not give a frame (the stage is not built). */
+  | { type: 'no-frame'; id: number; seq: number };
