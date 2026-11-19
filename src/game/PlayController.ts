@@ -65,6 +65,17 @@ export class PlayController {
   /** A replay's playback speed. */
   private rate = 1;
   private unwire: () => void = () => {};
+  /** Song time from the audio graph rather than the speakers (see AudioEngine.graphTime): a video is recorded. */
+  private readonly graphClock: boolean;
+  /** Takes the stage's frames while a video is recorded (see `captureStage`). */
+  private stageTaker: ((frame: ImageBitmap) => void) | null = null;
+  /** How the last note went, for a HUD drawn elsewhere (a video's): the word, its kind and when (performance.now ms). */
+  lastFeedback: { text: string; kind: string; at: number } | null = null;
+  /** Resolves once the highway can draw and the stage (when there is one) has drawn, or could not be built. */
+  readonly ready: Promise<void>;
+  private stageSettled: () => void = () => {};
+  /** Called after every frame is drawn, with its song time: a video takes the highway's picture then. */
+  onFrame: ((t: number) => void) | null = null;
   private readonly highway: Highway;
   /** How loud the song is in the bass, middle and treble: for the highway's glow and the stage. */
   private readonly meter = new BandMeter();
@@ -130,7 +141,11 @@ export class PlayController {
 
   /** Song time now, seconds (negative before the song starts). */
   get time() {
-    return this.engine.time();
+    return this.now();
+  }
+
+  private now() {
+    return this.graphClock ? this.engine.graphTime() : this.engine.time();
   }
 
   /** How long the song is, seconds. */
@@ -160,7 +175,10 @@ export class PlayController {
     stageHost?: HTMLElement,
     /** A recorded run to play back instead of taking input. */
     replay?: ReplayInputs,
+    /** `graphClock`: follow the audio graph's clock instead of what the speakers play (recording a video). */
+    options: { graphClock?: boolean } = {},
   ) {
+    this.graphClock = !!options.graphClock;
     engine.load(buffer);
     engine.offset = settings.offsetMs / 1000;
     engine.volume = settings.volume;
@@ -183,6 +201,8 @@ export class PlayController {
     this.meter.setAnalyser(engine.analyser);
     this.barLevels = barIntensity(chart);
     this.graphicsKey = JSON.stringify(resolveGraphics(settings.graphics));
+    const stageDrawn = stageHost ? new Promise<void>((resolve) => (this.stageSettled = resolve)) : Promise.resolve();
+    this.ready = this.highway.ready.then(() => stageDrawn);
     if (stageHost) {
       // Built once the highway is ready to draw: both compile their shaders in the same GPU process,
       // and the highway, which the player needs first, should not queue behind the stage's.
@@ -353,14 +373,17 @@ export class PlayController {
     const stage = new StageView(this.stageHost!, JSON.parse(this.graphicsKey), { mode: 'play', part: this.chart.part });
     if (this.isFrozen) stage.setRate('frozen');
     this.stage = stage;
+    if (this.stageTaker) stage.capture(this.stageTaker);
     stage.ready.then(
       () => {
         if (this.stage !== stage) return;
         if (this.shownStage !== stage) this.shownStage?.dispose();
         this.shownStage = stage;
+        this.stageSettled();
       },
       (err) => {
         console.warn('3D stage unavailable', err);
+        this.stageSettled();
         if (this.stage !== stage) return;
         stage.dispose();
         this.stage = this.shownStage;
@@ -388,7 +411,7 @@ export class PlayController {
 
   pause() {
     if (this.phase !== 'playing' && this.phase !== 'countdown') return;
-    this.engine.pause();
+    this.engine.pause(this.now());
     for (let l = 0; l < this.chart.lanes; l++) this.rumble.sustainEnd(l);
     this.rumble.overdriveEnd(true);
     this.setPhase('paused');
@@ -399,7 +422,7 @@ export class PlayController {
       if (this.phase === 'finished') this.seekTo(REPLAY_START);
       else if (this.phase !== 'paused') return;
       this.setPhase('playing');
-      await this.engine.play(this.engine.time(), 0.05, this.rate);
+      await this.engine.play(this.now(), 0.05, this.rate);
       return;
     }
     if (this.phase !== 'paused') return;
@@ -449,11 +472,32 @@ export class PlayController {
     return at;
   }
 
+  /**
+   * Hands every frame the stage draws to `take`, or stops with null (recording a video). A stage
+   * rebuilt meanwhile hands its frames over too.
+   */
+  captureStage(take: ((frame: ImageBitmap) => void) | null) {
+    this.stageTaker = take;
+    this.stage?.capture(take);
+    if (this.shownStage !== this.stage) this.shownStage?.capture(take);
+  }
+
+  /** Where the highway stands on its canvas (CSS pixels): the strike line, its foot and its width. */
+  hudLayout() {
+    const pos = this.highway.padScreenPositions();
+    if (!pos.length) return null;
+    const first = pos[0];
+    const last = pos[pos.length - 1];
+    const laneW = pos.length > 1 ? (last.x - first.x) / (pos.length - 1) : 90;
+    const foot = this.highway.footRow(Math.max(24, Math.min(46, window.innerHeight * 0.034)));
+    return { x: (first.x + last.x) / 2, y: first.y, foot: foot[0]?.y ?? first.y + 120, width: laneW * pos.length };
+  }
+
   /** A replay's playback speed (1 = as played). The song's pitch follows it. */
   async setRate(rate: number) {
     if (!this.playback || rate === this.rate) return;
     this.rate = rate;
-    if (this.phase === 'playing') await this.engine.play(this.engine.time(), 0.02, rate);
+    if (this.phase === 'playing') await this.engine.play(this.now(), 0.02, rate);
   }
 
   private finish() {
@@ -473,7 +517,7 @@ export class PlayController {
       if (now - this.frozenFrame < 500) return;
       this.frozenFrame = now;
     }
-    const t = this.engine.time();
+    const t = this.now();
 
     if (this.phase === 'countdown') {
       const n = Math.ceil(this.startAt - t);
@@ -522,6 +566,7 @@ export class PlayController {
     }
     this.highway.render(t, this.session, beatPulse * 0.5 + low * 0.5);
     this.updateHud(t, beat);
+    this.onFrame?.(t);
   };
 
   /**
@@ -529,6 +574,7 @@ export class PlayController {
    * early) moves the bar in the tag's little target above or below its middle.
    */
   private flashFeedback(text: string, kind: string, delta?: number) {
+    this.lastFeedback = { text, kind, at: performance.now() };
     const el = this.hud.feedback;
     this.hud.feedbackWord.textContent = text;
     el.dataset.kind = kind;

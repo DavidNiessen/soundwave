@@ -41,6 +41,8 @@ export type ToStage =
   | { type: 'overdrive'; id: number }
   | { type: 'finale'; id: number; seconds: number }
   | { type: 'debug'; id: number }
+  /** Sends a copy of every frame drawn (`frame`) while on: for recording a video. */
+  | { type: 'capture'; id: number; on: boolean }
   | { type: 'dispose'; id: number };
 
 /** From the stage host to the page. */
@@ -53,4 +55,6 @@ export type FromStage =
   | { type: 'shown'; id: number }
   /** The stage could not be built (no WebGL on this canvas, say). */
   | { type: 'failed'; id: number; message: string; webgl: boolean }
-  | { type: 'debug'; id: number; info: Record<string, unknown> };
+  | { type: 'debug'; id: number; info: Record<string, unknown> }
+  /** A frame just drawn, while capture is on. */
+  | { type: 'frame'; id: number; frame: ImageBitmap };

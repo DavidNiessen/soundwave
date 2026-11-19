@@ -19,6 +19,11 @@ interface Slot {
   lastFrozen: number;
   size: { width: number; height: number; dpr: number };
   disposed: boolean;
+  canvas: HTMLCanvasElement | OffscreenCanvas;
+  /** Every frame drawn is copied to the page (a video is being recorded). */
+  capture: boolean;
+  /** A copy is on its way: the next frame waits rather than pile copies up. */
+  copying: boolean;
 }
 
 /**
@@ -27,7 +32,7 @@ interface Slot {
  * holds up the menus, the highway or the input; where a worker cannot draw (no OffscreenCanvas with
  * WebGL), StageView runs the very same host on the page instead. `post` sends messages back.
  */
-export function createStageHost(post: (m: FromStage) => void) {
+export function createStageHost(post: (m: FromStage) => void, transfer: (m: FromStage, list: Transferable[]) => void = post) {
   const slots = new Map<number, Slot>();
   let visible = true;
   let looping = false;
@@ -42,13 +47,13 @@ export function createStageHost(post: (m: FromStage) => void) {
     nextFrame(loop);
     frames++;
     const now = performance.now();
-    for (const slot of slots.values()) {
+    for (const [id, slot] of slots) {
       if (!slot.stage) continue;
       if (slot.rate === 'frozen') {
         if (now - slot.lastFrozen < FROZEN_MS) continue;
         slot.lastFrozen = now;
       }
-      draw(slot);
+      draw(slot, id);
     }
   };
   const wake = () => {
@@ -56,12 +61,24 @@ export function createStageHost(post: (m: FromStage) => void) {
     looping = true;
     nextFrame(loop);
   };
-  const draw = (slot: Slot) => {
+  const draw = (slot: Slot, id?: number) => {
     const { intensity, overdrive, barSeconds, bands } = slot.input;
     const beat = slot.beat;
     slot.beat = 'none';
     slot.stage!.setBands(bands);
     slot.stage!.render({ beat, intensity, overdrive, barSeconds });
+    // Copied in the same task as it was drawn, while the picture is still in the canvas.
+    if (slot.capture && id !== undefined && !slot.copying) {
+      slot.copying = true;
+      createImageBitmap(slot.canvas).then(
+        (frame) => {
+          slot.copying = false;
+          if (slot.disposed || !slot.capture) frame.close();
+          else transfer({ type: 'frame', id, frame }, [frame]);
+        },
+        () => void (slot.copying = false),
+      );
+    }
   };
 
   // Loading progress for the page's loading screen.
@@ -76,6 +93,9 @@ export function createStageHost(post: (m: FromStage) => void) {
       lastFrozen: 0,
       size: { width: m.width, height: m.height, dpr: m.dpr },
       disposed: false,
+      canvas: m.canvas,
+      capture: false,
+      copying: false,
     };
     slots.set(m.id, slot);
     let stage: AuroraStage;
@@ -137,6 +157,9 @@ export function createStageHost(post: (m: FromStage) => void) {
         break;
       case 'finale':
         slot.stage?.finale(m.seconds);
+        break;
+      case 'capture':
+        slot.capture = m.on;
         break;
       case 'debug':
         if (slot.stage) post({ type: 'debug', id: m.id, info: { ...slot.stage.debugInfo(), frames, at: performance.now() } });
