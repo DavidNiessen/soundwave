@@ -6015,7 +6015,7 @@ a.btn {
   right: calc(1.6% + var(--safe-r));
   bottom: calc(3.5% + var(--safe-b));
   z-index: 5;
-  width: clamp(21rem, 29vw, 34rem);
+  width: clamp(22rem, 30vw, 34rem);
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
@@ -6053,18 +6053,22 @@ a.btn {
 /* Back on the left, the video and hiding the controls on the right. */
 .replay-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.3rem 0.5rem;
   padding-top: 0.45rem;
   border-top: 1px solid var(--line);
 }
 .replay-foot-end {
   display: flex;
-  gap: 0.35rem;
+  gap: 0.2rem;
+  margin-left: auto;
 }
 .replay-foot .btn {
-  padding-inline: 0.55rem 0.75rem;
+  gap: 0.4em;
+  padding-inline: 0.45rem 0.6rem;
+  font-size: 0.9rem;
 }
 .replay-what {
   flex: 1;
