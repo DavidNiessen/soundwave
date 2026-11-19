@@ -2,6 +2,7 @@ import {
   Clapperboard,
   Ellipsis,
   FilePlus2,
+  Film,
   Pin,
   Trash2,
   ListMusic,
@@ -172,6 +173,14 @@ export function HomeScreen({
                 icon: Ellipsis,
                 ...keysOf('home.replayOptions'),
                 run: () => replayCommands.current?.options(),
+              },
+              {
+                id: 'replay-export',
+                label: 'Export video',
+                icon: Film,
+                ...keysOf('home.replayExport'),
+                bar: false,
+                run: () => replayCommands.current?.exportVideo(),
               },
               {
                 id: 'replay-keep',

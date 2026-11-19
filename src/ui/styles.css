@@ -6368,6 +6368,159 @@ a.btn {
   }
 }
 
+/* Exporting a replay as a video: the settings, side by side choices like the lobby's. */
+.export-card {
+  gap: 0.6rem;
+}
+.export-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.2rem 0 0.3rem;
+}
+.export-row {
+  display: grid;
+  grid-template-columns: 6.2rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.6rem;
+}
+.export-label {
+  color: var(--ink-2);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+.export-options {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+}
+.export-option {
+  flex: 1;
+  min-height: calc(var(--target) - 0.4rem);
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--r-s);
+  color: var(--ink-2);
+  font-size: 0.9rem;
+  font-weight: 800;
+  white-space: nowrap;
+  transition:
+    background 0.16s,
+    color 0.16s;
+}
+.export-option.on {
+  background: var(--lit);
+  color: var(--lit-ink);
+}
+:root[data-input='mouse'] .export-option:not(.on):hover:not(:disabled) {
+  background: var(--row-hi);
+  color: var(--ink);
+}
+.export-option:disabled {
+  opacity: 0.45;
+}
+.export-summary {
+  font-size: 0.85rem;
+}
+.replay-export {
+  padding-inline: 0.55rem 0.75rem;
+}
+
+/* Recording: the replay plays out of sight at the video's size; what is shown is the video. */
+.export-screen {
+  position: absolute;
+  inset: 0;
+  background: #05030f;
+}
+.export-frame {
+  position: fixed;
+  left: 0;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+  overflow: hidden;
+}
+.export-view {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  justify-items: center;
+  gap: 1rem;
+  padding: calc(1rem + var(--safe-t)) calc(1rem + var(--safe-r)) calc(1rem + var(--safe-b)) calc(1rem + var(--safe-l));
+  background: radial-gradient(ellipse at 50% 0%, var(--deep), var(--night) 70%);
+}
+.export-preview {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  min-height: 0;
+  align-self: center;
+  border-radius: var(--r-m);
+  box-shadow:
+    0 0 0 1px var(--glass-edge),
+    0 30px 60px -20px rgb(0 0 0 / 0.8);
+}
+.export-panel {
+  width: min(36rem, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--r-l);
+  background: var(--panel);
+  box-shadow: inset 0 0 0 1px var(--glass-edge);
+}
+.export-status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+.export-rec {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.export-rec svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+.export-rec.recording svg {
+  color: var(--danger);
+  animation: replay-rec 1.4s ease-in-out infinite;
+}
+:root[data-motion='reduced'] .export-rec.recording svg {
+  animation: none;
+}
+.export-rec.saved svg {
+  color: var(--ok);
+}
+.export-time {
+  font-weight: 900;
+  font-style: italic;
+  font-variant-numeric: tabular-nums;
+}
+.export-meter {
+  height: 6px;
+}
+.export-meter > span {
+  background: linear-gradient(90deg, #b3306f, var(--pink));
+  transition: none;
+}
+@media (max-width: 560px) {
+  .export-row {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+}
+
 /* Narrow screens and touch: the controls run along the foot of the screen, over the deck, and step
    aside while the replay plays. The score moves to the top, as it does for touch. */
 @media (max-width: 760px) {

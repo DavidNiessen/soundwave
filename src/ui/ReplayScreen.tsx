@@ -1,4 +1,4 @@
-import { ArrowLeft, CircleDot, Eye, EyeOff, FastForward, Minus, Pause, Play, Plus, Rewind, RotateCcw, SkipBack } from 'lucide-react';
+import { ArrowLeft, CircleDot, Eye, EyeOff, FastForward, Film, Minus, Pause, Play, Plus, Rewind, RotateCcw, SkipBack } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getEngine } from '../audio/engine';
 import { playSfx } from '../audio/sfx';
@@ -27,6 +27,8 @@ interface Props {
   silent: boolean;
   settings: Settings;
   onBack(): void;
+  /** Asks how to export the replay as a video (it pauses first). */
+  onExport(): void;
 }
 
 /** The playback speeds, slowest first. */
@@ -70,7 +72,7 @@ const speedLabel = (r: number) => `${r}×`;
  * and overdrive. It can be paused, jumped through, played from the start and slowed down or sped
  * up. The controls step aside while it plays, and come back with any input.
  */
-export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, onBack }: Props) {
+export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, onBack, onExport }: Props) {
   const hints = useHints(settings);
   const mode = useInputMode();
   const settingsRef = useRef(settings);
@@ -209,6 +211,11 @@ export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, 
     setRateState(next);
     void c.setRate(next);
   }, []);
+  const exportVideo = () => {
+    ctrlRef.current?.pause();
+    setEnded(false);
+    onExport();
+  };
   const toggleControls = () => {
     if (away) wake();
     else sleep();
@@ -328,6 +335,7 @@ export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, 
       bar: false,
       run: () => seekBy(JUMP),
     },
+    { id: 'export', label: 'Export video', icon: Film, ...keysOf('replay.export'), bar: false, run: exportVideo },
     { id: 'restart', label: 'From the start', icon: SkipBack, ...keysOf('replay.restart'), bar: false, run: restart },
     {
       id: 'controls',
@@ -377,6 +385,11 @@ export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, 
               {what} · {replayDate(replay.date)}
             </span>
           </div>
+          <button type="button" className="btn small quiet replay-export" data-action="export" onClick={exportVideo}>
+            <Hint {...keysOf('replay.export')} {...hints} />
+            <Film strokeWidth={ICON_STROKE} aria-hidden />
+            Video
+          </button>
           <span className="replay-time" aria-hidden>
             <span ref={timeRef}>0:00</span>
             <span className="replay-total"> / {clock(duration)}</span>
@@ -509,6 +522,17 @@ export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, 
               >
                 <RotateCcw strokeWidth={ICON_STROKE} aria-hidden />
                 Watch again
+              </button>
+              <button
+                type="button"
+                className="btn wide"
+                onClick={() => {
+                  close();
+                  exportVideo();
+                }}
+              >
+                <Film strokeWidth={ICON_STROKE} aria-hidden />
+                Export video
               </button>
               <button type="button" className="btn wide" onClick={close}>
                 <Eye strokeWidth={ICON_STROKE} aria-hidden />

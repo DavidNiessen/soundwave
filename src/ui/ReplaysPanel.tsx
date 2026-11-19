@@ -1,4 +1,4 @@
-import { Clapperboard, Ellipsis, Pin, PinOff, Play, Settings as SettingsIcon, Trash2 } from 'lucide-react';
+import { Clapperboard, Ellipsis, Film, Pin, PinOff, Play, Settings as SettingsIcon, Trash2 } from 'lucide-react';
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
 import type { Settings } from '../game/settings';
 import { getInputMode, usesFocus } from '../input/inputMode';
@@ -15,6 +15,8 @@ import { keysOf } from '../input/bindings';
 /** What can be done with saved replays. */
 export interface ReplayActions {
   watch(replay: ReplayMeta): void;
+  /** Asks how to export the replay as a video. */
+  exportVideo(replay: ReplayMeta): void;
   /** Keeps a replay (it is never removed to make room) or lets it go again. */
   keep(replay: ReplayMeta, kept: boolean): Promise<void>;
   remove(replays: ReplayMeta[]): Promise<void>;
@@ -23,6 +25,7 @@ export interface ReplayActions {
 /** What the main menu's action bar does to the highlighted replay (see HomeScreen). */
 export interface ReplayCommands {
   options(): void;
+  exportVideo(): void;
   keep(): void;
   remove(): void;
 }
@@ -78,15 +81,21 @@ export function ReplaysPanel({ replays, songs, settings, actions, onSettings, co
   };
 
   // The action bar's shortcuts act on whichever replay is highlighted when they are pressed.
-  const latest = useRef<ReplayCommands>({ options() {}, keep() {}, remove() {} });
+  const latest = useRef<ReplayCommands>({ options() {}, exportVideo() {}, keep() {}, remove() {} });
   latest.current = {
     options: () => current && setMenu(current),
+    exportVideo: () => current && actions.exportVideo(current),
     keep: () => current && toggleKeep(current),
     remove: () => current && setAsking(current),
   };
   useImperativeHandle(
     commands,
-    () => ({ options: () => latest.current.options(), keep: () => latest.current.keep(), remove: () => latest.current.remove() }),
+    () => ({
+      options: () => latest.current.options(),
+      exportVideo: () => latest.current.exportVideo(),
+      keep: () => latest.current.keep(),
+      remove: () => latest.current.remove(),
+    }),
     [],
   );
 
@@ -187,6 +196,7 @@ export function ReplaysPanel({ replays, songs, settings, actions, onSettings, co
                 song={byId.get(current.songId)}
                 hints={hints}
                 onWatch={() => watch(current)}
+                onExport={() => actions.exportVideo(current)}
                 onKeep={() => toggleKeep(current)}
                 onDelete={() => setAsking(current)}
               />
@@ -219,6 +229,17 @@ export function ReplaysPanel({ replays, songs, settings, actions, onSettings, co
               >
                 <Play strokeWidth={ICON_STROKE} aria-hidden />
                 Watch
+              </button>
+              <button
+                type="button"
+                className="btn wide"
+                onClick={() => {
+                  close();
+                  actions.exportVideo(menu);
+                }}
+              >
+                <Film strokeWidth={ICON_STROKE} aria-hidden />
+                Export video
               </button>
               <button
                 type="button"
@@ -285,12 +306,13 @@ interface CardProps {
   song: SongMeta | undefined;
   hints: ReturnType<typeof useHints>;
   onWatch(): void;
+  onExport(): void;
   onKeep(): void;
   onDelete(): void;
 }
 
 /** The highlighted replay: how the run went, note by note, and what can be done with it. */
-function ReplayCard({ replay: r, song, hints, onWatch, onKeep, onDelete }: CardProps) {
+function ReplayCard({ replay: r, song, hints, onWatch, onExport, onKeep, onDelete }: CardProps) {
   const res = r.results;
   const Icon = PART_ICON[r.part];
   return (
@@ -347,6 +369,11 @@ function ReplayCard({ replay: r, song, hints, onWatch, onKeep, onDelete }: CardP
         <button type="button" className="btn primary" onClick={onWatch}>
           <Play strokeWidth={ICON_STROKE} aria-hidden />
           Watch
+        </button>
+        <button type="button" className="btn" data-action="replay-export" onClick={onExport}>
+          <Hint kbd={keysOf('home.replayExport').kbd} {...hints} />
+          <Film strokeWidth={ICON_STROKE} aria-hidden />
+          Video
         </button>
         <button type="button" className="btn" data-action="replay-keep" aria-pressed={r.kept} onClick={onKeep}>
           <Hint kbd={keysOf('home.replayKeep').kbd} {...hints} />
