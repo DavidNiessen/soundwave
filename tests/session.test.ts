@@ -179,3 +179,70 @@ describe('hold and release notes', () => {
     expect(s.results().releases).toEqual({ hit: 0, total: 1 });
   });
 });
+
+describe('one run, whatever the frame rate', () => {
+  // Twenty seconds: taps on every half second, a chord, sustains, a hold to let go on time, and a
+  // phrase early on that fills the overdrive meter.
+  const notes: Partial<Note>[] = [];
+  for (let i = 0; i < 36; i++) notes.push({ t: 1 + i * 0.5, lane: i % 3, phrase: i < 4 ? 0 : -1 });
+  // The holds have the fourth lane to themselves, so no tap ends one.
+  notes.push({ t: 4, lane: 3 }, { t: 6.25, lane: 3, dur: 2 }, { t: 9.25, lane: 3, dur: 1.5, release: true }, { t: 12.25, lane: 3, dur: 3 });
+  notes.sort((a, b) => a.t! - b.t! || a.lane! - b.lane!);
+  const song = chart(notes);
+
+  type Input = { t: number; kind: 'press' | 'release' | 'overdrive'; lane: number };
+  const inputs: Input[] = [];
+  song.notes.forEach((n, i) => {
+    if (n.dur === 0 && i % 7 === 5) return; // not played
+    const off = ((i * 37) % 11) * 0.012 - 0.06; // early and late, within the windows
+    inputs.push({ t: n.t + off, kind: 'press', lane: n.lane });
+    // Sustains are let go a little early, on time, or (the hold to let go on time) too late.
+    inputs.push({
+      t: n.dur > 0 ? n.t + n.dur + (n.release ? 0.3 : -0.2 + (i % 3) * 0.15) : n.t + off + 0.07,
+      kind: 'release',
+      lane: n.lane,
+    });
+  });
+  inputs.push({ t: 5.31, kind: 'press', lane: 2 }, { t: 3.47, kind: 'overdrive', lane: 0 }, { t: 7.013, kind: 'overdrive', lane: 0 });
+  inputs.sort((a, b) => a.t - b.t);
+
+  /** The run with the frames of a display at `fps`: the inputs since the last frame first, each at its own time. */
+  const play = (fps: number) => {
+    const s = new GameSession(song);
+    const events: string[] = [];
+    s.on((e) => events.push(e.type));
+    let next = 0;
+    for (let frame = 0; frame / fps <= 21; frame++) {
+      const t = frame / fps;
+      for (; next < inputs.length && inputs[next].t <= t; next++) {
+        const e = inputs[next];
+        if (e.kind === 'press') s.press(e.lane, e.t);
+        else if (e.kind === 'release') s.release(e.lane, e.t);
+        else s.activateOverdrive(e.t);
+      }
+      s.update(t);
+    }
+    s.update(Number.POSITIVE_INFINITY);
+    return { results: s.results(), events };
+  };
+
+  it('gives the same score, counts and events at 30, 60, 144 and 1000 frames a second', () => {
+    const reference = play(1000);
+    // The run has everything in it that could differ: sustain points, a miss, a stray press, overdrive.
+    expect(reference.results.counts.miss).toBeGreaterThan(1);
+    expect(reference.results.overdriveActivations).toBe(1);
+    expect(reference.events).toContain('overdrive-end');
+    expect(reference.events).toContain('release-miss');
+    for (const fps of [30, 60, 144]) expect(play(fps)).toEqual(reference);
+  });
+
+  it('shows the sustain points of a hold between two frames', () => {
+    const s = new GameSession(chart([{ t: 1, dur: 2 }]));
+    s.press(0, 1);
+    s.update(2);
+    // One beat is half a second: two beats held so far, at 25 points a beat.
+    expect(s.score).toBeCloseTo(50 + 2 * 25, 6);
+    s.update(4);
+    expect(s.results().score).toBe(50 + 4 * 25);
+  });
+});
