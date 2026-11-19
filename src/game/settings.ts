@@ -2,6 +2,7 @@ import { normalizeBindings, type BindingOverrides } from '../input/bindings';
 import type { GlyphStyle, PadInput } from '../input/pads';
 import { DEFAULT_REPLAY_LIMIT, REPLAY_LIMIT } from '../storage/replays';
 import { DEFAULT_GRAPHICS, normalizeGraphics, type GraphicsSettings } from './graphics';
+import { DEFAULT_VIDEO_EXPORT, normalizeVideoExport, type VideoExportSettings } from './videoExport';
 
 export interface Settings {
   /** How fast the track scrolls, as a multiple of the usual speed (see TRACK_SPEED). */
@@ -55,6 +56,8 @@ export interface Settings {
   replays: boolean;
   /** How many replays are kept; older ones make room for new ones (kept replays aside). */
   replayLimit: number;
+  /** How a replay's video is made (asked each time it is exported, remembered from the last). */
+  videoExport: VideoExportSettings;
   /** The desktop app looks for a new release when it starts. */
   checkUpdates: boolean;
   /** The desktop app shows what is being played on the player's Discord profile. */
@@ -134,6 +137,7 @@ export const DEFAULT_SETTINGS: Settings = {
   touchOverdriveSide: 'right',
   replays: true,
   replayLimit: DEFAULT_REPLAY_LIMIT,
+  videoExport: DEFAULT_VIDEO_EXPORT,
   checkUpdates: true,
   discordStatus: true,
   volumeDefaults: VOLUME_DEFAULTS,
@@ -177,6 +181,7 @@ export function normalizeSettings(raw: Partial<Settings>): Settings {
   s.checkUpdates = Boolean(s.checkUpdates);
   s.replays = Boolean(s.replays);
   s.replayLimit = clampReplayLimit(Number(s.replayLimit));
+  s.videoExport = normalizeVideoExport(s.videoExport);
   s.discordStatus = Boolean(s.discordStatus);
   if (typeof s.outputDevice !== 'string') s.outputDevice = '';
   if (typeof s.outputDeviceName !== 'string' || !s.outputDevice) s.outputDeviceName = '';
