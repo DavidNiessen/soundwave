@@ -6,6 +6,9 @@ import { StageView } from '../render/stage/StageView';
 import { barAt, barIntensity } from '../render/stage/LightShow';
 import { resolveGraphics } from './graphics';
 import { GameSession, type Results } from './GameSession';
+import { ReplayPlayback, ReplayRecorder, type ReplayInputs } from './replay';
+import { BufferAnalyser } from '../audio/bufferAnalyser';
+import type { StageInput } from '../render/stage/protocol';
 import { Rumbler } from '../input/rumble';
 import { barsLeft, findBreaks, type Break } from './breaks';
 import { GamepadInput, KeyboardInput, TouchInput, type InputHandlers } from './input';
@@ -40,16 +43,54 @@ export interface HudRefs {
 
 export type PlayPhase = 'countdown' | 'playing' | 'paused' | 'finished';
 
+/** A video frame on its way: what it was begun with, and the stage's picture of it, coming. */
+export interface FrameJob {
+  t: number;
+  now: number;
+  beat: 'none' | 'beat' | 'downbeat';
+  pulse: number;
+  picture: Promise<ImageBitmap | null>;
+}
+
 const LEAD_IN = 3;
+/** Song time a replay starts at: a moment before the song, without a countdown. */
+export const REPLAY_START = -1.5;
 /** How long the stage celebrates after the last note before the result comes up, seconds. */
 export const FINALE_SECONDS = 4;
 
 /**
  * Drives one play-through: audio, input, session and both renderers. Lives outside React
  * so the frame loop never triggers re-renders; React only sees phase changes and results.
+ *
+ * Played, every call into the session goes through a recorder, so the run can be saved as a
+ * replay. Given a recorded run instead, it plays that back: no input is taken, the session follows
+ * the recording, and the song can be paused, sped up, slowed down and jumped through (`seek`).
  */
 export class PlayController {
-  readonly session: GameSession;
+  /** The run's state. A replay that jumps gets a new one (see `seek`). */
+  session: GameSession;
+  /** Writes down every call into the session while a song is played (absent in a replay). */
+  private readonly recorder: ReplayRecorder | null = null;
+  /** The recorded run being played back (absent while a song is played). */
+  private readonly playback: ReplayPlayback | null = null;
+  /** A replay's playback speed. */
+  private rate = 1;
+  private unwire: () => void = () => {};
+  /** Song time from the audio graph rather than the speakers (see AudioEngine.graphTime): a video is recorded. */
+  private readonly graphClock: boolean;
+  /** Takes the stage's frames while a video is recorded (see `captureStage`). */
+  private stageTaker: ((frame: ImageBitmap) => void) | null = null;
+  /** How the last note went, for a HUD drawn elsewhere (a video's): the word, its kind and when (performance.now ms). */
+  lastFeedback: { text: string; kind: string; at: number } | null = null;
+  /** Resolves once the highway can draw and the stage (when there is one) has drawn, or could not be built. */
+  readonly ready: Promise<void>;
+  private stageSettled: () => void = () => {};
+  /** The clock of the frame being made (performance.now ms, or a video's own while it is made frame by frame). */
+  private clock = performance.now();
+  /** Frames are made one by one for a video (see `beginFrames`): the frame loop does not run. */
+  private frames = false;
+  /** Called after every frame is drawn, with its song time: a video takes the highway's picture then. */
+  onFrame: ((t: number) => void) | null = null;
   private readonly highway: Highway;
   /** How loud the song is in the bass, middle and treble: for the highway's glow and the stage. */
   private readonly meter = new BandMeter();
@@ -65,9 +106,9 @@ export class PlayController {
   /** The graphics the newest stage was built with, as JSON. */
   private graphicsKey = '';
   private readonly barLevels: number[];
-  private readonly input: KeyboardInput;
-  private readonly padInput: GamepadInput;
-  private readonly touchInput: TouchInput;
+  private readonly input: KeyboardInput | null = null;
+  private readonly padInput: GamepadInput | null = null;
+  private readonly touchInput: TouchInput | null = null;
   private readonly observer: ResizeObserver;
   private readonly rumble: Rumbler;
   private raf = 0;
@@ -113,35 +154,70 @@ export class PlayController {
     return Math.max(0, this.chart.duration - this.engine.time()) / this.engine.playbackRate;
   }
 
+  /** Song time now, seconds (negative before the song starts). */
+  get time() {
+    return this.now();
+  }
+
+  private now() {
+    return this.graphClock ? this.engine.graphTime() : this.engine.time();
+  }
+
+  /** How long the song is, seconds. */
+  get duration() {
+    return Math.max(this.chart.duration, this.engine.duration, this.playback?.end ?? 0);
+  }
+
+  get playbackRate() {
+    return this.rate;
+  }
+
+  get currentPhase() {
+    return this.phase;
+  }
+
   onPhase: (p: PlayPhase, countdown?: number) => void = () => {};
-  onFinish: (r: Results) => void = () => {};
+  /** The song is over: how it went, and the run as recorded (absent in a replay). */
+  onFinish: (r: Results, inputs?: ReplayInputs) => void = () => {};
 
   constructor(
     private readonly engine: AudioEngine,
-    buffer: AudioBuffer,
+    private readonly buffer: AudioBuffer,
     private readonly chart: Chart,
     settings: Settings,
     highwayCanvas: HTMLCanvasElement,
     private readonly hud: HudRefs,
     stageHost?: HTMLElement,
+    /** A recorded run to play back instead of taking input. */
+    replay?: ReplayInputs,
+    /** `graphClock`: follow the audio graph's clock instead of what the speakers play (recording a video). */
+    options: { graphClock?: boolean } = {},
   ) {
+    this.graphClock = !!options.graphClock;
     engine.load(buffer);
     engine.offset = settings.offsetMs / 1000;
     engine.volume = settings.volume;
     engine.onEnded = () => this.finish();
 
     this.downbeats = new Set(chart.downbeats);
-    this.session = new GameSession(chart);
+    if (replay) {
+      this.playback = new ReplayPlayback(chart, replay);
+      this.session = this.playback.session;
+    } else {
+      this.session = new GameSession(chart);
+      this.recorder = new ReplayRecorder(this.session);
+    }
     // In development the running game can be reached from the console (to start overdrive, say).
     if (import.meta.env.DEV) (window as unknown as { __play?: PlayController }).__play = this;
     this.highway = new Highway(highwayCanvas, chart);
     this.highway.speed = highwaySpeed(settings.trackSpeed);
     this.breaks = findBreaks(chart);
     this.barTimes = chart.downbeats.map((i) => chart.beats[i]).filter((x) => x !== undefined);
-    this.highway.attach(this.session);
     this.meter.setAnalyser(engine.analyser);
     this.barLevels = barIntensity(chart);
     this.graphicsKey = JSON.stringify(resolveGraphics(settings.graphics));
+    const stageDrawn = stageHost ? new Promise<void>((resolve) => (this.stageSettled = resolve)) : Promise.resolve();
+    this.ready = this.highway.ready.then(() => stageDrawn);
     if (stageHost) {
       // Built once the highway is ready to draw: both compile their shaders in the same GPU process,
       // and the highway, which the player needs first, should not queue behind the stage's.
@@ -153,45 +229,31 @@ export class PlayController {
     }
 
     const padBindings = chart.lanes === 5 ? settings.pad5 : settings.pad4;
-    this.rumble = new Rumbler(settings, chart.lanes, padBindings);
-    this.session.on((e) => {
-      if (e.type === 'hit') {
-        this.flashFeedback(e.grade.toUpperCase(), e.grade, e.delta);
-        this.rumble.hit(e.lane, e.grade);
-        if (chart.notes[e.noteIndex].dur > 0) this.rumble.sustainStart(e.lane);
-      } else if (e.type === 'miss') {
-        this.flashFeedback('MISS', 'miss');
-        this.rumble.miss(e.lane);
-      } else if (e.type === 'release') {
-        this.flashFeedback(e.grade.toUpperCase(), e.grade, e.delta);
-        this.rumble.hit(e.lane, e.grade);
-      } else if (e.type === 'release-miss') {
-        this.flashFeedback(e.early ? 'TOO EARLY' : 'LET GO!', 'miss');
-        this.rumble.miss(e.lane);
-      } else if (e.type === 'sustain-end') this.rumble.sustainEnd(e.lane);
-      else if (e.type === 'overdrive-start') {
-        this.stage?.overdriveStart();
-        this.odMeterAtStart = Math.max(this.session.overdrive, 0.01);
-        this.rumble.overdrive();
-      } else if (e.type === 'overdrive-end') this.rumble.overdriveEnd();
-      else if (e.type === 'phrase-complete') {
-        this.flashFeedback('CHARGED', 'od');
-        this.rumble.phraseComplete();
-      }
-    });
+    // A replay is watched, not played: the controller stays still.
+    this.rumble = new Rumbler(this.rumbleSettings(settings), chart.lanes, padBindings);
+    this.wire();
 
+    // The canvas changes size with the window and when the touch pads take the bottom of the screen.
+    this.drawTimeline();
+    this.observer = new ResizeObserver(() => this.resize());
+    this.observer.observe(highwayCanvas);
+    window.addEventListener('resize', this.resize);
+    this.placeKeys();
+    if (this.playback) return;
+
+    const recorder = this.recorder!;
     const keys = chart.lanes === 5 ? settings.keys5 : settings.keys4;
     const handlers: InputHandlers = {
       press: (lane, ts) => {
         if (this.phase !== 'playing') return;
-        this.session.press(lane, this.engine.time(ts));
+        recorder.press(lane, this.engine.time(ts));
       },
       release: (lane, ts) => {
         if (this.phase !== 'playing') return;
-        this.session.release(lane, this.engine.time(ts));
+        recorder.release(lane, this.engine.time(ts));
       },
       overdrive: () => {
-        if (this.phase === 'playing') this.session.activateOverdrive();
+        if (this.phase === 'playing') recorder.overdrive(this.engine.time());
       },
       pause: () => {
         // With the settings open over the pause menu, Esc and the pause button belong to them.
@@ -219,13 +281,42 @@ export class PlayController {
       },
     );
     hud.overdriveButton.addEventListener('pointerdown', this.overdrivePress);
+  }
 
-    // The canvas changes size with the window and when the touch pads take the bottom of the screen.
-    this.drawTimeline();
-    this.observer = new ResizeObserver(() => this.resize());
-    this.observer.observe(highwayCanvas);
-    window.addEventListener('resize', this.resize);
-    this.placeKeys();
+  private rumbleSettings(s: Settings): Settings {
+    return this.playback ? { ...s, rumble: 'off' } : s;
+  }
+
+  /** Listens to the session for the feedback tag, the rumble, the stage and the highway. */
+  private wire() {
+    this.unwire();
+    const chart = this.chart;
+    this.highway.attach(this.session);
+    this.unwire = this.session.on((e) => {
+      if (e.type === 'hit') {
+        this.flashFeedback(e.grade.toUpperCase(), e.grade, e.delta);
+        this.rumble.hit(e.lane, e.grade);
+        if (chart.notes[e.noteIndex].dur > 0) this.rumble.sustainStart(e.lane);
+      } else if (e.type === 'miss') {
+        this.flashFeedback('MISS', 'miss');
+        this.rumble.miss(e.lane);
+      } else if (e.type === 'release') {
+        this.flashFeedback(e.grade.toUpperCase(), e.grade, e.delta);
+        this.rumble.hit(e.lane, e.grade);
+      } else if (e.type === 'release-miss') {
+        this.flashFeedback(e.early ? 'TOO EARLY' : 'LET GO!', 'miss');
+        this.rumble.miss(e.lane);
+      } else if (e.type === 'sustain-end') this.rumble.sustainEnd(e.lane);
+      else if (e.type === 'overdrive-start') {
+        this.stage?.overdriveStart();
+        this.odMeterAtStart = Math.max(this.session.overdrive, 0.01);
+        this.rumble.overdrive();
+      } else if (e.type === 'overdrive-end') this.rumble.overdriveEnd();
+      else if (e.type === 'phrase-complete') {
+        this.flashFeedback('CHARGED', 'od');
+        this.rumble.phraseComplete();
+      }
+    });
   }
 
   private readonly resize = () => {
@@ -235,7 +326,7 @@ export class PlayController {
 
   private readonly overdrivePress = (e: Event) => {
     e.preventDefault();
-    if (this.phase === 'playing') this.session.activateOverdrive();
+    if (this.phase === 'playing') this.recorder?.overdrive(this.engine.time());
   };
 
   /** Lays the highway out again after the layout changed without the canvas changing size (another input in use). */
@@ -243,29 +334,10 @@ export class PlayController {
     this.resize();
   }
 
-  /**
-   * The timeline's shape: thick where there are notes to play, a thin line through every longer
-   * stretch without any (the intro, a break, the fade-out).
-   */
+  /** The timeline's shape (see timelineShape). */
   private drawTimeline() {
-    const d = this.chart.duration;
-    if (!(d > 0)) return;
-    const min = Math.max(4, d * 0.02);
-    const pct = (t: number) => `${((Math.min(d, Math.max(0, t)) / d) * 100).toFixed(2)}%`;
-    let css = 'linear-gradient(to right';
-    let free = 0;
-    let from = 0;
-    const quiet = (a: number, b: number) => {
-      if (b - a < min) return;
-      css += `, #000 ${pct(from)} ${pct(a)}, transparent ${pct(a)} ${pct(b)}`;
-      from = b;
-    };
-    for (const n of this.chart.notes) {
-      quiet(free, n.t);
-      free = Math.max(free, n.t + n.dur);
-    }
-    quiet(free, d);
-    this.hud.timeline.style.setProperty('--segments', `${css}, #000 ${pct(from)} 100%)`);
+    const shape = timelineShape(this.chart);
+    if (shape) this.hud.timeline.style.setProperty('--segments', shape);
   }
 
   /** Puts the lane labels on the deck under their lanes and tells the HUD where the highway is. */
@@ -298,7 +370,7 @@ export class PlayController {
     this.engine.offset = s.offsetMs / 1000;
     this.engine.volume = s.volume;
     this.highway.speed = highwaySpeed(s.trackSpeed);
-    this.rumble.update(s);
+    this.rumble.update(this.rumbleSettings(s));
     const key = JSON.stringify(resolveGraphics(s.graphics));
     if (key === this.graphicsKey) return;
     this.graphicsKey = key;
@@ -316,14 +388,17 @@ export class PlayController {
     const stage = new StageView(this.stageHost!, JSON.parse(this.graphicsKey), { mode: 'play', part: this.chart.part });
     if (this.isFrozen) stage.setRate('frozen');
     this.stage = stage;
+    if (this.stageTaker) stage.capture(this.stageTaker);
     stage.ready.then(
       () => {
         if (this.stage !== stage) return;
         if (this.shownStage !== stage) this.shownStage?.dispose();
         this.shownStage = stage;
+        this.stageSettled();
       },
       (err) => {
         console.warn('3D stage unavailable', err);
+        this.stageSettled();
         if (this.stage !== stage) return;
         stage.dispose();
         this.stage = this.shownStage;
@@ -333,6 +408,14 @@ export class PlayController {
 
   /** Starts the run with its countdown. `from`: song time of its first moment, for a chart tested from the middle. */
   async start(from = 0) {
+    if (this.playback) {
+      // A replay starts straight away, a moment before the song.
+      this.seekTo(REPLAY_START);
+      this.setPhase('playing');
+      await this.engine.play(REPLAY_START, 0.05, this.rate);
+      this.loop();
+      return;
+    }
     this.startAt = Math.max(0, from);
     this.lastBeat = -1;
     while (this.lastBeat + 1 < this.chart.beats.length && this.chart.beats[this.lastBeat + 1] <= this.startAt - LEAD_IN) this.lastBeat++;
@@ -343,17 +426,24 @@ export class PlayController {
 
   pause() {
     if (this.phase !== 'playing' && this.phase !== 'countdown') return;
-    this.engine.pause();
+    this.engine.pause(this.now());
     for (let l = 0; l < this.chart.lanes; l++) this.rumble.sustainEnd(l);
     this.rumble.overdriveEnd(true);
     this.setPhase('paused');
   }
 
   async resume() {
+    if (this.playback) {
+      if (this.phase === 'finished') this.seekTo(REPLAY_START);
+      else if (this.phase !== 'paused') return;
+      this.setPhase('playing');
+      await this.engine.play(this.now(), 0.05, this.rate);
+      return;
+    }
     if (this.phase !== 'paused') return;
     // Rewind slightly so the player can re-enter the groove.
     const at = Math.max(this.startAt - LEAD_IN, this.engine.time() - 1.5);
-    this.session.dropHolds();
+    this.recorder!.dropHolds(this.engine.time());
     await this.engine.play(at, 0.05);
     this.highway.reset();
     this.lastCount = -1;
@@ -367,24 +457,99 @@ export class PlayController {
     this.onPhase(p, countdown);
   }
 
+  /**
+   * A replay jumps to song time `t`: the session is rebuilt as it stood then, without a sound or a
+   * flash for what was skipped, and the song carries on from there (or stays paused).
+   */
+  async seek(t: number) {
+    if (!this.playback) return;
+    const at = this.seekTo(t);
+    if (this.phase === 'finished') {
+      this.engine.pause();
+      this.setPhase('paused');
+    }
+    if (this.phase === 'playing') await this.engine.play(at, 0.02, this.rate);
+    else await this.engine.seek(at);
+  }
+
+  /** Puts the replay's session, the highway and the HUD where they stand at song time `t`. */
+  private seekTo(t: number): number {
+    const at = Math.max(REPLAY_START, Math.min(this.playback!.end, t));
+    this.session = this.playback!.seek(at);
+    this.wire();
+    this.highway.reset();
+    this.lastBeat = -1;
+    while (this.lastBeat + 1 < this.chart.beats.length && this.chart.beats[this.lastBeat + 1] <= at) this.lastBeat++;
+    this.hud.feedback.classList.remove('pop');
+    // Everything on the HUD is drawn afresh for the new session.
+    for (const k of Object.keys(this.hudCache) as (keyof typeof this.hudCache)[]) if (k !== 'odActive') this.hudCache[k] = -1;
+    this.hudCache.odActive = !this.session.overdriveActive;
+    return at;
+  }
+
+  /**
+   * Hands every frame the stage draws to `take`, or stops with null (recording a video). A stage
+   * rebuilt meanwhile hands its frames over too.
+   */
+  captureStage(take: ((frame: ImageBitmap) => void) | null) {
+    this.stageTaker = take;
+    this.stage?.capture(take);
+    if (this.shownStage !== this.stage) this.shownStage?.capture(take);
+  }
+
+  /** Where the highway stands on its canvas (CSS pixels): the strike line, its foot and its width. */
+  hudLayout() {
+    const pos = this.highway.padScreenPositions();
+    if (!pos.length) return null;
+    const first = pos[0];
+    const last = pos[pos.length - 1];
+    const laneW = pos.length > 1 ? (last.x - first.x) / (pos.length - 1) : 90;
+    const foot = this.highway.footRow(Math.max(24, Math.min(46, window.innerHeight * 0.034)));
+    return { x: (first.x + last.x) / 2, y: first.y, foot: foot[0]?.y ?? first.y + 120, width: laneW * pos.length };
+  }
+
+  /** A replay's playback speed (1 = as played). The song's pitch follows it. */
+  async setRate(rate: number) {
+    if (!this.playback || rate === this.rate) return;
+    this.rate = rate;
+    if (this.phase === 'playing') await this.engine.play(this.now(), 0.02, rate);
+  }
+
   private finish() {
     if (this.phase === 'finished') return;
-    this.session.update(Number.POSITIVE_INFINITY);
+    if (this.playback) this.playback.finish();
+    else this.recorder!.update(Number.POSITIVE_INFINITY);
     this.setPhase('finished');
     this.stage?.finale(FINALE_SECONDS);
-    this.onFinish(this.session.results());
+    this.onFinish(this.session.results(), this.recorder?.take());
   }
 
   private loop = () => {
-    if (this.disposed) return;
+    if (this.disposed || this.frames) return;
     this.raf = requestAnimationFrame(this.loop);
     if (this.frozen && this.phase === 'paused') {
       const now = performance.now();
       if (now - this.frozenFrame < 500) return;
       this.frozenFrame = now;
     }
-    const t = this.engine.time();
+    const t = this.now();
+    const f = this.advance(t, performance.now());
+    const stage = this.stage;
+    if (stage && f.stage) {
+      if (f.beat !== 'none') stage.beat(f.beat);
+      stage.input(f.stage);
+    }
+    this.highway.render(t, this.session, f.pulse, this.clock);
+    this.updateHud(t, f.beat);
+    this.onFrame?.(t);
+  };
 
+  /**
+   * Everything one frame moves on, but the drawing: the countdown, the session, the beats, the
+   * rumble and how loud the music is. `now` is the clock it runs on (ms): the real one, or a video's.
+   */
+  private advance(t: number, now: number) {
+    this.clock = now;
     if (this.phase === 'countdown') {
       const n = Math.ceil(this.startAt - t);
       if (t >= this.startAt) this.setPhase('playing');
@@ -394,7 +559,8 @@ export class PlayController {
       }
     }
     if (this.phase === 'playing') {
-      this.session.update(t);
+      if (this.playback) this.playback.advance(t);
+      else this.recorder!.update(t);
       if (t > this.chart.duration + 0.5 && t > this.engine.duration) this.finish();
     }
 
@@ -403,41 +569,90 @@ export class PlayController {
     let beat: 'none' | 'beat' | 'downbeat' = 'none';
     while (this.lastBeat + 1 < beats.length && beats[this.lastBeat + 1] <= t) {
       this.lastBeat++;
-      this.beatAt = performance.now();
+      this.beatAt = now;
       beat = this.downbeats.has(this.lastBeat) ? 'downbeat' : 'beat';
     }
-    const stage = this.stage;
     if (this.phase === 'playing' && this.session.overdriveActive)
       this.rumble.overdriveTick(this.session.overdrive / this.odMeterAtStart, beat);
-    const now = performance.now();
     // Each beat swells the highway's light in quickly and lets it ebb away softly: a rise of a few
     // hundredths of a second and a long fall, on the clock, so it is the same at any frame rate and
     // dies away during a pause. The curve peaks at 1, about 0.05 s after the beat.
     const since = (now - this.beatAt) / 1000;
     const beatPulse = since >= 0 && since < 1.5 ? ((1 - Math.exp(-since / 0.02)) * Math.exp(-since / 0.2)) / 0.715 : 0;
-    const bands = this.meter.update(Math.min(0.1, (now - this.meterAt) / 1000));
+    const bands = this.meter.update(Math.min(0.1, Math.max(0, now - this.meterAt) / 1000));
     this.meterAt = now;
     const low = bands.low;
-    if (stage) {
+    let stage: StageInput | null = null;
+    if (this.stage) {
       const bar = barAt(this.barTimes, t);
       const busy = bar >= 0 ? (this.barLevels[bar] ?? 0.3) : 0.15;
-      if (beat !== 'none') stage.beat(beat);
-      stage.input({
+      stage = {
         intensity: busy * 0.75 + low * 0.25,
         overdrive: this.session.overdriveActive,
         barSeconds: this.chart.secondsPerBeat * 4,
         bands,
-      });
+      };
     }
-    this.highway.render(t, this.session, beatPulse * 0.5 + low * 0.5);
-    this.updateHud(t, beat);
-  };
+    return { beat, stage, pulse: beatPulse * 0.5 + low * 0.5 };
+  }
+
+  /**
+   * Makes a replay's video frame by frame, as fast as the frames can be drawn rather than as the
+   * song plays: the song is not played, its loudness is read from its samples, and everything moves
+   * on the video's clock. Call once, before the first `renderFrame`.
+   */
+  beginFrames(clock: number) {
+    if (!this.playback) return;
+    this.frames = true;
+    cancelAnimationFrame(this.raf);
+    this.meter.setAnalyser(this.bufferBands() as unknown as AnalyserNode);
+    this.meterAt = clock;
+    this.beatAt = -Infinity;
+    this.seekTo(REPLAY_START);
+    this.setPhase('playing');
+  }
+
+  /**
+   * Moves the replay on to the frame of song time `t` at the video's clock `now` (ms), and asks the
+   * stage for its picture of it, which it draws in its own worker while the page carries on with
+   * the frame before (see `drawFrame`).
+   */
+  beginFrame(t: number, now: number): FrameJob {
+    this.bands?.at(t);
+    const f = this.advance(t, now);
+    const picture = this.stage && f.stage && !this.disposed ? this.stage.step(now, f.stage, f.beat) : Promise.resolve(null);
+    return { t, now, beat: f.beat, pulse: f.pulse, picture };
+  }
+
+  /**
+   * Draws a frame begun with `beginFrame`: the highway and the HUD at once (`onHighway` is called
+   * while the highway's picture is on its canvas), then resolves with the stage's picture (null
+   * without a stage).
+   */
+  drawFrame(job: FrameJob, onHighway: () => void): Promise<ImageBitmap | null> {
+    if (this.disposed) return Promise.resolve(null);
+    this.highway.render(job.t, this.session, job.pulse, job.now);
+    this.updateHud(job.t, job.beat);
+    onHighway();
+    return job.picture;
+  }
+
+  private bands: BufferAnalyser | null = null;
+  private bufferBands() {
+    const b = this.buffer;
+    this.bands ??= new BufferAnalyser({
+      sampleRate: b.sampleRate,
+      channels: Array.from({ length: b.numberOfChannels }, (_, i) => b.getChannelData(i)),
+    });
+    return this.bands;
+  }
 
   /**
    * Shows how the last note went on the tag beside the strike line. `delta` (seconds, negative =
    * early) moves the bar in the tag's little target above or below its middle.
    */
   private flashFeedback(text: string, kind: string, delta?: number) {
+    this.lastFeedback = { text, kind, at: this.clock };
     const el = this.hud.feedback;
     this.hud.feedbackWord.textContent = text;
     el.dataset.kind = kind;
@@ -546,9 +761,10 @@ export class PlayController {
     window.removeEventListener('resize', this.resize);
     this.observer.disconnect();
     this.hud.overdriveButton.removeEventListener('pointerdown', this.overdrivePress);
-    this.touchInput.dispose();
-    this.input.dispose();
-    this.padInput.dispose();
+    this.unwire();
+    this.touchInput?.dispose();
+    this.input?.dispose();
+    this.padInput?.dispose();
     this.rumble.dispose();
     this.engine.stop();
     this.engine.onEnded = null;
@@ -556,6 +772,31 @@ export class PlayController {
     this.stage?.dispose();
     this.shownStage?.dispose();
   }
+}
+
+/**
+ * A song's timeline as a CSS mask: thick where there are notes to play, a thin line through every
+ * longer stretch without any (the intro, a break, the fade-out). Null for a song of no length.
+ */
+export function timelineShape(chart: Chart, length = chart.duration): string | null {
+  const d = length;
+  if (!(d > 0)) return null;
+  const min = Math.max(4, d * 0.02);
+  const pct = (t: number) => `${((Math.min(d, Math.max(0, t)) / d) * 100).toFixed(2)}%`;
+  let css = 'linear-gradient(to right';
+  let free = 0;
+  let from = 0;
+  const quiet = (a: number, b: number) => {
+    if (b - a < min) return;
+    css += `, #000 ${pct(from)} ${pct(a)}, transparent ${pct(a)} ${pct(b)}`;
+    from = b;
+  };
+  for (const n of chart.notes) {
+    quiet(free, n.t);
+    free = Math.max(free, n.t + n.dur);
+  }
+  quiet(free, d);
+  return `${css}, #000 ${pct(from)} 100%)`;
 }
 
 function reducedMotion(): boolean {

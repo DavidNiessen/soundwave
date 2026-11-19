@@ -443,11 +443,15 @@ export class AuroraStage {
     this.camera.updateProjectionMatrix();
   }
 
-  /** One frame. Respects the frame-rate cap and adapts the resolution when frames run long. */
-  render(f: StageFrame) {
+  /**
+   * One frame. Respects the frame-rate cap and adapts the resolution when frames run long; a frame
+   * of a video (`f.now` given) is drawn on that clock, always, and at the resolution set.
+   */
+  render(f: StageFrame & { now?: number }) {
     if (this.disposed) return;
-    const now = performance.now();
-    this.frameAvg += (Math.min(100, now - this.lastFrame) - this.frameAvg) * 0.05;
+    const exact = f.now !== undefined;
+    const now = f.now ?? performance.now();
+    if (!exact) this.frameAvg += (Math.min(100, now - this.lastFrame) - this.frameAvg) * 0.05;
     this.lastFrame = now;
     if (f.beat !== 'none') {
       const t = now / 1000;
@@ -461,10 +465,10 @@ export class AuroraStage {
         : f.beat === 'beat' || this.pendingBeat === 'beat'
           ? 'beat'
           : 'none';
-    if (this.g.fpsCap && now - this.lastRender < 1000 / this.g.fpsCap - 2) return;
+    if (!exact && this.g.fpsCap && now - this.lastRender < 1000 / this.g.fpsCap - 2) return;
     const dt = Math.min(0.1, (now - (this.lastRender || now)) / 1000) || 1 / 60;
     this.lastRender = now;
-    this.adaptResolution(dt);
+    if (!exact) this.adaptResolution(dt);
     const beat = this.pendingBeat;
     this.pendingBeat = 'none';
     // The clock everything moves to runs by itself at the music's tempo and is drawn toward each

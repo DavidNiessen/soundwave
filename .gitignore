@@ -18,10 +18,6 @@ public/ort/
 local-audio/
 debug-annotations/
 
-# Design process scratch (review captures, local roll data)
-.impeccable/review/
-.impeccable/questions/
-
 # Characters built from downloaded files (tools/stage/aurora/build_people.py): not redistributable
 public/stage/aurora/local/
 

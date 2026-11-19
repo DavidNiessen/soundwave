@@ -2,6 +2,7 @@ import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type { StemName } from '../analysis/types';
 import type { Difficulty, Part } from '../chart/types';
 import type { SongEdits } from '../editor/edits';
+import { replaysToPrune, type Replay, type ReplayData, type ReplayMeta } from './replays';
 import { soundwaveAudio } from './soundwaveFile';
 
 export interface SongMeta {
@@ -44,6 +45,10 @@ interface SoundwaveDB extends DBSchema {
   stems: { key: string; value: { key: string; songId: string; name: StemName; blob: Blob }; indexes: { songId: string } };
   /** What the track editor made for a song: hand-edited charts and their beat grid, keyed by song id. */
   edits: { key: string; value: { songId: string; data: SongEdits } };
+  /** Saved replays, for their list (src/storage/replays.ts). */
+  replays: { key: string; value: ReplayMeta; indexes: { date: number } };
+  /** Each saved replay's chart and inputs, read only to play it. */
+  replayData: { key: string; value: ReplayData };
 }
 
 /** The library cannot be opened because the game is also open somewhere else, on an older version of it. */
@@ -61,7 +66,7 @@ function db() {
   // without a word, storage fails with the reason until the way is clear.
   let blocked: () => void = () => {};
   const gate = new Promise<never>((_, reject) => (blocked = () => reject(new StorageBlockedError())));
-  const opening = openDB<SoundwaveDB>('soundwave', 4, {
+  const opening = openDB<SoundwaveDB>('soundwave', 5, {
     blocked,
     // A newer version of the game wants to upgrade the library: this one lets go of it.
     blocking() {
@@ -81,6 +86,10 @@ function db() {
       if (oldVersion < 2) d.createObjectStore('stems', { keyPath: 'key' }).createIndex('songId', 'songId');
       // (Version 3 added a store for a developer tool that is gone; libraries that have it keep it, unused.)
       if (oldVersion < 4) d.createObjectStore('edits', { keyPath: 'songId' });
+      if (oldVersion < 5) {
+        d.createObjectStore('replays', { keyPath: 'id' }).createIndex('date', 'date');
+        d.createObjectStore('replayData', { keyPath: 'id' });
+      }
     },
   });
   const guarded = Promise.race([opening, gate]);
@@ -99,8 +108,8 @@ function db() {
 }
 
 /**
- * Deletes the whole library: every song and its file, analyses, stems, hand-edited charts and best
- * scores. The connection here is closed first; another tab or window still holding one blocks it.
+ * Deletes the whole library: every song and its file, analyses, stems, hand-edited charts, best
+ * scores and replays. The connection here is closed first; another tab or window still holding one blocks it.
  */
 export async function deleteLibrary(): Promise<void> {
   const open = dbPromise;
@@ -231,4 +240,67 @@ export async function submitScore(s: Omit<BestScore, 'key' | 'date'>): Promise<n
   const prev = await d.get('scores', key);
   if (!prev || s.score > prev.score) await d.put('scores', { ...s, key, date: Date.now() });
   return prev?.score;
+}
+
+/* Replays ---------------------------------------------------------------------------------- */
+
+/** Every saved replay, newest first. */
+export async function listReplays(): Promise<ReplayMeta[]> {
+  return (await (await db()).getAllFromIndex('replays', 'date')).reverse();
+}
+
+export async function getReplayData(id: string): Promise<ReplayData | undefined> {
+  return (await db()).get('replayData', id);
+}
+
+/** A replay whole, as a backup carries it. */
+export async function getReplay(id: string): Promise<Replay | undefined> {
+  const d = await db();
+  const [meta, data] = await Promise.all([d.get('replays', id), d.get('replayData', id)]);
+  return meta && data ? { meta, data } : undefined;
+}
+
+/**
+ * Saves a replay, then removes the oldest beyond `limit` (kept ones never go). A replay with an id
+ * already saved is left as it is. Resolves to whether it was added.
+ */
+export async function putReplay({ meta, data }: Replay, limit?: number): Promise<boolean> {
+  const d = await db();
+  const tx = d.transaction(['replays', 'replayData'], 'readwrite');
+  const had = await tx.objectStore('replays').get(meta.id);
+  if (!had) await Promise.all([tx.objectStore('replays').put(meta), tx.objectStore('replayData').put({ ...data, id: meta.id })]);
+  await tx.done;
+  if (limit !== undefined) await pruneReplays(limit);
+  return !had;
+}
+
+/** Changes what the list keeps about a replay (whether it is kept). */
+export async function updateReplay(id: string, change: Partial<Pick<ReplayMeta, 'kept'>>) {
+  const d = await db();
+  const tx = d.transaction('replays', 'readwrite');
+  const had = await tx.store.get(id);
+  if (had) await tx.store.put({ ...had, ...change });
+  await tx.done;
+}
+
+export async function deleteReplays(ids: readonly string[]) {
+  if (!ids.length) return;
+  const tx = (await db()).transaction(['replays', 'replayData'], 'readwrite');
+  for (const id of ids) {
+    await tx.objectStore('replays').delete(id);
+    await tx.objectStore('replayData').delete(id);
+  }
+  await tx.done;
+}
+
+export async function deleteAllReplays() {
+  const tx = (await db()).transaction(['replays', 'replayData'], 'readwrite');
+  await Promise.all([tx.objectStore('replays').clear(), tx.objectStore('replayData').clear(), tx.done]);
+}
+
+/** Removes the oldest replays beyond `limit`, the kept ones aside. Resolves to how many went. */
+export async function pruneReplays(limit: number): Promise<number> {
+  const gone = replaysToPrune(await listReplays(), limit);
+  await deleteReplays(gone);
+  return gone.length;
 }

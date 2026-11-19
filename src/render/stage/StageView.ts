@@ -103,6 +103,15 @@ function receive(m: FromStage) {
       debugAsks.get(m.id)?.(m.info);
       debugAsks.delete(m.id);
       return;
+    case 'frame': {
+      const view = views.get(m.id);
+      if (view) view.onFrame(m.frame, m.seq);
+      else m.frame.close();
+      return;
+    }
+    case 'no-frame':
+      views.get(m.id)?.onStep(m.seq, null);
+      return;
   }
 }
 
@@ -182,6 +191,8 @@ export class StageView {
   private disposed = false;
   private lastInput = 0;
   private lastSize = '';
+  /** Takes each frame drawn while a video is recorded (see `capture`). */
+  private frameTaker: ((frame: ImageBitmap) => void) | null = null;
 
   constructor(
     private host: HTMLElement,
@@ -228,8 +239,10 @@ export class StageView {
     if (target === 'worker') {
       const offscreen = canvas.transferControlToOffscreen();
       worker!.postMessage({ ...base, canvas: offscreen } satisfies ToStage, [offscreen]);
+      if (this.frameTaker) worker!.postMessage({ type: 'capture', id: this.id, on: true } satisfies ToStage);
     } else {
       this.send({ ...base, canvas });
+      if (this.frameTaker) this.send({ type: 'capture', id: this.id, on: true });
       void getPageHost().then((handle) => {
         this.pageHandle = handle;
         const queued = this.queue;
@@ -340,6 +353,48 @@ export class StageView {
     this.send({ type: 'finale', id: this.id, seconds });
   }
 
+  /**
+   * Hands every frame the stage draws to `take` (an ImageBitmap it then owns), or stops with null:
+   * for recording a video, where the stage's picture is laid under the highway's.
+   */
+  capture(take: ((frame: ImageBitmap) => void) | null) {
+    this.frameTaker = take;
+    this.send({ type: 'capture', id: this.id, on: !!take });
+  }
+
+  /** @internal A frame drawn while capture is on, or one a `step` asked for. */
+  onFrame(frame: ImageBitmap, seq?: number) {
+    if (seq !== undefined) return this.onStep(seq, frame);
+    if (this.frameTaker && !this.disposed) this.frameTaker(frame);
+    else frame.close();
+  }
+
+  private steps = new Map<number, (frame: ImageBitmap | null) => void>();
+  private nextStep = 1;
+
+  /**
+   * Draws one frame of a video on its clock (`now`, ms), with what the music is doing then, and
+   * resolves with it (null when there is none: the stage is not built). From the first step on, the
+   * stage draws only when asked, so the video's frames come as fast as they can be made.
+   */
+  step(now: number, input: StageInput, beat: Beat | 'none'): Promise<ImageBitmap | null> {
+    if (this.disposed) return Promise.resolve(null);
+    const seq = this.nextStep++;
+    const { low, mid, high } = input.bands;
+    return new Promise((resolve) => {
+      this.steps.set(seq, resolve);
+      this.send({ type: 'step', id: this.id, seq, now, input: { ...input, bands: { low, mid, high } }, beat });
+    });
+  }
+
+  /** @internal The frame a step asked for. */
+  onStep(seq: number, frame: ImageBitmap | null) {
+    const resolve = this.steps.get(seq);
+    this.steps.delete(seq);
+    if (resolve && !this.disposed) resolve(frame);
+    else frame?.close();
+  }
+
   /** Dev diagnostics from the stage, wherever it runs. */
   debugInfo(): Promise<Record<string, unknown>> {
     return new Promise((resolve) => {
@@ -353,6 +408,8 @@ export class StageView {
     clearTimeout(this.patience);
     this.send({ type: 'dispose', id: this.id });
     this.disposed = true;
+    for (const resolve of this.steps.values()) resolve(null);
+    this.steps.clear();
     views.delete(this.id);
     this.observer.disconnect();
     window.removeEventListener('resize', this.sendSize);

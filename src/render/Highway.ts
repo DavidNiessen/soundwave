@@ -1232,10 +1232,13 @@ export class Highway {
     g.attributes.aAlpha.needsUpdate = true;
     g.attributes.aStar.needsUpdate = true;
   }
-  /** Renders the frame for song time `t`. `beatPulse` (0..1) lets the music drive the track glow. */
-  render(t: number, session: GameSession, beatPulse = 0) {
+  /**
+   * Renders the frame for song time `t`. `beatPulse` (0..1) lets the music drive the track glow.
+   * `now` is the clock its own motion (particles, glows, fades) runs on, in ms: the real one, or a
+   * video's, which steps a frame at a time however fast the frames are made.
+   */
+  render(t: number, session: GameSession, beatPulse = 0, now = performance.now()) {
     if (!this.compiled) return;
-    const now = performance.now();
     const dt = Math.min(0.05, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
     const speed = this.speed;

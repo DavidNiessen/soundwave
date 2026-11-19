@@ -5404,7 +5404,7 @@ input.text {
 
 /* The Edit tab is the track list itself: it fills the tab, the list scrolls inside it, and the
    highlighted track's charts stand beside it. */
-.home-body[data-tab='edit'] {
+.home-body:is([data-tab='edit'], [data-tab='replays']) {
   justify-content: flex-start;
   gap: clamp(0.5rem, 1.2vh, 0.9rem);
   padding-bottom: 0;
@@ -5958,6 +5958,617 @@ kbd.mark {
 }
 a.btn {
   text-decoration: none;
+}
+
+/* ------------------------------------------------------------------------------------------- */
+/* Replays                                                                                      */
+
+/* A replay is watched, not played: the highway keeps its usual layout for touch too (the foot of
+   the screen is for the controls, not for fingers on the lanes). */
+:root[data-input='touch'] .play.replay .highway {
+  height: 100%;
+  --strike: 0.78;
+  --pads: pill;
+  --deck-share: 0;
+}
+/* Always in view, so a replay is never taken for a song being played. */
+.replay-badge {
+  position: absolute;
+  top: calc(12px + var(--safe-t));
+  right: calc(14px + var(--safe-r));
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.3rem 0.7rem 0.3rem 0.55rem;
+  border-radius: 999px;
+  background: rgb(6 4 14 / 0.56);
+  box-shadow: inset 0 0 0 1px var(--glass-edge);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  pointer-events: none;
+}
+.replay-badge svg {
+  width: 1.05em;
+  height: 1.05em;
+  color: var(--pink);
+  animation: replay-rec 2.4s ease-in-out infinite;
+}
+@keyframes replay-rec {
+  50% {
+    opacity: 0.35;
+  }
+}
+:root[data-motion='reduced'] .replay-badge svg {
+  animation: none;
+}
+
+/* The controls: a pane at the right foot of the screen, the scorebox's twin on the other side. */
+.replay-dock {
+  position: absolute;
+  right: calc(1.6% + var(--safe-r));
+  bottom: calc(3.5% + var(--safe-b));
+  z-index: 5;
+  width: clamp(22rem, 30vw, 34rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.7rem 0.8rem 0.75rem;
+  border-radius: var(--r-l);
+  background: var(--panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-edge),
+    inset 0 1px 0 rgb(255 255 255 / 0.1),
+    0 24px 50px -24px rgb(0 0 0 / 0.8);
+  transition:
+    opacity 0.3s var(--ease),
+    transform 0.4s var(--ease);
+}
+.replay.away .replay-dock {
+  opacity: 0;
+  transform: translateY(0.8rem);
+  pointer-events: none;
+}
+:root[data-motion='reduced'] .replay-dock {
+  transition: opacity 0.2s;
+}
+:root[data-motion='reduced'] .replay.away .replay-dock {
+  transform: none;
+}
+.replay-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.9rem;
+  padding: 0 0.35rem;
+}
+/* Back on the left, the video and hiding the controls on the right. */
+.replay-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.3rem 0.5rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--line);
+}
+.replay-foot-end {
+  display: flex;
+  gap: 0.2rem;
+  margin-left: auto;
+}
+.replay-foot .btn {
+  gap: 0.4em;
+  padding-inline: 0.45rem 0.6rem;
+  font-size: 0.9rem;
+}
+.replay-what {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.replay-title {
+  font-size: 1.1rem;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.replay-sub {
+  color: var(--ink-2);
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.replay-time {
+  font-weight: 900;
+  font-style: italic;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.replay-total {
+  color: var(--ink-3);
+}
+.replay-note {
+  color: var(--ink-2);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+/* The timeline: where the notes are, what has been watched, where notes were missed. Wide enough
+   to take a finger, though the line itself is thin. */
+.replay-scrub {
+  position: relative;
+  height: 1.7rem;
+  margin: 0 0.35rem;
+  border-radius: var(--r-s);
+  cursor: pointer;
+  touch-action: none;
+  --p: 0;
+}
+:root[data-input='touch'] .replay-scrub {
+  height: 2.6rem;
+}
+.replay-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 0.55rem;
+  transform: translateY(-50%);
+  border-radius: 3px;
+  background: rgb(255 255 255 / 0.22);
+  overflow: hidden;
+  -webkit-mask:
+    linear-gradient(#000 0 0) center / 100% 2px no-repeat,
+    var(--segments, linear-gradient(#000 0 0)) center / 100% 100% no-repeat;
+  mask:
+    linear-gradient(#000 0 0) center / 100% 2px no-repeat,
+    var(--segments, linear-gradient(#000 0 0)) center / 100% 100% no-repeat;
+}
+.replay-fill {
+  height: 100%;
+  width: calc(var(--p) * 100%);
+  background: linear-gradient(90deg, #b3306f, var(--pink));
+}
+.replay-miss {
+  position: absolute;
+  left: calc(var(--at) * 100%);
+  top: calc(50% - 0.75rem);
+  width: 2px;
+  height: 0.4rem;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--danger);
+  opacity: 0.85;
+  pointer-events: none;
+}
+.replay-head-dot {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--p) * 100%);
+  width: 0.95rem;
+  height: 0.95rem;
+  margin: -0.475rem 0 0 -0.475rem;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 0 10px rgb(255 255 255 / 0.6);
+  pointer-events: none;
+  transition: transform 0.2s var(--ease);
+}
+.replay-scrub.is-focus .replay-head-dot,
+:root[data-input='mouse'] .replay-scrub:hover .replay-head-dot {
+  transform: scale(1.25);
+}
+
+.replay-transport {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+.replay-btn {
+  min-width: var(--target);
+  padding: 0.35rem 0.55rem;
+}
+.replay-play {
+  min-width: calc(var(--target) * 1.5);
+}
+.replay-play svg {
+  fill: currentColor;
+}
+/* Each control's key or button sits on its corner, so the row stays a row of symbols. */
+.replay-transport :is(.replay-btn, .icon-btn) > :is(.keycap-hint, .hint-glyph) {
+  position: absolute;
+  top: -0.55rem;
+  right: -0.35rem;
+  z-index: 1;
+  pointer-events: none;
+}
+.replay-transport :is(.replay-btn, .icon-btn) > .keycap-hint {
+  font-size: 0.6rem;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.45);
+}
+.replay-transport :is(.replay-btn, .icon-btn) > .hint-glyph {
+  height: 1.15rem;
+  filter: drop-shadow(0 2px 4px rgb(0 0 0 / 0.5));
+}
+/* The replay's own keep button lights up while the replay is kept. */
+.btn[aria-pressed='true'] svg {
+  color: var(--mint);
+  fill: currentColor;
+}
+.replay-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0 0.2rem;
+  border-radius: 999px;
+  background: var(--well);
+}
+.replay-speed .icon-btn {
+  position: relative;
+  width: 2.3rem;
+  border-radius: 999px;
+}
+.replay-speed .icon-btn:disabled {
+  opacity: 0.4;
+}
+.replay-rate {
+  min-width: 2.9em;
+  text-align: center;
+  font-weight: 900;
+  font-style: italic;
+  font-variant-numeric: tabular-nums;
+}
+/* The end of a replay: how the run went, and where to go from here. */
+.replay-end-score {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem 0.8rem;
+  margin: 0.2rem 0 0.4rem;
+}
+.replay-end-score .stars {
+  font-size: 1.25rem;
+  align-self: center;
+}
+.replay-end-score .num {
+  font-size: 1.7rem;
+}
+.replay-end-acc {
+  width: 100%;
+  color: var(--ink-2);
+  font-weight: 700;
+}
+
+/* The Replays tab: the runs as a list, the highlighted one's result beside it. */
+.replays-panel {
+  gap: clamp(0.5rem, 1.2vh, 0.9rem);
+}
+.replays-panel .song-row {
+  padding-right: calc(var(--target) + 0.35rem);
+}
+.replay-row-sub {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+}
+.replay-row-sub svg {
+  width: 1em;
+  height: 1em;
+  flex: none;
+  color: var(--ink-3);
+}
+.replay-row-score {
+  min-width: 4.6rem;
+  text-align: right;
+  font-weight: 900;
+  font-style: italic;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.replay-kept {
+  display: inline-grid;
+  color: var(--mint);
+}
+.replay-kept svg {
+  width: 1rem;
+  height: 1rem;
+}
+.replays-panel .song-item.current .song-row {
+  background: var(--row-hi);
+}
+.replays-none {
+  align-items: center;
+  text-align: center;
+  margin: auto;
+  padding: 2.5rem 1rem;
+}
+.replays-none > svg {
+  width: 2.4rem;
+  height: 2.4rem;
+  color: var(--pink);
+}
+.replay-card-what {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.replay-card-what svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+.replay-card-date {
+  color: var(--ink-3);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.replay-card-score {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.8rem;
+}
+.replay-card-score .stars {
+  font-size: 1.2rem;
+}
+.replay-card-score .num {
+  font-size: 1.6rem;
+}
+.replay-stats {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+  margin: 0;
+}
+.replay-stats div {
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--r-s);
+  background: var(--row);
+}
+.replay-stats dt {
+  color: var(--ink-3);
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.replay-stats dd {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 900;
+  font-style: italic;
+  font-variant-numeric: tabular-nums;
+}
+.replay-card-note {
+  grid-column: 1 / -1;
+  color: var(--ink-2);
+  font-size: 0.85rem;
+}
+.replay-card-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.replay-card-actions .btn.primary {
+  flex: 1 1 8rem;
+}
+@media (max-width: 640px) {
+  .replays-panel .song-side :is(.stars, .replay-best) {
+    display: none;
+  }
+  .replay-row-score {
+    min-width: 0;
+  }
+}
+
+/* Exporting a replay as a video: the settings, side by side choices like the lobby's. */
+.export-card {
+  gap: 0.6rem;
+}
+.export-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.2rem 0 0.3rem;
+}
+.export-row {
+  display: grid;
+  grid-template-columns: 6.2rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.6rem;
+}
+.export-label {
+  color: var(--ink-2);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+.export-options {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+}
+.export-option {
+  flex: 1;
+  min-height: calc(var(--target) - 0.4rem);
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--r-s);
+  color: var(--ink-2);
+  font-size: 0.9rem;
+  font-weight: 800;
+  white-space: nowrap;
+  transition:
+    background 0.16s,
+    color 0.16s;
+}
+.export-option.on {
+  background: var(--lit);
+  color: var(--lit-ink);
+}
+:root[data-input='mouse'] .export-option:not(.on):hover:not(:disabled) {
+  background: var(--row-hi);
+  color: var(--ink);
+}
+.export-option:disabled {
+  opacity: 0.45;
+}
+.export-summary {
+  font-size: 0.85rem;
+}
+
+/* Recording: the replay plays out of sight at the video's size; what is shown is the video. */
+.export-screen {
+  position: absolute;
+  inset: 0;
+  background: #05030f;
+}
+.export-frame {
+  position: fixed;
+  left: 0;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+  overflow: hidden;
+}
+.export-view {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  justify-items: center;
+  gap: 1rem;
+  padding: calc(1rem + var(--safe-t)) calc(1rem + var(--safe-r)) calc(1rem + var(--safe-b)) calc(1rem + var(--safe-l));
+  background: radial-gradient(ellipse at 50% 0%, var(--deep), var(--night) 70%);
+}
+.export-preview {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  min-height: 0;
+  align-self: center;
+  border-radius: var(--r-m);
+  box-shadow:
+    0 0 0 1px var(--glass-edge),
+    0 30px 60px -20px rgb(0 0 0 / 0.8);
+}
+.export-panel {
+  width: min(36rem, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--r-l);
+  background: var(--panel);
+  box-shadow: inset 0 0 0 1px var(--glass-edge);
+}
+.export-status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+.export-rec {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.export-rec svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+.export-rec.recording svg {
+  color: var(--danger);
+  animation: replay-rec 1.4s ease-in-out infinite;
+}
+:root[data-motion='reduced'] .export-rec.recording svg {
+  animation: none;
+}
+.export-rec.saved svg {
+  color: var(--ok);
+}
+.export-time {
+  font-weight: 900;
+  font-style: italic;
+  font-variant-numeric: tabular-nums;
+}
+.export-meter {
+  height: 6px;
+}
+.export-meter > span {
+  background: linear-gradient(90deg, #b3306f, var(--pink));
+  transition: none;
+}
+@media (max-width: 560px) {
+  .export-row {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+}
+
+/* Narrow screens and touch: the controls run along the foot of the screen, over the deck, and step
+   aside while the replay plays. The score moves to the top, as it does for touch. */
+@media (max-width: 760px) {
+  .replay-dock {
+    left: calc(0.6rem + var(--safe-l));
+    right: calc(0.6rem + var(--safe-r));
+    bottom: calc(0.6rem + var(--safe-b));
+    width: auto;
+  }
+  .play.replay .hud-scorebox {
+    left: calc(12px + var(--safe-l));
+    bottom: auto;
+    top: calc(10px + var(--safe-t));
+    flex-direction: column-reverse;
+    width: clamp(170px, 44vw, 250px);
+    gap: 6px;
+  }
+  .play.replay :is(.hud-artist, .hud-song) {
+    display: none;
+  }
+}
+:root[data-input='touch'] .replay-dock {
+  left: calc(0.6rem + var(--safe-l));
+  right: calc(var(--edge, 64px) + 1.6rem + var(--safe-r));
+  bottom: calc(0.6rem + var(--safe-b));
+  width: auto;
+  max-width: 36rem;
+  margin-inline: auto;
+}
+@media (max-width: 560px) {
+  :root[data-input='touch'] .replay-dock {
+    right: calc(0.6rem + var(--safe-r));
+  }
+  .replay-transport {
+    gap: 0.25rem;
+  }
+  .replay-btn {
+    padding-inline: 0.45rem;
+  }
 }
 
 /* ------------------------------------------------------------------------------------------- */

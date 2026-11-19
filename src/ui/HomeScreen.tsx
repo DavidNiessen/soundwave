@@ -1,5 +1,10 @@
 import {
+  Clapperboard,
+  Ellipsis,
   FilePlus2,
+  Film,
+  Pin,
+  Trash2,
   ListMusic,
   PencilRuler,
   Play,
@@ -29,6 +34,8 @@ import { Mosaic } from './Cover';
 import { ICON_STROKE } from './icons';
 import { useStageBrowser } from './StageBrowser';
 import { TrackPicker, type TrackPickerProps } from './TrackPicker';
+import { ReplaysPanel, type ReplayActions, type ReplayCommands } from './ReplaysPanel';
+import type { ReplayMeta } from '../storage/replays';
 import { useSlide } from './useSlide';
 import { keysOf } from '../input/bindings';
 
@@ -49,6 +56,9 @@ interface Props {
   onAdd(): void;
   /** What the Edit tab's list of tracks needs to bring songs in and open them in the editor. */
   tracks: Omit<TrackPickerProps, 'songs' | 'status' | 'settings'>;
+  /** The saved replays, newest first, and what can be done with them (the Replays tab). */
+  replays: ReplayMeta[];
+  replayActions: ReplayActions;
   onSettings(): void;
   /** The player's stages changed in the Stage tab. */
   onStages(next: Settings['stage']): void;
@@ -62,17 +72,18 @@ interface Props {
   settings: Settings;
 }
 
-/** The main menu's tabs: playing sets, making charts, and picking the stage they are played on. */
-type Tab = 'play' | 'edit' | 'stage';
+/** The main menu's tabs: playing sets, making charts, watching runs again, and picking the stage they are played on. */
+type Tab = 'play' | 'edit' | 'replays' | 'stage';
 const TABS: [Tab, string, LucideIcon][] = [
   ['play', 'Play', Play],
   ['edit', 'Edit', PencilRuler],
+  ['replays', 'Replays', Clapperboard],
   ['stage', 'Stage', Theater],
 ];
 const tabIndex = (t: Tab) => TABS.findIndex(([id]) => id === t);
 /**
  * The tab the menu was on last, for as long as the game is open: coming back from the editor lands
- * on Edit again, and a fresh start is always Play.
+ * on Edit again, back from a replay on Replays, and a fresh start is always Play.
  */
 let lastTab: Tab = 'play';
 
@@ -93,6 +104,8 @@ export function HomeScreen({
   onSet,
   onAdd,
   tracks,
+  replays,
+  replayActions,
   onSettings,
   onStages,
   onExit,
@@ -111,6 +124,8 @@ export function HomeScreen({
   const follow = useRef(false);
   /** Presses of New track in the action bar, passed on to the list that owns the file chooser. */
   const [picks, setPicks] = useState(0);
+  /** The Replays tab's shortcuts, which act on its highlighted replay. */
+  const replayCommands = useRef<ReplayCommands | null>(null);
   const setTab = (t: Tab) => {
     if (t === tabRef.current) return;
     lastTab = t;
@@ -121,10 +136,11 @@ export function HomeScreen({
   useEffect(() => {
     const onTab = (e: Event) => {
       if (document.querySelector('[data-modal]')) return;
-      const next = TABS[TABS.findIndex(([id]) => id === tabRef.current) + (e as CustomEvent<number>).detail]?.[0];
+      const step = (e as CustomEvent<number>).detail;
+      const next = TABS[tabIndex(tabRef.current) + step]?.[0];
       if (!next) return;
       playSfx('tab');
-      menuPulse((e as CustomEvent<number>).detail > 0 ? 'tab-right' : 'tab-left');
+      menuPulse(step > 0 ? 'tab-right' : 'tab-left');
       follow.current = true;
       setTab(next);
     };
@@ -158,17 +174,53 @@ export function HomeScreen({
       ? stage.actions
       : tab === 'play'
         ? [{ id: 'add', label: importing ? `Importing ${importing}…` : 'Add songs', icon: Upload, ...keysOf('home.add'), run: onAdd }]
-        : [
-            {
-              id: 'search',
-              label: 'Search',
-              icon: Search,
-              ...keysOf('home.search'),
-              bar: false,
-              run: () => document.querySelector<HTMLInputElement>('.track-picker input[type=search]')?.focus(),
-            },
-            { id: 'new', label: 'New track', icon: FilePlus2, ...keysOf('home.new'), primary: true, run: () => setPicks((n) => n + 1) },
-          ]),
+        : tab === 'replays'
+          ? replays.length
+            ? [
+                {
+                  id: 'replay-options',
+                  label: 'Options',
+                  icon: Ellipsis,
+                  ...keysOf('home.replayOptions'),
+                  run: () => replayCommands.current?.options(),
+                },
+                {
+                  id: 'replay-export',
+                  label: 'Export video',
+                  icon: Film,
+                  ...keysOf('home.replayExport'),
+                  bar: false,
+                  run: () => replayCommands.current?.exportVideo(),
+                },
+                {
+                  id: 'replay-keep',
+                  label: 'Keep',
+                  icon: Pin,
+                  ...keysOf('home.replayKeep'),
+                  bar: false,
+                  run: () => replayCommands.current?.keep(),
+                },
+                {
+                  id: 'replay-delete',
+                  label: 'Delete',
+                  icon: Trash2,
+                  ...keysOf('home.replayDelete'),
+                  bar: false,
+                  run: () => replayCommands.current?.remove(),
+                },
+              ]
+            : []
+          : [
+              {
+                id: 'search',
+                label: 'Search',
+                icon: Search,
+                ...keysOf('home.search'),
+                bar: false,
+                run: () => document.querySelector<HTMLInputElement>('.track-picker input[type=search]')?.focus(),
+              },
+              { id: 'new', label: 'New track', icon: FilePlus2, ...keysOf('home.new'), primary: true, run: () => setPicks((n) => n + 1) },
+            ]),
     // The Stage tab has its own actions; Settings has nothing to do with it there.
     ...(tab === 'stage' ? [] : [{ id: 'settings', label: 'Settings', icon: SettingsIcon, ...keysOf('home.settings'), run: onSettings }]),
     ...(update
@@ -242,6 +294,15 @@ export function HomeScreen({
       >
         {tab === 'stage' ? (
           stage.view
+        ) : tab === 'replays' ? (
+          <ReplaysPanel
+            replays={replays}
+            songs={songs}
+            settings={settings}
+            actions={replayActions}
+            onSettings={onSettings}
+            commands={replayCommands}
+          />
         ) : tab === 'play' ? (
           <>
             <h2 className="page-title">Pick a set</h2>

@@ -20,6 +20,7 @@ import { playSfx } from '../audio/sfx';
 import { inDesktopApp } from '../game/displayMode';
 import { applyPreset, autoTier, resolveGraphics, type GraphicsPreset, type GraphicsSettings, type Level } from '../game/graphics';
 import {
+  clampReplayLimit,
   clampTrackSpeed,
   DEFAULT_SETTINGS,
   keyLabel,
@@ -39,6 +40,8 @@ import { Hint, keyName, useActions, useHints } from './actions';
 import { Calibration } from './Calibration';
 import { Dialog } from './Dialog';
 import { ICON_STROKE } from './icons';
+import { deleteAllReplays } from '../storage/db';
+import { REPLAY_LIMIT } from '../storage/replays';
 import { useLibraryBackup, type LibraryBackup } from './LibraryBackup';
 import { APP_VERSION } from '../app/release';
 import { checkForUpdates, updates, type UpdateStatus } from '../app/updates';
@@ -85,6 +88,8 @@ interface Props {
   onBack(): void;
   /** Opened from a paused song: what would disturb the song is switched off. */
   inSong?: boolean;
+  /** Every saved replay was deleted from here. */
+  onReplaysDeleted?(): void;
 }
 
 type Tab = 'video' | 'audio' | 'game' | 'controller' | 'touch' | 'shortcuts' | 'advanced';
@@ -113,7 +118,7 @@ const RESERVED = new Set(['Escape', 'Enter', 'Tab']);
 const FIELDS: Record<Tab, readonly (keyof Settings)[]> = {
   video: ['graphics', 'displayMode', 'uiScale', 'motion'],
   audio: ['volume', 'musicVolume', 'sfxVolume', 'songPreviews', 'muteUnfocused', 'outputDevice', 'outputDeviceName'],
-  game: ['trackSpeed', 'offsetMs'],
+  game: ['trackSpeed', 'offsetMs', 'replays', 'replayLimit'],
   controller: ['glyphs', 'rumble', 'rumbleHits', 'rumbleMisses', 'rumbleSustains', 'rumbleOverdrive', 'ps5Haptics'],
   touch: ['touchHaptics', 'touchOverdriveSide'],
   shortcuts: ['keys4', 'keys5', 'overdriveKey', 'pad4', 'pad5', 'padOverdrive', 'bindings'],
@@ -188,12 +193,14 @@ const PRESET_LABEL: Record<Exclude<GraphicsPreset, 'auto' | 'custom'>, string> =
 };
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 
-export function SettingsScreen({ settings, model, device, onChange, onBack, inSong = false }: Props) {
+export function SettingsScreen({ settings, model, device, onChange, onBack, inSong = false, onReplaysDeleted }: Props) {
   const [tab, setTabState] = useState<Tab>(loadTab);
   const [binding, setBinding] = useState<Binding | null>(null);
   const [calibrating, setCalibrating] = useState(false);
   /** Asking whether to put the open tab's settings back to their defaults. */
   const [askReset, setAskReset] = useState(false);
+  /** Asking whether to delete every saved replay. */
+  const [askReplays, setAskReplays] = useState(false);
   const library = useLibraryBackup(settings);
   const update = useSyncExternalStore(updates.subscribe, updates.snapshot);
   const [updateOpen, setUpdateOpen] = useState(false);
@@ -421,6 +428,7 @@ export function SettingsScreen({ settings, model, device, onChange, onBack, inSo
     upToDate,
     showUpdate: () => setUpdateOpen(true),
     calibrate: () => setCalibrating(true),
+    deleteReplays: () => setAskReplays(true),
     inSong,
     outputs,
     outputsRefused,
@@ -518,6 +526,31 @@ export function SettingsScreen({ settings, model, device, onChange, onBack, inSo
           )}
         </Dialog>
       )}
+      {askReplays && (
+        <Dialog title="Delete all replays" variant="card" closeLabel="Keep them" onClose={() => setAskReplays(false)}>
+          {(close) => (
+            <div className="pause-card">
+              <h2 className="display">Delete all replays?</h2>
+              <p className="hint">Every saved replay goes, the ones you kept too. Your songs, charts and best scores stay.</p>
+              <button type="button" className="btn wide" data-autofocus data-sfx="back" onClick={close}>
+                Keep them
+              </button>
+              <button
+                type="button"
+                className="btn danger wide"
+                onClick={() => {
+                  setAskReplays(false);
+                  void deleteAllReplays()
+                    .catch(() => {})
+                    .then(() => onReplaysDeleted?.());
+                }}
+              >
+                Delete all replays
+              </button>
+            </div>
+          )}
+        </Dialog>
+      )}
       {library.ui}
       {updateOpen && <UpdateCard settings={settings} onClose={() => setUpdateOpen(false)} />}
       {calibrating && (
@@ -551,6 +584,8 @@ interface Ctx {
   /** Opens the card that offers the update found. */
   showUpdate(): void;
   calibrate(): void;
+  /** Asks whether to delete every saved replay. */
+  deleteReplays(): void;
   inSong: boolean;
   outputs: OutputList;
   outputsRefused: boolean;
@@ -844,6 +879,40 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
             button: 'Start',
             disabled: c.inSong,
             run: c.calibrate,
+          },
+        ],
+      },
+      {
+        title: 'Replays',
+        rows: [
+          toggle(
+            'replays',
+            'Record replays',
+            'Saves every song you finish as a replay, with the notes as you played them, to watch again from the Replays tab of the main menu. Off: nothing new is recorded, and the replays you have stay.',
+            s.replays,
+            (v) => set({ replays: v }),
+          ),
+          {
+            kind: 'slider',
+            id: 'replayLimit',
+            label: 'Replays kept',
+            help: 'How many of your newest replays are saved. Each new one makes the oldest go once there are more; replays you keep never go and do not count. A lower number removes the oldest when you leave the settings.',
+            value: s.replayLimit,
+            min: REPLAY_LIMIT.min,
+            max: REPLAY_LIMIT.max,
+            step: REPLAY_LIMIT.step,
+            disabled: !s.replays,
+            format: (v) => String(Math.round(v)),
+            set: (v) => set({ replayLimit: clampReplayLimit(v) }),
+          },
+          {
+            kind: 'action',
+            id: 'deleteReplays',
+            label: 'Delete all replays',
+            help: 'Deletes every saved replay, the ones you kept too. It asks first.',
+            button: 'Delete',
+            danger: true,
+            run: c.deleteReplays,
           },
         ],
       },
@@ -1208,7 +1277,7 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
           disabled: lib.busy,
           run: lib.exportLibrary,
           note: lib.exportNote,
-          help: 'Saves every song with its charts, the charts you edited by hand, your best scores and your settings in one file, to move the game to another computer or keep a copy safe. Separated stems are left out: a song makes them again when it is analyzed again.',
+          help: 'Saves every song with its charts, the charts you edited by hand, your best scores, your replays and your settings in one file, to move the game to another computer or keep a copy safe. Separated stems are left out: a song makes them again when it is analyzed again.',
         },
         {
           kind: 'action',
@@ -1220,7 +1289,7 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
           note: lib.importNote,
           help: c.inSong
             ? 'Leave the song first: importing restarts the game.'
-            : 'Adds the songs from a library backup with their charts, keeps the better of each best score, and takes over the backup’s settings. Songs you already have stay as they are. The game restarts afterwards.',
+            : 'Adds the songs from a library backup with their charts and its replays, keeps the better of each best score, and takes over the backup’s settings. Songs you already have stay as they are. The game restarts afterwards.',
         },
         {
           kind: 'action',
@@ -1232,7 +1301,7 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
           run: lib.deleteEverything,
           help: c.inSong
             ? 'Leave the song first: deleting everything restarts the game.'
-            : 'Deletes every song with its charts, the charts you edited by hand and all best scores, and puts every setting back to how the game came. It asks first, and you hold the button to confirm. The downloaded analysis model stays.',
+            : 'Deletes every song with its charts, the charts you edited by hand, all best scores and replays, and puts every setting back to how the game came. It asks first, and you hold the button to confirm. The downloaded analysis model stays.',
         },
       ],
     },
