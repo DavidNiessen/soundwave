@@ -248,13 +248,16 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
     const length = Math.max(chart.duration, buffer.duration);
     let shownSecond = -1;
 
-    /** Lays one frame of the video: the stage, the highway, the HUD. `now`: the clock it was drawn on, ms. */
-    const compose = (t: number, stageFrame: ImageBitmap | null, now: number) => {
+    /**
+     * Lays one frame of the video: the stage, the highway (`highway`: its canvas, or a copy taken
+     * as it was drawn), the HUD. `now`: the clock it was drawn on, ms.
+     */
+    const compose = (t: number, stageFrame: ImageBitmap | null, now: number, highway: CanvasImageSource = hwRef.current!) => {
       g.fillStyle = video.stage ? '#05030f' : night;
       g.fillRect(0, 0, width, height);
       if (stageFrame) g.drawImage(stageFrame, 0, 0, width, height);
       const hw = hwRef.current!;
-      g.drawImage(hw, 0, 0, width, height);
+      g.drawImage(highway, 0, 0, width, height);
       if (video.hud) {
         const s = ctrl.session;
         const layout = ctrl.hudLayout();
@@ -345,14 +348,26 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
           if (p === 'finished') over = true;
         };
         const total = Math.ceil((length + 0.5 + TAIL - REPLAY_START) * video.fps);
+        const timeOf = (i: number) => REPLAY_START + i / video.fps;
+        // The highway is copied as soon as it is drawn, so the stage's picture can be waited for.
+        const layer = document.createElement('canvas');
+        layer.width = width;
+        layer.height = height;
+        const lg = layer.getContext('2d')!;
+        // A frame ahead: while the stage's worker draws the next frame, the page draws the
+        // highway and encodes this one.
+        let job = ctrl.beginFrame(timeOf(0), clock0);
         for (let i = 0; i < total && !finished; i++) {
-          const t = REPLAY_START + i / video.fps;
-          const now = clock0 + i * step;
-          await ctrl.renderFrame(t, now, (picture) => {
-            compose(t, picture, now);
-            picture?.close();
+          const t = job.t;
+          const now = job.now;
+          const picture = await ctrl.drawFrame(job, () => {
+            lg.clearRect(0, 0, width, height);
+            lg.drawImage(hwRef.current!, 0, 0, width, height);
           });
-          if (finished || !live) return;
+          if (finished || !live) return void picture?.close();
+          compose(t, picture, now, layer);
+          picture?.close();
+          if (i + 1 < total) job = ctrl.beginFrame(timeOf(i + 1), clock0 + (i + 1) * step);
           await encoder.frame(i);
           if (i % 15 === 0) {
             const made = (i + 1) / video.fps;
@@ -363,6 +378,8 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
           if (over && endAt === Number.POSITIVE_INFINITY) endAt = t;
           if (t - endAt >= TAIL) break;
         }
+        // The frame begun ahead of the last one is not needed.
+        void job.picture.then((p) => p?.close());
         if (finished || !live) return;
         finished = true;
         await save(() => encoder!.finish());

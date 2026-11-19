@@ -43,6 +43,15 @@ export interface HudRefs {
 
 export type PlayPhase = 'countdown' | 'playing' | 'paused' | 'finished';
 
+/** A video frame on its way: what it was begun with, and the stage's picture of it, coming. */
+export interface FrameJob {
+  t: number;
+  now: number;
+  beat: 'none' | 'beat' | 'downbeat';
+  pulse: number;
+  picture: Promise<ImageBitmap | null>;
+}
+
 const LEAD_IN = 3;
 /** Song time a replay starts at: a moment before the song, without a countdown. */
 export const REPLAY_START = -1.5;
@@ -604,18 +613,28 @@ export class PlayController {
   }
 
   /**
-   * Draws the frame of song time `t` at the video's clock `now` (ms), then hands `draw` the stage's
-   * picture of it (null without a stage) while the highway's is still on its canvas.
+   * Moves the replay on to the frame of song time `t` at the video's clock `now` (ms), and asks the
+   * stage for its picture of it, which it draws in its own worker while the page carries on with
+   * the frame before (see `drawFrame`).
    */
-  async renderFrame(t: number, now: number, draw: (stage: ImageBitmap | null) => void) {
-    if (this.disposed) return;
+  beginFrame(t: number, now: number): FrameJob {
     this.bands?.at(t);
     const f = this.advance(t, now);
-    const picture = this.stage && f.stage ? await this.stage.step(now, f.stage, f.beat) : null;
-    if (this.disposed) return void picture?.close();
-    this.highway.render(t, this.session, f.pulse, now);
-    this.updateHud(t, f.beat);
-    draw(picture);
+    const picture = this.stage && f.stage && !this.disposed ? this.stage.step(now, f.stage, f.beat) : Promise.resolve(null);
+    return { t, now, beat: f.beat, pulse: f.pulse, picture };
+  }
+
+  /**
+   * Draws a frame begun with `beginFrame`: the highway and the HUD at once (`onHighway` is called
+   * while the highway's picture is on its canvas), then resolves with the stage's picture (null
+   * without a stage).
+   */
+  drawFrame(job: FrameJob, onHighway: () => void): Promise<ImageBitmap | null> {
+    if (this.disposed) return Promise.resolve(null);
+    this.highway.render(job.t, this.session, job.pulse, job.now);
+    this.updateHud(job.t, job.beat);
+    onHighway();
+    return job.picture;
   }
 
   private bands: BufferAnalyser | null = null;
