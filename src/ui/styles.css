@@ -9785,3 +9785,22 @@ a.btn {
 .option-chip > :first-child:not(svg) {
   grid-column: 1;
 }
+
+/* The board stands on your place: anchored at the bottom right, just above the big "2nd", and
+   growing upward as more players are shown, never past the top of the screen. */
+.sd-board {
+  top: auto;
+  bottom: calc(var(--safe-b) + clamp(5rem, 12vh, 8rem) + clamp(3.4rem, 6vw, 5.6rem));
+  max-height: calc(100% - var(--safe-t) - 5rem - clamp(5rem, 12vh, 8rem) - clamp(3.4rem, 6vw, 5.6rem));
+  justify-content: flex-end;
+  overflow: visible;
+}
+.sd-place {
+  right: clamp(0.8rem, 2vw, 2rem);
+  bottom: calc(var(--safe-b) + clamp(5rem, 12vh, 8rem));
+}
+@media (max-width: 720px) {
+  .sd-board {
+    top: auto;
+  }
+}
