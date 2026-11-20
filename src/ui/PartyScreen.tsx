@@ -508,11 +508,33 @@ function InParty(props: PartyProps) {
     online.ready(first ? pick.part : me.part, first ? pick.difficulty : me.difficulty, first ? false : me.ready, have, calibrated);
   }, [party.code, haveKey, me, pick, have, calibrated]);
 
+  usePartySounds(party, s.account!.id);
+
   if (!me) return null;
   if (party.phase === 'results')
     return party.showdown ? <ShowdownBetween key={party.songIndex} {...props} me={me} have={have} /> : <PartyResults {...props} me={me} />;
   if (!party.mode) return <PartyRoom {...props} me={me} />;
   return <ModeLobby {...props} me={me} have={have} />;
+}
+
+/**
+ * The party's comings and goings, heard: a chime when someone joins or leaves, a pop when someone
+ * gets ready (in a mode's lobby). Nothing on the first look at a party, and nothing for this player's
+ * own joining: they know.
+ */
+function usePartySounds(party: PartyState, me: string) {
+  const seen = useRef<{ code: string; ids: Set<string>; ready: Set<string> } | null>(null);
+  useEffect(() => {
+    const ids = new Set(party.members.map((m) => m.id));
+    const ready = new Set(party.members.filter((m) => m.ready).map((m) => m.id));
+    const before = seen.current;
+    seen.current = { code: party.code, ids, ready };
+    if (!before || before.code !== party.code || party.phase !== 'lobby') return;
+    if ([...ids].some((id) => !before.ids.has(id) && id !== me)) playShowdownSfx('join');
+    else if ([...before.ids].some((id) => !ids.has(id))) playShowdownSfx('leave');
+    else if (party.mode && [...ready].some((id) => !before.ready.has(id))) playShowdownSfx('ready');
+    else if (party.mode && [...before.ready].some((id) => ids.has(id) && !ready.has(id))) playShowdownSfx('unready');
+  }, [party, me]);
 }
 
 /** The party's code, to invite friends with, and the switch that keeps it off Discord. */
@@ -844,6 +866,11 @@ function ModeLobby({
   const counting = !watching && !!nextSong && party.members.filter((m) => m.connected).length >= 2 && everyoneReady;
   const left = useCountdown(counting, AUTO_START_S);
   const started = useRef(false);
+  // The count is heard: a tick a second, and a go as it runs out.
+  useEffect(() => {
+    if (left === null) return;
+    playShowdownSfx(left === 0 ? 'go' : 'tick');
+  }, [left]);
   useEffect(() => {
     if (!counting) started.current = false;
     else if (left === 0 && canStart && !started.current) {

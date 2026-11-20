@@ -1,11 +1,13 @@
 /**
- * A Showdown's sounds, made live in Web Audio rather than played from files: a Strike flying off,
- * the warning that one is coming, the hit landing, the round's countdown, and going through, out
- * or winning. They go through the effects' output (audio/sfx.ts), so they follow its volume.
+ * A party's sounds, made live in Web Audio rather than played from files: someone joining or
+ * leaving, getting ready or not, the lobby's countdown and its go; and a Showdown's: a Strike flying
+ * off, the warning that one is coming, the hit landing, the round's countdown, and going through,
+ * out or winning. They go through the effects' output (audio/sfx.ts), so they follow its volume.
  */
 import { sfxOutput } from './sfx';
 
-export type ShowdownSfx = 'strike' | 'incoming' | 'impact' | 'tick' | 'through' | 'out' | 'win' | 'turn';
+export type ShowdownSfx =
+  'strike' | 'incoming' | 'impact' | 'tick' | 'through' | 'out' | 'win' | 'turn' | 'join' | 'leave' | 'ready' | 'unready' | 'go';
 
 /** A burst of noise, for whooshes and impacts. */
 function noise(ctx: AudioContext, seconds: number): AudioBuffer {
@@ -91,6 +93,29 @@ export function playShowdownSfx(name: ShowdownSfx) {
     case 'out':
       // Down, minor.
       [494, 392, 311].forEach((f, i) => tone(ctx, out, t + i * 0.14, f, 0.5, { type: 'sine', gain: 0.18 }));
+      break;
+    case 'join':
+      // A bright two-note chime, up a fifth: someone is in.
+      tone(ctx, out, t, 784, 0.3, { type: 'sine', gain: 0.14 });
+      tone(ctx, out, t + 0.09, 1175, 0.45, { type: 'sine', gain: 0.14 });
+      break;
+    case 'leave':
+      // The same, down and softer.
+      tone(ctx, out, t, 1175, 0.25, { type: 'sine', gain: 0.09 });
+      tone(ctx, out, t + 0.09, 784, 0.35, { type: 'sine', gain: 0.09 });
+      break;
+    case 'ready':
+      // A quick pop with a high glint on top.
+      tone(ctx, out, t, 660, 0.12, { type: 'triangle', gain: 0.2, to: 990 });
+      tone(ctx, out, t + 0.05, 1980, 0.2, { type: 'sine', gain: 0.06 });
+      break;
+    case 'unready':
+      tone(ctx, out, t, 520, 0.12, { type: 'triangle', gain: 0.12, to: 350 });
+      break;
+    case 'go':
+      // The count is over: a rising sweep into a bright chord.
+      sweep(ctx, out, t, 0.35, 600, 5000, 0.16, 1.5);
+      [784, 988, 1175, 1568].forEach((f) => tone(ctx, out, t + 0.12, f, 0.6, { gain: 0.07 }));
       break;
     case 'win':
       // A held major chord with a rising top note.

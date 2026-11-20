@@ -137,6 +137,7 @@ export function PlayScreen({
     // Discord shows the time left, or that the song is paused or over (src/app/discord.ts). The
     // countdown and the song count down alike; the time left is taken once the song plays again.
     let shown: PlayPhase | null = null;
+    let shownCount = -1;
     ctrl.onPhase = (p, n) => {
       if (p !== shown) {
         shown = p;
@@ -149,6 +150,12 @@ export function PlayScreen({
         playSfx('resume');
         menuPulse('select');
       }
+      // A party's song counts itself in out loud: everyone starts on the same beat.
+      if (togetherRef.current) {
+        if (p === 'countdown' && n !== undefined && n !== shownCount && n <= 3) playShowdownSfx('tick');
+        else if (p === 'playing' && prev === 'countdown') playShowdownSfx('go');
+      }
+      if (n !== undefined) shownCount = n;
       prev = p;
       setPhase(p);
       if (n !== undefined) setCount(n);
