@@ -8,7 +8,7 @@
  */
 
 /** Raised whenever a message changes in a way an older game or server would misread. */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 /** The most players in one party. */
 export const PARTY_MAX = 16;
 /** How long a dropped player keeps their place in a party, ms. */
@@ -37,10 +37,6 @@ export const HIT_REPEAT_MS = 30_000;
 export const MAX_ATTACKERS = 2;
 /** Drain: the multiplier a hit caps the score's multiplier at. */
 export const DRAIN_CAP = 2;
-/** Band mode: a player who misses this many notes in a row drops out until a bandmate brings them back. */
-export const DROP_MISSES = 15;
-/** The most players in a band: one per part. */
-export const BAND_MAX = 4;
 /** The fewest players in the last song of a Showdown: a final of four. */
 export const SHOWDOWN_FINAL = 4;
 
@@ -150,11 +146,10 @@ export interface SetSong {
  * What a party plays. A party starts as just its players; the host picks a mode, and its set and
  * options, before the first song.
  * - versus: everyone plays the set, and the scores are compared;
- * - band: up to four, one on each part, for one band score (spec 4.5);
  * - showdown: the lowest go out after each song, and overdrive strikes the player above (spec 4.1).
  */
-export type PartyMode = 'versus' | 'band' | 'showdown';
-export const PARTY_MODES: PartyMode[] = ['versus', 'band', 'showdown'];
+export type PartyMode = 'versus' | 'showdown';
+export const PARTY_MODES: PartyMode[] = ['versus', 'showdown'];
 
 /** A party's Showdown, chosen by the host in the lobby; a party without one plays for scores alone. */
 export interface ShowdownOptions {
@@ -222,8 +217,6 @@ export interface ResultLine {
 export interface SongResults {
   songIndex: number;
   lines: ResultLine[];
-  /** Band mode: the band's score (everyone's added up) and its stars, against the parts' pars added up. */
-  band?: { score: number; stars: number };
 }
 
 export type PartyPhase = 'lobby' | 'playing' | 'results';
@@ -242,8 +235,6 @@ export interface PartyState {
   mode: PartyMode | null;
   /** The party plays a Showdown, with these options; null for any other mode. */
   showdown: ShowdownOptions | null;
-  /** The party plays as a band (spec 4.5): up to four, one per part, for one band score. */
-  band: boolean;
   /** Private: never offered to friends on Discord (spec 5.4). */
   private: boolean;
 }
@@ -276,8 +267,6 @@ export interface BoardLine {
   aim?: string;
   /** Showdown: under a hit now, or about to be. */
   hit?: boolean;
-  /** Band mode: dropped out after a run of misses, until a bandmate brings them back. */
-  dropped?: boolean;
 }
 
 /* WebSocket messages ------------------------------------------------------------------------ */
@@ -299,8 +288,7 @@ export type ClientMessage =
    */
   | { type: 'start'; songIndex: number; charts: WireChart[]; assign: Record<string, number> }
   | { type: 'progress'; songIndex: number; score: number; streak: number; stars: number }
-  /** `run`: in band mode, the run itself (as in ScoreSubmission), so the band's score can be checked for its board. */
-  | { type: 'finish'; songIndex: number; result: SongScore; run?: { ops: string; times: string } }
+  | { type: 'finish'; songIndex: number; result: SongScore }
   /** The player left the song early. */
   | { type: 'quit'; songIndex: number }
   /** The host takes everyone back to the lobby (to pick another set). */
@@ -318,13 +306,7 @@ export type ClientMessage =
   /** A player who is not playing this song cheers the others on. */
   | { type: 'cheer' }
   /** The host makes the party private (never offered on Discord), or not. */
-  | { type: 'private'; on: boolean }
-  /** Band mode: this player started overdrive in bar `bar` of the song, for `seconds`. */
-  | { type: 'overdrive'; songIndex: number; bar: number; seconds: number }
-  /** Band mode: this player dropped out (or is back in). */
-  | { type: 'dropped'; songIndex: number; out: boolean }
-  /** Band mode: this player completed an overdrive phrase, which brings dropped-out bandmates back. */
-  | { type: 'revive'; songIndex: number };
+  | { type: 'private'; on: boolean };
 
 export type ServerMessage =
   | { type: 'welcome'; you: Account; server: string; protocol: number }
@@ -344,11 +326,7 @@ export type ServerMessage =
   /** Showdown, to the target: a hit from `from` (a name) lands at `at` (the server's clock) and lasts `ms`. */
   | { type: 'hit'; songIndex: number; from: string; at: number; ms: number }
   /** A player watching cheers the players on. */
-  | { type: 'cheer'; from: string }
-  /** Band mode: two or more started overdrive in one bar: everyone's multiplier doubles from `at` (server clock) for `ms`. */
-  | { type: 'band-overdrive'; songIndex: number; at: number; ms: number }
-  /** Band mode, to a player who dropped out: `by` (a name) brought them back. */
-  | { type: 'revive'; songIndex: number; by: string };
+  | { type: 'cheer'; from: string };
 
 /* Leaderboards ------------------------------------------------------------------------------ */
 
@@ -403,20 +381,4 @@ export interface Run {
   times: string;
   result: SongScore;
   at: number;
-}
-
-/** A band's run on a song: its players, their parts and difficulties, and the band score. */
-export interface BandLine {
-  players: { name: string; part: Part; difficulty: Difficulty }[];
-  score: number;
-  stars: number;
-  at: number;
-}
-
-/**
- * `GET /bands/:songId`: a song's band boards, one per line-up (the set of charts played), each best
- * first.
- */
-export interface BandBoard {
-  lineups: { key: string; parts: { part: Part; difficulty: Difficulty }[]; lines: BandLine[] }[];
 }

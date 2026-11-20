@@ -6,7 +6,7 @@ import { StageView } from '../render/stage/StageView';
 import type { Avatars } from '../render/aurora/AuroraStage';
 import { barAt, barIntensity } from '../render/stage/LightShow';
 import { resolveGraphics } from './graphics';
-import { GameSession, PHRASE_REWARD, RULE, type GameEvent, type Results } from './GameSession';
+import { GameSession, PHRASE_REWARD, type Results } from './GameSession';
 import { ReplayPlayback, ReplayRecorder, replayResults, type ReplayInputs } from './replay';
 import { BufferAnalyser } from '../audio/bufferAnalyser';
 import type { StageInput } from '../render/stage/protocol';
@@ -16,7 +16,7 @@ import { GamepadInput, KeyboardInput, TouchInput, type InputHandlers } from './i
 import { WINDOWS } from './judge';
 import { GOLD_STARS, MAX_MULTIPLIER, multiplierFor, STREAK_PER_MULTIPLIER } from './scoring';
 import { highwaySpeed, type Settings } from './settings';
-import { DRAIN_CAP, DROP_MISSES } from '../net/protocol';
+import { DRAIN_CAP } from '../net/protocol';
 
 export interface HudRefs {
   score: HTMLElement;
@@ -47,7 +47,7 @@ export interface HudRefs {
 interface Effect {
   from: number;
   to: number;
-  kind: 'drain' | 'fog' | 'boost';
+  kind: 'drain' | 'fog';
   state: 0 | 1 | 2;
 }
 
@@ -198,22 +198,12 @@ export class PlayController {
   private readonly avatars: Avatars | undefined;
   /**
    * What playing together does to this run for a while, in song time: Showdown's Drain caps the
-   * multiplier and its Fog hazes the far highway; band overdrive doubles the multiplier.
+   * multiplier and its Fog hazes the far highway.
    * `state`: 0 before it starts, 1 while it lasts, 2 once over.
    */
   private effects: Effect[] = [];
-  /** Band mode: drops out after a long run of misses (see DROP_MISSES), until a bandmate brings them back. */
-  band = false;
-  private out = false;
-  private missRun = 0;
   /** The multiplier rule last recorded (GameSession's RULE). */
   private ruleNow = 0;
-  /** Band mode: this player started overdrive, in bar `bar` of the song, for `seconds`. */
-  onOverdriveStart: ((bar: number, seconds: number) => void) | null = null;
-  /** Band mode: this player completed an overdrive phrase (which brings dropped-out bandmates back). */
-  onPhrase: (() => void) | null = null;
-  /** Band mode: this player dropped out, or was brought back. */
-  onOut: ((out: boolean) => void) | null = null;
 
   constructor(
     private readonly engine: AudioEngine,
@@ -330,7 +320,6 @@ export class PlayController {
     const chart = this.chart;
     this.highway.attach(this.session);
     this.unwire = this.session.on((e) => {
-      if (this.band && !this.playback) this.followBand(e);
       if (e.type === 'hit') {
         this.flashFeedback(e.grade.toUpperCase(), e.grade, e.delta);
         this.rumble.hit(e.lane, e.grade);
@@ -355,17 +344,6 @@ export class PlayController {
         this.rumble.phraseComplete();
       }
     });
-  }
-
-  /** Band mode: a long run of misses drops this player out; their own phrases and overdrive go to the band. */
-  private followBand(e: GameEvent) {
-    if (e.type === 'hit' || e.type === 'release') this.missRun = 0;
-    else if (e.type === 'miss' && ++this.missRun >= DROP_MISSES && !this.out) {
-      this.out = true;
-      this.recordRule(this.session.time);
-      this.onOut?.(true);
-    } else if (e.type === 'phrase-complete') this.onPhrase?.();
-    else if (e.type === 'overdrive-start') this.onOverdriveStart?.(barAt(this.barTimes, this.session.time), this.session.overdriveSeconds);
   }
 
   private readonly resize = () => {
@@ -401,21 +379,7 @@ export class PlayController {
     this.addEffect(at, ms, drain ? 'drain' : 'fog');
   }
 
-  /** Band mode: band overdrive from `at` (performance.now ms) for `ms`: the multiplier doubles. */
-  bandOverdrive(at: number, ms: number) {
-    this.addEffect(at, ms, 'boost');
-  }
-
-  /** Band mode: a bandmate's overdrive phrase brings this player back in. */
-  revive() {
-    if (!this.out || this.phase !== 'playing') return;
-    this.out = false;
-    this.missRun = 0;
-    this.recordRule(this.engine.time());
-    this.onOut?.(false);
-  }
-
-  private addEffect(at: number, ms: number, kind: 'drain' | 'fog' | 'boost') {
+  private addEffect(at: number, ms: number, kind: 'drain' | 'fog') {
     if (this.playback) return;
     const from = this.engine.time(at);
     this.effects.push({ from, to: from + (ms / 1000) * this.engine.playbackRate, kind, state: 0 });
@@ -434,7 +398,6 @@ export class PlayController {
     due.sort((a, b) => a.at - b.at);
     for (const d of due) {
       d.e.state = d.next;
-      if (d.next === 1 && d.e.kind === 'boost') this.stage?.overdriveStart();
       this.recordRule(d.at);
     }
     this.effects = this.effects.filter((e) => e.state !== 2);
@@ -444,7 +407,7 @@ export class PlayController {
   /** Records the multiplier's rule at song time `at`, if it changed. */
   private recordRule(at: number) {
     const on = (kind: string) => this.effects.some((e) => e.state === 1 && e.kind === kind);
-    const rule = (on('drain') ? DRAIN_CAP : 0) | (on('boost') ? RULE.boost : 0) | (this.out ? RULE.out : 0);
+    const rule = on('drain') ? DRAIN_CAP : 0;
     if (rule === this.ruleNow) return;
     this.ruleNow = rule;
     this.recorder?.rule(rule, at);

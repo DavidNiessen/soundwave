@@ -12,7 +12,6 @@ import {
   PROTOCOL_VERSION,
   type Account,
   type ApiError,
-  type BandBoard,
   type Avatar,
   type Board,
   type BoardLine,
@@ -69,10 +68,10 @@ export interface OnlineState {
 }
 
 /**
- * What happens to a player during a party's song: a Showdown Strike's answer or a hit coming, band
- * overdrive or being brought back in a band, a cheer. Times (`at`) are this machine's performance.now.
+ * What happens to a player during a party's song: a Showdown Strike's answer or a hit coming, or a
+ * cheer. Times (`at`) are this machine's performance.now.
  */
-export type PlayEvent = Extract<ServerMessage, { type: 'struck' | 'hit' | 'cheer' | 'band-overdrive' | 'revive' }>;
+export type PlayEvent = Extract<ServerMessage, { type: 'struck' | 'hit' | 'cheer' }>;
 
 /** A song the party starts: when (performance.now ms on this machine) and on which chart (null: sit it out). */
 export interface PartyStart {
@@ -599,10 +598,8 @@ class OnlineClient {
         return;
       case 'hit':
       case 'struck':
-      case 'cheer':
-      case 'band-overdrive':
-      case 'revive': {
-        const e: PlayEvent = msg.type === 'hit' || msg.type === 'band-overdrive' ? { ...msg, at: msg.at - this.offset } : msg;
+      case 'cheer': {
+        const e: PlayEvent = msg.type === 'hit' ? { ...msg, at: msg.at - this.offset } : msg;
         for (const l of this.playListeners) l(e);
         return;
       }
@@ -656,9 +653,8 @@ class OnlineClient {
   progress(songIndex: number, score: number, streak: number, stars: number) {
     this.send({ type: 'progress', songIndex, score, streak, stars });
   }
-  /** `run`: in band mode, the run itself, so the band's score can be checked for its board. */
-  finish(songIndex: number, result: SongScore, run?: { ops: string; times: string }) {
-    this.sendOrKeep({ type: 'finish', songIndex, result, ...(run ? { run } : {}) });
+  finish(songIndex: number, result: SongScore) {
+    this.sendOrKeep({ type: 'finish', songIndex, result });
   }
   /** The host picks what the party plays, or goes back to just the players (null). */
   setMode(mode: PartyMode | null) {
@@ -679,21 +675,6 @@ class OnlineClient {
   }
   /** A party to join once signed in (from Discord). */
   private waitingParty: string | null = null;
-  /** Band mode: this player started overdrive (two in one bar make band overdrive). */
-  overdriveStarted(songIndex: number, bar: number, seconds: number) {
-    this.send({ type: 'overdrive', songIndex, bar, seconds });
-  }
-  /** Band mode: this player dropped out, or is back in. */
-  dropped(songIndex: number, out: boolean) {
-    this.send({ type: 'dropped', songIndex, out });
-  }
-  /** Band mode: this player completed an overdrive phrase, which brings dropped-out bandmates back. */
-  revive(songIndex: number) {
-    this.send({ type: 'revive', songIndex });
-  }
-  bandBoard(songId: string) {
-    return this.request<BandBoard>(`/bands/${songId}`, { auth: true });
-  }
   quit(songIndex: number) {
     this.sendOrKeep({ type: 'quit', songIndex });
   }

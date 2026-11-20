@@ -22,12 +22,10 @@ const NoteState = { Pending: 0, Hit: 1, Missed: 2 } as const;
 const SUSTAIN_RELEASE_GRACE = 0.12;
 /**
  * Playing together changes the multiplier by a rule, a few bits: Showdown's Drain caps it (the
- * cap, 0..3, in the low bits), band overdrive doubles it, and a band member who dropped out
- * scores nothing. The rule is part of a run (replay.ts), so a re-judged score includes it.
+ * cap, 0..3, in the low bits). The rule is part of a run (replay.ts), so a re-judged score includes
+ * it. Bits beyond the cap are ignored (an older version's band mode used them).
  */
-export const RULE = { cap: 3, boost: 4, out: 8 } as const;
-/** Band overdrive: the multiplier of every band member doubles while it lasts. */
-export const BAND_FACTOR = 2;
+export const RULE = { cap: 3 } as const;
 
 /** Fraction of the overdrive meter a completed phrase awards. */
 export const PHRASE_REWARD = 0.25;
@@ -88,8 +86,7 @@ export class GameSession {
   /** The score of a flawless run without overdrive: what the stars (and Showdown's shares) are measured against. */
   readonly par: number;
   /**
-   * What playing together does to the multiplier now (see `RULE`): Showdown's Drain caps it, band
-   * overdrive doubles it, and a band member who dropped out scores nothing until they are brought back.
+   * What playing together does to the multiplier now (see `RULE`): Showdown's Drain caps it.
    */
   private rule = 0;
   /** The share of par that turns the stars gold on this chart (it depends on how much overdrive the chart offers). */
@@ -143,8 +140,7 @@ export class GameSession {
   }
 
   get multiplier() {
-    if (this.rule & RULE.out) return 0;
-    const m = multiplierFor(this.streak) * (this.overdriveActive ? OVERDRIVE_FACTOR : 1) * (this.rule & RULE.boost ? BAND_FACTOR : 1);
+    const m = multiplierFor(this.streak) * (this.overdriveActive ? OVERDRIVE_FACTOR : 1);
     const cap = this.rule & RULE.cap;
     return cap > 0 ? Math.min(cap, m) : m;
   }
@@ -262,12 +258,7 @@ export class GameSession {
   /** From song time t the multiplier follows `rule` (see `RULE`; 0 for none). */
   setRule(rule: number, t = this.now) {
     this.reach(t);
-    this.rule = rule & 15;
-  }
-
-  /** How long the overdrive running now has left, seconds (0 when none runs). */
-  get overdriveSeconds() {
-    return this.overdriveActive ? this.overdrive / this.drain : 0;
+    this.rule = rule & RULE.cap;
   }
 
   /**

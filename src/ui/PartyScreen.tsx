@@ -18,6 +18,13 @@ import {
   Crown,
   Download,
   Gavel,
+  KeyRound,
+  Link as LinkIcon,
+  LoaderCircle,
+  Pencil,
+  Server as ServerIcon,
+  ShieldCheck,
+  UserRound,
   Gauge,
   ListMusic,
   Lock,
@@ -49,8 +56,6 @@ import { confirmInput } from '../input/pads';
 import { online, parseInvite, type OnlineState } from '../net/client';
 import { partySongs, type Transfer } from '../net/partySongs';
 import {
-  BAND_MAX,
-  DROP_MISSES,
   PARTY_MAX,
   PARTY_MODES,
   type BoardLine,
@@ -107,13 +112,6 @@ const MODES: Record<PartyMode, { label: string; icon: LucideIcon; cap: string; w
     cap: 'Everyone plays the set on the part they like. The best score takes each song, and the set.',
     who: `2 to ${PARTY_MAX} players`,
     binding: 'party.versus',
-  },
-  band: {
-    label: 'Band',
-    icon: Users,
-    cap: 'One on each part, for one band score. Overdrive together and everyone’s multiplier doubles.',
-    who: `2 to ${BAND_MAX} players, one per part`,
-    binding: 'party.bandMode',
   },
   showdown: {
     label: 'Showdown',
@@ -206,111 +204,138 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
   const [password, setPassword] = useState('');
   const [serverPassword, setServerPassword] = useState('');
   const [code, setCode] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<'connect' | 'account' | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const info = s.info;
+  /** The player chose to type another address while one is known. */
+  const [changing, setChanging] = useState(false);
+  const info = changing ? null : s.info;
 
-  const run = async (what: () => Promise<unknown>) => {
-    setBusy(true);
+  const run = async (what: 'connect' | 'account', task: () => Promise<unknown>) => {
+    setBusy(what);
     setProblem(null);
     try {
-      await what();
+      await task();
     } catch (e) {
       setProblem((e as Error).message);
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
   // The server is asked what it is once it is known (a stored address, or an invite link opened).
   useEffect(() => {
-    if (s.server && !info) void run(() => online.choose(s.server!));
-  }, [s.server, info]);
+    if (s.server && !s.info) void run('connect', () => online.choose(s.server!));
+  }, [s.server, s.info]);
   // An invite link opened elsewhere (a click, the web game's address) lands here ready to sign up.
   useEffect(() => {
     if (!s.invite) return;
     setHow('up');
+    setChanging(false);
     if (s.server) setAddress(s.server.replace(/^https?:\/\//, ''));
   }, [s.invite, s.server]);
 
   /** The server field takes an address or a whole invite link. */
   const connect = () =>
-    run(async () => {
+    run('connect', async () => {
       const invite = parseInvite(address);
-      if (!invite) return void (await online.choose(address));
-      await online.useInvite(invite);
-      setAddress(invite.server.replace(/^https?:\/\//, ''));
-      setHow('up');
+      if (!invite) await online.choose(address);
+      else {
+        await online.useInvite(invite);
+        setAddress(invite.server.replace(/^https?:\/\//, ''));
+        setHow('up');
+      }
+      setChanging(false);
     });
 
   const mode = info?.mode;
   /** A code typed or pasted (a whole link works too), else the invite a link brought. */
   const invite = (code.trim() && (parseInvite(code)?.invite ?? code.trim())) || s.invite || undefined;
   const submit = () =>
-    run(() =>
+    run('account', () =>
       how === 'in'
         ? online.signIn(name, password)
         : online.signUp({ name, password, ...(invite ? { invite } : mode === 'password' ? { serverPassword } : {}) }),
     );
+  const needsCode = how === 'up' && mode === 'invite' && !invite;
+  const short = how === 'up' && password.length > 0 && password.length < 8;
 
   return (
     <div className="party-connect">
-      <form
-        className="ready-panel"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void connect();
-        }}
-      >
-        <h2 className="label">1 · The server</h2>
-        <label className="meta-field">
-          <span className="dim">Its address, or the invite link you were sent</span>
-          <input
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            placeholder="play.example.com"
-            spellCheck={false}
-            autoComplete="url"
-            inputMode="url"
-            data-autofocus
-          />
-        </label>
-        <button type="submit" className={`btn wide ${info ? '' : 'primary'}`} disabled={busy || !address.trim()}>
-          {info ? 'Connect again' : 'Connect'}
-        </button>
-        {info && (
-          <div className="party-server">
-            <span className="online-dot on" aria-hidden />
-            <span className="song-text">
-              <span className="song-title">{info.name}</span>
-              <span className="song-artist">
-                {info.description && `${info.description} · `}
-                {info.online} online ·{' '}
-                {
-                  {
-                    public: 'anyone can make an account',
-                    password: 'making an account needs the server’s password or an invite',
-                    invite: 'making an account needs an invite',
-                  }[info.mode]
-                }
-              </span>
-            </span>
-          </div>
-        )}
-      </form>
+      <div className="connect-card">
+        <ol className="connect-steps" aria-label="Steps">
+          <li className={info ? 'done' : 'on'}>
+            <span className="num">{info ? <Check strokeWidth={ICON_STROKE} aria-hidden /> : 1}</span>
+            Server
+          </li>
+          <li className={info ? 'on' : ''}>
+            <span className="num">2</span>
+            You
+          </li>
+        </ol>
 
-      <form
-        className={`ready-panel ${info ? '' : 'waiting'}`}
-        aria-disabled={!info}
-        onSubmit={(e) => {
-          e.preventDefault();
-          void submit();
-        }}
-      >
-        <h2 className="label">2 · You</h2>
-        {!info && <p className="hint">Connect to a server first.</p>}
-        {info && (
-          <>
+        {!info ? (
+          <form
+            className="connect-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void connect();
+            }}
+          >
+            <h2 className="connect-title">Connect to a server</h2>
+            <p className="hint">
+              Soundwave servers are run by players, for their friends. Type the address of one, or paste the invite link someone sent you.
+            </p>
+            <label className="meta-field">
+              <span className="dim">Address or invite link</span>
+              <span className="connect-input">
+                <ServerIcon strokeWidth={ICON_STROKE} aria-hidden />
+                <input
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder="play.example.com"
+                  spellCheck={false}
+                  autoComplete="url"
+                  inputMode="url"
+                  data-autofocus
+                />
+              </span>
+            </label>
+            <button type="submit" className="btn primary wide connect-go" disabled={!!busy || !address.trim()}>
+              {busy === 'connect' ? (
+                <LoaderCircle className="spin" strokeWidth={ICON_STROKE} aria-hidden />
+              ) : (
+                <LinkIcon strokeWidth={ICON_STROKE} aria-hidden />
+              )}
+              {busy === 'connect' ? 'Connecting…' : 'Connect'}
+            </button>
+            {changing && (
+              <button type="button" className="btn quiet wide" onClick={() => setChanging(false)}>
+                Keep {s.info?.name ?? 'the server I had'}
+              </button>
+            )}
+          </form>
+        ) : (
+          <form
+            className="connect-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submit();
+            }}
+          >
+            <div className="party-server">
+              <span className="online-dot on" aria-hidden />
+              <span className="song-text">
+                <span className="song-title">{info.name}</span>
+                <span className="song-artist">
+                  {info.description && `${info.description} · `}
+                  {info.online} online
+                </span>
+              </span>
+              <button type="button" className="btn small quiet" onClick={() => setChanging(true)}>
+                <Pencil strokeWidth={ICON_STROKE} aria-hidden />
+                Change
+              </button>
+            </div>
             <div className="choice-pair" role="radiogroup" aria-label="Sign in or make an account">
               <button
                 type="button"
@@ -319,7 +344,7 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
                 className={`choice ${how === 'in' ? 'on' : ''}`}
                 onClick={() => setHow('in')}
               >
-                Sign in
+                I have an account
               </button>
               <button
                 type="button"
@@ -328,53 +353,90 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
                 className={`choice ${how === 'up' ? 'on' : ''}`}
                 onClick={() => setHow('up')}
               >
-                Make an account
+                I’m new here
               </button>
             </div>
+            {how === 'up' && (
+              <p className="hint connect-note">
+                {s.invite
+                  ? 'Your invite lets you in.'
+                  : {
+                      public: 'Anyone can make an account here.',
+                      password: 'Making an account here needs the server’s password, or an invite.',
+                      invite: 'Making an account here needs an invite from someone on it.',
+                    }[info.mode]}
+              </p>
+            )}
             <label className="meta-field">
               <span className="dim">Name</span>
-              <input value={name} onChange={(e) => setName(e.target.value)} maxLength={24} autoComplete="username" spellCheck={false} />
+              <span className="connect-input">
+                <UserRound strokeWidth={ICON_STROKE} aria-hidden />
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  maxLength={24}
+                  autoComplete="username"
+                  spellCheck={false}
+                  data-autofocus
+                />
+              </span>
             </label>
             <label className="meta-field">
-              <span className="dim">Password{how === 'up' && ', at least 8 characters'}</span>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                maxLength={200}
-                autoComplete={how === 'up' ? 'new-password' : 'current-password'}
-              />
+              <span className="dim">Password</span>
+              <span className="connect-input">
+                <KeyRound strokeWidth={ICON_STROKE} aria-hidden />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  maxLength={200}
+                  autoComplete={how === 'up' ? 'new-password' : 'current-password'}
+                  aria-invalid={short}
+                />
+              </span>
+              {how === 'up' && <span className={short ? 'warn' : 'dim'}>At least 8 characters</span>}
             </label>
-            {how === 'up' && s.invite && !code && <p className="hint">Your invite lets you in.</p>}
             {how === 'up' && mode === 'password' && !invite && (
               <label className="meta-field">
                 <span className="dim">The server’s password</span>
-                <input type="password" value={serverPassword} onChange={(e) => setServerPassword(e.target.value)} />
+                <span className="connect-input">
+                  <ShieldCheck strokeWidth={ICON_STROKE} aria-hidden />
+                  <input type="password" value={serverPassword} onChange={(e) => setServerPassword(e.target.value)} />
+                </span>
               </label>
             )}
             {how === 'up' && !s.invite && (
               <label className="meta-field">
-                <span className="dim">
-                  {mode === 'invite' ? 'Your invite link or code' : 'An invite link or code, if you have one'} (the server’s owner uses
-                  their set-up code here)
+                <span className="dim">{mode === 'invite' ? 'Your invite link or code' : 'An invite link or code (if you have one)'}</span>
+                <span className="connect-input">
+                  <LinkIcon strokeWidth={ICON_STROKE} aria-hidden />
+                  <input value={code} onChange={(e) => setCode(e.target.value)} spellCheck={false} />
                 </span>
-                <input value={code} onChange={(e) => setCode(e.target.value)} spellCheck={false} />
+                <span className="dim">Owner: use the set-up code your server printed.</span>
               </label>
             )}
-            <button type="submit" className="btn primary wide" disabled={busy || !name.trim() || !password}>
-              <LogIn strokeWidth={ICON_STROKE} aria-hidden />
-              {how === 'in' ? 'Sign in' : 'Make the account'}
+            <button
+              type="submit"
+              className="btn primary wide connect-go"
+              disabled={!!busy || !name.trim() || !password || short || needsCode}
+            >
+              {busy === 'account' ? (
+                <LoaderCircle className="spin" strokeWidth={ICON_STROKE} aria-hidden />
+              ) : (
+                <LogIn strokeWidth={ICON_STROKE} aria-hidden />
+              )}
+              {busy === 'account' ? 'One moment…' : how === 'in' ? 'Sign in' : 'Make my account'}
             </button>
-          </>
+          </form>
         )}
-      </form>
-      {problem && (
-        <p className="party-error" role="alert">
-          {problem}
-        </p>
-      )}
+        {problem && (
+          <p className="party-error" role="alert">
+            {problem}
+          </p>
+        )}
+      </div>
       <p className="hint party-note">
-        Nothing is sent anywhere until you connect. A server stores your name, a hash of your password, and what its features need; you can
+        Nothing is sent anywhere until you connect. A server keeps your name, a hash of your password and what its features need. You can
         save all of it, or delete your account, at any time.
       </p>
     </div>
@@ -454,7 +516,7 @@ function NoParty({ s, settings, setlist, onBack, onBoards, onSongs, onAvatar }: 
               Start a party
               <Hint {...keysOf('party.create')} {...hints} />
             </span>
-            <span className="tile-cap">Friends join with its code. Then you pick what to play together: Versus, Band or Showdown.</span>
+            <span className="tile-cap">Friends join with its code. Then you pick what to play together: Versus or Showdown.</span>
             <span className="tile-meta">Up to {PARTY_MAX} players</span>
             <span className="hero-songs">
               {PARTY_MODES.map((m, i) => (
@@ -785,14 +847,7 @@ function PartyRoom({ party, s, settings, onBack, me }: PartyProps & { me: Member
   ]);
 
   /** A word under a mode for this party as it is: who would sit out, or what it needs. */
-  const fit = (m: PartyMode) =>
-    m === 'band' && n > BAND_MAX
-      ? `${n - BAND_MAX} of you would watch`
-      : m === 'showdown' && n < 3
-        ? 'Works with 2, better with more'
-        : n < 2
-          ? 'Waiting for friends to join'
-          : '';
+  const fit = (m: PartyMode) => (m === 'showdown' && n < 3 ? 'Works with 2, better with more' : n < 2 ? 'Waiting for friends to join' : '');
 
   return (
     <div className="lobby-body party-room">
@@ -1016,7 +1071,6 @@ function ModeLobby({
             on={{ toggleHits, toggleOnePart, toggleRotation }}
           />
         )}
-        {mode === 'band' && <BandNotes party={party} />}
         <Players party={party} me={me} host={host} showReady />
       </div>
 
@@ -1088,9 +1142,7 @@ function ModeLobby({
           <span className="dim">
             {locked
               ? `Everyone plays ${PART_LABEL[locked].toLowerCase()} in this Showdown.`
-              : mode === 'band'
-                ? 'Each part is played once: if yours is taken, you get one nobody has.'
-                : 'A song without your part is played on one it has.'}
+              : 'A song without your part is played on one it has.'}
           </span>
         </p>
         {!calibrated && (
@@ -1338,29 +1390,6 @@ function ShowdownOptionsPanel({
   );
 }
 
-/** What a band is, and what keeps this one from playing as it is. */
-function BandNotes({ party }: { party: PartyState }) {
-  const parts = party.members.map((m) => m.part);
-  const twice = PARTS.filter((p) => parts.filter((x) => x === p).length > 1);
-  return (
-    <section className="ready-panel" aria-label="Band">
-      <h2 className="label">
-        <Users strokeWidth={ICON_STROKE} aria-hidden /> Band
-      </h2>
-      <p className="hint">
-        One band score for everyone. Two overdrives in one bar double everyone’s multiplier, and a player who misses {DROP_MISSES} notes in
-        a row drops out until a bandmate completes an overdrive phrase.
-      </p>
-      {party.members.length > BAND_MAX && <p className="warn">A band has {BAND_MAX} players at most: the others watch.</p>}
-      {twice.length > 0 && (
-        <p className="warn">
-          Two of you picked {twice.map((p) => PART_LABEL[p].toLowerCase()).join(' and ')}: one of you gets a part nobody has.
-        </p>
-      )}
-    </section>
-  );
-}
-
 /* While a song plays ---------------------------------------------------------------------- */
 
 const nameOf = (party: PartyState | null, id: string) => party?.members.find((m) => m.id === id)?.name ?? 'Left';
@@ -1373,7 +1402,6 @@ export function PartyBoard({ me }: { me: string }) {
   const s = useOnline();
   const board = useSyncExternalStore(online.subscribeBoard, online.board);
   const showdown = !!s.party?.showdown;
-  const band = !!s.party?.band;
   const all = [...(board?.lines ?? [])]
     .filter((l) => !l.out || l.score > 0)
     .sort((a, b) => (showdown ? (b.share ?? 0) - (a.share ?? 0) : b.score - a.score));
@@ -1384,14 +1412,6 @@ export function PartyBoard({ me }: { me: string }) {
   const lines = showdown ? all.filter((_, i) => i < 5 || (at >= 0 && Math.abs(i - at) <= 1)) : all;
   return (
     <ol className="party-board" aria-label="Scores">
-      {band && (
-        <li className="party-board-row band">
-          <span className="num rank" />
-          <span className="party-name">Band</span>
-          <span className="num">{all.reduce((sum, l) => sum + l.score, 0).toLocaleString()}</span>
-          <span />
-        </li>
-      )}
       {lines.map((l) => (
         <BoardRow
           key={l.id}
@@ -1436,7 +1456,7 @@ function BoardRow({
         {threat && <Swords className="aim" strokeWidth={ICON_STROKE} aria-label="Their Strike would hit you" />} {name}
       </span>
       <span className="num">{showdown ? percent(l.share ?? 0) : l.score.toLocaleString()}</span>
-      <span className="dim num">{l.done ? 'done' : l.out ? 'left' : l.hit ? 'hit' : l.dropped ? 'out' : `×${l.streak}`}</span>
+      <span className="dim num">{l.done ? 'done' : l.out ? 'left' : l.hit ? 'hit' : `×${l.streak}`}</span>
     </li>
   );
 }
@@ -1485,21 +1505,6 @@ function PartyResults({ party, s, settings, onBack, onStartSong }: PartyProps & 
         <h2 className="label">
           Song {party.songIndex + 1} of {party.set.length}: {song?.title}
         </h2>
-        {results?.band && (
-          <div className="set-card party-result band-total">
-            <span className="slot-num">
-              <Users strokeWidth={ICON_STROKE} aria-hidden />
-            </span>
-            <span className="song-text">
-              <span className="song-title">The band</span>
-              <span className="song-artist">Everyone’s score added up</span>
-            </span>
-            <span className="set-best">
-              <Stars n={results.band.stars} />
-              <span className="num">{results.band.score.toLocaleString()}</span>
-            </span>
-          </div>
-        )}
         {results && <ResultTable lines={results.lines} me={s.account!.id} />}
         {party.showdown && (
           <>

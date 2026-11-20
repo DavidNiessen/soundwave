@@ -51,8 +51,6 @@ interface Props {
     onProgress(score: number, streak: number, stars: number): void;
     /** A Showdown: the overdrive button strikes the player above (with hits on), and hits land here. */
     showdown?: { songIndex: number; hits: boolean; me: string };
-    /** A band: overdrive and phrases go to the band, and a long run of misses drops this player out. */
-    band?: { songIndex: number; me: string };
   };
 }
 
@@ -109,8 +107,6 @@ export function PlayScreen({
   const [run, setRun] = useState(0);
   const [hit, setHit] = useState<HitNote | null>(null);
   const [note, setNote] = useState<{ text: string; key: number } | null>(null);
-  // Band mode: this player dropped out, until a bandmate brings them back.
-  const [out, setOut] = useState(false);
   const finishRef = useRef(onFinish);
   finishRef.current = onFinish;
   const mode = useInputMode();
@@ -164,7 +160,7 @@ export function PlayScreen({
           togetherRef.current?.onProgress(Math.round(s.score), s.streak, s.progressStars);
         }, BOARD_INTERVAL_MS)
       : 0;
-    const unShowdown = party?.showdown ? showdown(ctrl, party.showdown) : party?.band ? playBand(ctrl, party.band) : () => {};
+    const unShowdown = party?.showdown ? showdown(ctrl, party.showdown) : party ? cheers() : () => {};
     // A song that loses the window (a call, another app) pauses instead of running on unseen.
     const hidden = () => document.hidden && ctrl.pause();
     document.addEventListener('visibilitychange', hidden);
@@ -197,7 +193,7 @@ export function PlayScreen({
       };
     return online.onPlayEvent((e) => {
       if (e.type === 'cheer') return setNote({ text: `${e.from} cheers you on`, key: performance.now() });
-      if (e.type === 'band-overdrive' || e.type === 'revive' || e.songIndex !== sd.songIndex) return;
+      if (e.songIndex !== sd.songIndex) return;
       if (e.type === 'struck') {
         asking = false;
         if (!e.target) return ctrl.overdriveNow();
@@ -211,29 +207,10 @@ export function PlayScreen({
     });
   }
 
-  /**
-   * Band mode: overdrive and completed phrases are told to the band (two overdrives in one bar make
-   * band overdrive; a phrase brings dropped-out bandmates back), and so is dropping out.
-   */
-  function playBand(ctrl: PlayController, band: { songIndex: number; me: string }) {
-    ctrl.band = true;
-    ctrl.onOverdriveStart = (bar, seconds) => online.overdriveStarted(band.songIndex, bar, seconds);
-    ctrl.onPhrase = () => {
-      if (online.board()?.lines.some((l) => l.dropped && l.id !== band.me)) online.revive(band.songIndex);
-    };
-    ctrl.onOut = (out) => {
-      online.dropped(band.songIndex, out);
-      setOut(out);
-    };
+  /** Any other party: players watching can cheer the ones playing on. */
+  function cheers() {
     return online.onPlayEvent((e) => {
-      if (e.type === 'cheer') return setNote({ text: `${e.from} cheers you on`, key: performance.now() });
-      if (e.type === 'struck' || e.type === 'hit' || e.songIndex !== band.songIndex) return;
-      if (e.type === 'band-overdrive') {
-        ctrl.bandOverdrive(e.at, e.ms);
-        return setNote({ text: 'Band overdrive: everyone’s multiplier doubles', key: performance.now() });
-      }
-      ctrl.revive();
-      setNote({ text: `${e.by} brought you back`, key: performance.now() });
+      if (e.type === 'cheer') setNote({ text: `${e.from} cheers you on`, key: performance.now() });
     });
   }
 
@@ -354,11 +331,6 @@ export function PlayScreen({
       </div>
       {together?.board}
       {hit && <HitBanner hit={hit} onOver={() => setHit(null)} />}
-      {out && (
-        <p className="showdown-hit coming" role="alert">
-          You dropped out: your notes score nothing until a bandmate’s overdrive phrase brings you back.
-        </p>
-      )}
       {note && (
         <p className="showdown-note" key={note.key} role="status">
           {note.text}

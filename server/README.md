@@ -79,12 +79,6 @@ list. The owner and moderators remove cheated runs.
 A player's look on the stage is three colours (`GET` and `PUT /me/profile`, body `{ avatar: { top, bottom, finish } }`,
 `null` for none). Their party sees it at once.
 
-## Bands
-
-A party's host can make it a band: up to four players, one on each part, for one band score. At the end of a
-song every player's game sends its run along, and the server judges each again; only a band whose runs all
-check out goes on the song's band boards (`GET /bands/:songId`, one board per line-up of charts).
-
 ## Showdown
 
 A party's host can make it a Showdown: scores count as a share of each chart's par, the lowest
@@ -188,7 +182,6 @@ player's access token (`Authorization: Bearer …`). Bodies and answers are JSON
 | `POST /scores/:id/share`                             | Share your run to the replay list, or not: `{ shared }`                     |
 | `DELETE /scores/:id?reason=…`                        | Remove a cheated run (owner and moderators)                                 |
 | `GET /replays?song=…`                                | The replays players shared                                                  |
-| `GET /bands/:songId`                                 | A song's band boards, one per line-up                                       |
 | `GET /showdown/rotation`, `POST /showdown/rotation`  | The Showdown rotation; set it (owner and moderators): `{ songs }`           |
 | `GET /songs?query=…`, `POST /songs`                  | Shared songs; share one (the `.soundwave` file as the body)                 |
 | `GET /songs/:id/file`, `GET /songs/:id/charts`       | A shared song's file, or its charts without the audio                       |
@@ -197,7 +190,7 @@ player's access token (`Authorization: Bearer …`). Bodies and answers are JSON
 | `PUT /party/songs/:id`, `GET /party/songs/:id`       | Send one of your party's songs to the server; get it (party players only)   |
 | `GET /mod/reports`                                   | Reported songs (owner and moderators)                                       |
 | `POST /mod/…`, `GET /mod/audit`                      | Moderation, see above                                                       |
-| `/ws`                                                | The WebSocket: parties, Showdown, bands (see Protocol)                      |
+| `/ws`                                                | The WebSocket: parties and Showdown (see Protocol)                          |
 
 ## Protocol
 

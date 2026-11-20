@@ -22,8 +22,6 @@ export const SET_LIMIT = 20;
 /** The most notes in one chart: far beyond any real song, a bound on what one message can hold. */
 const NOTES_LIMIT = 30_000;
 const BEATS_LIMIT = 20_000;
-/** The longest a run's base64 text may be (hours of play), in a party's final score. */
-const RUN_TEXT_MAX = 2_200_000;
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -133,9 +131,7 @@ export function clientMessage(raw: unknown): ClientMessage | undefined {
     case 'finish': {
       const result = score(raw.result);
       if (!Number.isInteger(raw.songIndex) || !result) return undefined;
-      const r = raw.run;
-      const run = isObj(r) && str(r.ops, RUN_TEXT_MAX) && str(r.times, RUN_TEXT_MAX) ? { ops: r.ops, times: r.times } : undefined;
-      return { type: 'finish', songIndex: raw.songIndex as number, result, ...(run ? { run } : {}) };
+      return { type: 'finish', songIndex: raw.songIndex as number, result };
     }
     case 'quit':
       return Number.isInteger(raw.songIndex) ? { type: 'quit', songIndex: raw.songIndex as number } : undefined;
@@ -161,16 +157,6 @@ export function clientMessage(raw: unknown): ClientMessage | undefined {
       return { type: 'cheer' };
     case 'private':
       return typeof raw.on === 'boolean' ? { type: raw.type, on: raw.on } : undefined;
-    case 'overdrive':
-      return Number.isInteger(raw.songIndex) && Number.isInteger(raw.bar) && num(raw.seconds)
-        ? { type: 'overdrive', songIndex: raw.songIndex as number, bar: raw.bar as number, seconds: Math.max(0, Math.min(60, raw.seconds)) }
-        : undefined;
-    case 'dropped':
-      return Number.isInteger(raw.songIndex) && typeof raw.out === 'boolean'
-        ? { type: 'dropped', songIndex: raw.songIndex as number, out: raw.out }
-        : undefined;
-    case 'revive':
-      return Number.isInteger(raw.songIndex) ? { type: 'revive', songIndex: raw.songIndex as number } : undefined;
   }
   return undefined;
 }

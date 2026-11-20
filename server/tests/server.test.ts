@@ -187,7 +187,7 @@ describe('accounts', () => {
     const log = await api<{ action: string; target: string; reason: string }[]>('GET', '/mod/audit', undefined, owner.access);
     expect(log.body[0]).toMatchObject({ action: 'ban 2 h', target: 'Player', reason: 'Cheating' });
     const exp = await exported(owner.access);
-    expect(Object.keys(exp).sort()).toEqual(['README.txt', 'account.json', 'avatar.json', 'bands.json', 'runs.json', 'songs-shared.json']);
+    expect(Object.keys(exp).sort()).toEqual(['README.txt', 'account.json', 'avatar.json', 'runs.json', 'songs-shared.json']);
     expect(JSON.parse(exp['account.json']).account.name).toBe('Owner');
     expect(Object.values(exp).join('\n')).not.toContain('argon2id$');
   });

@@ -13,7 +13,6 @@ import { Accounts, Refusal } from './accounts.ts';
 import type { Config } from './config.ts';
 import type { Store, UserRow } from './db.ts';
 import { Parties } from './parties.ts';
-import { Bands } from './bands.ts';
 import { Profiles } from './profiles.ts';
 import { zip } from './zip.ts';
 import { Rotation } from './rotation.ts';
@@ -50,7 +49,6 @@ avatar.json        Your look on the stage: three colours, or null when you have 
 runs.json          Every run you sent to the leaderboards: the song, chart, part and difficulty, the
                    score, and the inputs it was judged from (base64; see src/game/replay.ts in the
                    game's source). Runs you shared to the replay list say so.
-bands.json         The band runs you played in, by song, with your part and difficulty.
 songs-shared.json  The songs you shared to the server's library.
 
 To delete your account and everything with it: Play together, Delete my account.
@@ -103,7 +101,6 @@ export async function startServer(config: Config, store: Store, log: (line: stri
   const partySongs = new PartySongs(config);
   const rotation = new Rotation(store);
   const profiles = new Profiles(store);
-  const bands = new Bands(store);
   /** Each signed-in player's socket (one per player: signing in elsewhere replaces it). */
   const sockets = new Map<string, WebSocket>();
   const clock = () => performance.now();
@@ -115,7 +112,6 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     send,
     clock,
     () => rotation.songs(),
-    (run) => void bands.record(run),
     (id) => partySongs.has(id),
   );
   /** What each player online says they are doing. */
@@ -196,7 +192,6 @@ export async function startServer(config: Config, store: Store, log: (line: stri
           'account.json': json(accounts.export(u)),
           'avatar.json': json(profiles.avatarOf(u.id) ?? null),
           'runs.json': json(scores.exportOf(u)),
-          'bands.json': json(bands.exportOf(u.id)),
           'songs-shared.json': json(songs.exportOf(u)),
         }),
         'soundwave-my-data.zip',
@@ -252,7 +247,6 @@ export async function startServer(config: Config, store: Store, log: (line: stri
 
   const ID = '([0-9a-f-]{36})';
   const patterns: [string, RegExp, Handler][] = [
-    ['GET', /^\/bands\/([0-9a-f]{64})$/, (req, _b, _ip, [song]) => (me(req), bands.board(song))],
     [
       'GET',
       /^\/boards\/([0-9a-f]{64})\/([0-9a-f]{64})\/(vocals|lead|bass|drums)\/(easy|medium|hard|expert)$/,

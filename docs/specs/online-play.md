@@ -1,7 +1,7 @@
 # Spec: playing together
 
-Status: **being built** (#16). Built: judging by time (milestone 0), the server, parties, leaderboards, Showdown, avatars, band mode, join from Discord,
-shared songs and the connected main menu. Still to do: Showdown, avatars, band mode, join from Discord.
+Status: **being built** (#16). Built: judging by time (milestone 0), the server, parties, leaderboards, Showdown, avatars, join from Discord,
+shared songs and the connected main menu. Band mode was built and then taken out for now.
 
 Decisions made while building, which override what follows:
 
@@ -24,17 +24,14 @@ Decisions made while building, which override what follows:
   the avatar is enough and free text from players would need moderating.
 - **Ending a party:** the host holds it (the button, or `L`), since it ends the party for everyone; players leave with a
   press.
-- **Band mode, as built:** band overdrive doubles every member's multiplier for as long as the shortest of the
-  overdrives that made it; a player drops out after 15 misses in a row (their notes score nothing) until a bandmate
-  completes an overdrive phrase; when every player is out the song still plays to its end. Band boards are per song,
-  one per line-up (the set of charts), and take a band only when every member's run, judged again, gives its score.
-  Band and Showdown runs are not posted to the song boards. Only in parties on a server (level 1 is not built).
+- **Band mode is taken out for now** (4.5): it was built, then removed with all its parts (the mode, band overdrive,
+  dropping out, band boards). A party plays Versus or Showdown. 4.5 below stays as the plan for when it comes back.
 - **Join from Discord, as built:** for parties on a server (level 1 sessions are not built). The join secret is the
   party's code and server; Discord greys the button when the party is full. A set under way keeps the button: a
   friend who joins mid-set sits the current song out and plays from the next. Discord starts the game through the
   `discord-<application id>` scheme, registered at start on Windows and Linux (on macOS the game must be running).
 - **A party is its players first, then a mode:** a new party has no mode. Its room shows the players and three mode
-  tiles (Versus, Band, Showdown); the host picks one, and the mode's lobby has the set, its options and ready up.
+  tiles (Versus, Showdown); the host picks one, and the mode's lobby has the set, its options and ready up.
   The host can go back to the room for another mode. The host's setlist is the party's set (picked in the library).
 - **A party's songs travel by themselves:** replacing "Get it" and asking the host. When a player in the party
   lacks a song of the set, the host's game sends it to the server (unless the host turned that off), which keeps
