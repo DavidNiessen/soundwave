@@ -155,7 +155,7 @@ function SignedIn({ settings, setlist, onParty, onBoards, onSongs, onAvatar, bas
       bar: false,
       run: () => (code.trim() ? join() : codeInput.current?.focus()),
     },
-    { id: 'party-account', label: s.account!.name, icon: UserRound, ...keysOf('party.signOut'), run: () => setModal('account') },
+    { id: 'party-account', label: 'Your account', icon: UserRound, ...keysOf('party.signOut'), bar: false, run: () => setModal('account') },
     { id: 'party-invite', label: 'Invite', icon: Send, ...keysOf('party.invite'), run: () => setModal('invite') },
     { id: 'party-boards', label: 'Leaderboards', icon: Trophy, ...keysOf('party.boards'), bar: false, run: onBoards },
     { id: 'party-songs', label: 'Shared songs', icon: Music, ...keysOf('party.songs'), bar: false, run: onSongs },
@@ -292,7 +292,7 @@ function SignedIn({ settings, setlist, onParty, onBoards, onSongs, onAvatar, bas
             ))}
           </div>
         </div>
-        <OnlineSidebar onBoards={onBoards} />
+        <OnlineSidebar onBoards={onBoards} onAccount={() => setModal('account')} />
       </div>
 
       {modal === 'account' && (

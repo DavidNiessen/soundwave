@@ -168,38 +168,30 @@ export function BoardsScreen({ library, playable, setlist, pick, thin, settings,
                 <Cover blob={song.cover} title={song.title} />
               </div>
               <div className="boards-song">
-                <button
-                  type="button"
-                  className="icon-btn"
-                  data-action="boards-prev"
-                  aria-label="Previous song"
-                  disabled={songs.length < 2}
-                  onClick={() => stepSong(-1)}
-                >
-                  <ChevronLeft strokeWidth={ICON_STROKE} aria-hidden />
-                </button>
                 <span className="song-text">
                   <span className="boards-title">{song.title}</span>
                   <span className="song-artist">{song.artist || 'Unknown artist'}</span>
                 </span>
-                <button
-                  type="button"
-                  className="icon-btn"
-                  data-action="boards-next"
-                  aria-label="Next song"
-                  disabled={songs.length < 2}
-                  onClick={() => stepSong(1)}
-                >
-                  <ChevronRight strokeWidth={ICON_STROKE} aria-hidden />
-                </button>
               </div>
-              {songs.length > 1 && (
-                <p className="boards-step dim">
-                  <Hint {...keysOf('boards.prevSong')} {...hints} />
-                  Song {at + 1} of {songs.length}
-                  <Hint {...keysOf('boards.nextSong')} {...hints} />
-                </p>
-              )}
+              {/* Every song with charts, to pick from; the shortcuts step through it too. */}
+              <ol className="boards-songs" aria-label="Songs">
+                {songs.map((x) => (
+                  <li key={x.id}>
+                    <button
+                      type="button"
+                      className={`boards-song-item ${x.id === song.id ? 'on' : ''}`}
+                      aria-current={x.id === song.id}
+                      onClick={() => setSongId(x.id)}
+                    >
+                      <Cover blob={x.cover} title={x.title} />
+                      <span className="song-text">
+                        <span className="song-title">{x.title}</span>
+                        <span className="song-artist">{x.artist}</span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ol>
             </>
           ) : view === 'songs' ? (
             <p className="hint">Songs with charts in your library show their boards here.</p>

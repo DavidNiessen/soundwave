@@ -8,7 +8,7 @@ import { online } from '../net/client';
 import type { Online } from '../net/protocol';
 import { ICON_STROKE } from './icons';
 
-export function OnlineSidebar({ onBoards }: { onBoards(): void }) {
+export function OnlineSidebar({ onBoards, onAccount }: { onBoards(): void; onAccount(): void }) {
   const s = useSyncExternalStore(online.subscribe, online.snapshot);
   const [top, setTop] = useState<{ name: string; score: number }[]>([]);
   const [people, setPeople] = useState<Online[]>([]);
@@ -30,11 +30,11 @@ export function OnlineSidebar({ onBoards }: { onBoards(): void }) {
   const others = people.filter((p) => p.name !== s.account!.name);
   return (
     <aside className="online-side" aria-label="On the server" data-nav-group="online-side">
-      <section className="online-you">
+      <button type="button" className="online-you" data-action="party-account" onClick={onAccount} title="Your account">
         <span className={`online-dot ${s.status === 'online' ? 'on' : ''}`} aria-hidden />
         <span className="party-name">{s.account!.name}</span>
         <span className="dim">{s.status === 'online' ? s.info?.name : 'Reconnecting…'}</span>
-      </section>
+      </button>
       <button type="button" className="online-card" onClick={onBoards}>
         <span className="label">
           <Trophy strokeWidth={ICON_STROKE} aria-hidden /> This week

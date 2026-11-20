@@ -8844,3 +8844,53 @@ a.btn {
   font-size: 0.8rem;
   white-space: nowrap;
 }
+
+/* The leaderboard's songs, as a list to pick from under the chosen one's cover. */
+.boards-cover {
+  width: min(100%, 12rem);
+}
+.boards-songs {
+  flex: 1;
+  min-height: 6rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0 0.3rem 0 0;
+  list-style: none;
+}
+.boards-song-item {
+  display: grid;
+  grid-template-columns: 2.6rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--r-m);
+  background: var(--panel-solid);
+  text-align: left;
+}
+.boards-song-item .cover {
+  width: 100%;
+  border-radius: var(--r-s);
+}
+.boards-song-item .song-title,
+.boards-song-item .song-artist {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.boards-song-item.on {
+  background: var(--lit);
+  color: var(--lit-ink);
+}
+.boards-song-item.on .song-artist {
+  color: var(--lit-ink);
+  opacity: 0.75;
+}
+.online-you {
+  width: 100%;
+  color: inherit;
+  text-align: left;
+}
