@@ -28,6 +28,8 @@ const WIDE_SHARE = 0.37;
 const BACK = 0.485 / WIDE_SHARE;
 const TALL_SHARE = 0.9;
 const LENGTH = 24;
+/** How much of the deck before the strike line a Showdown hit leaves clear, units. */
+const FOG_CLEAR = 1.2;
 /**
  * How far the deck runs on past the strike line, toward the player: far enough to leave the foot
  * of the screen, so the multiplier dial and the lane labels stand on it.
@@ -176,43 +178,65 @@ const highwayFragment = /* glsl */ `
  * brightest at the edge, with slow swells running down it toward the player and a fine shimmer.
  */
 /**
- * A Showdown hit: a storm over the far part of the deck. Bands of haze warp and roll toward the
- * player with bright streaks running through them, thick at the horizon and thinning to nothing
- * before the strike line, so notes come out of it late but nothing that has to be hit now is
- * hidden. It flashes as it lands (uFlash).
+ * A Showdown hit: a sheet of wavy, shimmering bands lying over the deck from just past the strike
+ * line to the horizon. Ridges warp from side to side and roll toward the player; their crests
+ * stand up out of the deck (fogVertex), catch the light white and fringe into rainbow colours,
+ * and the milky sheet between them blurs out what is underneath, so far notes are hard to read.
+ * The strike line stays clear: the sheet fades in a little beyond it. It flashes as it lands (uFlash).
  */
+const FOG_WAVES = /* glsl */ `
+  uniform float uTime;
+  // How far up the deck a point is (0 near, 1 far) and across it (0..1) -> the bands' phase there.
+  float fogPhase(vec2 uv) {
+    float bend = 0.16 * sin(uv.x * 8.0 + uTime * 1.3 + uv.y * 6.0)
+      + 0.09 * sin(uv.x * 19.0 - uTime * 2.2 + uv.y * 11.0)
+      + 0.05 * sin(uv.x * 37.0 + uTime * 3.1);
+    return uv.y * 11.0 + uTime * 1.3 + bend * (0.8 + 1.2 * uv.y);
+  }
+`;
+
+const fogVertex = /* glsl */ `
+  uniform float uLevel;
+  varying vec2 vUv;
+  ${FOG_WAVES}
+  void main() {
+    vUv = uv;
+    float s = sin(6.2831853 * fogPhase(uv));
+    vec3 p = position;
+    // The plane lies flat once turned: its own z is up.
+    p.z += pow(max(0.0, s), 3.0) * 0.16 * uLevel * smoothstep(0.0, 0.15, uv.y);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+  }
+`;
+
 const fogFragment = /* glsl */ `
   uniform float uLevel;
-  uniform float uTime;
   uniform float uFlash;
   varying vec2 vUv;
-  float hash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
-  float noise(vec2 p) {
-    vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
-  }
-  float fbm(vec2 p) {
-    float v = 0.0;
-    float a = 0.5;
-    for (int i = 0; i < 4; i++) { v += a * noise(p); p *= 2.03; a *= 0.5; }
-    return v;
-  }
+  ${FOG_WAVES}
+  float crest(float phase, float sharp) { return pow(max(0.0, sin(6.2831853 * phase)), sharp); }
   void main() {
-    // along: 0 nearest the strike line, 1 at the horizon. The haze rolls toward the player.
-    vec2 p = vec2(vUv.x * 3.0, vUv.y * 4.0 + uTime * 0.9);
-    // Warped by itself, so the bands bend and swirl rather than slide.
-    vec2 warp = vec2(fbm(p + vec2(0.0, uTime * 0.3)), fbm(p + vec2(5.2, -uTime * 0.25)));
-    float haze = fbm(p + warp * 2.2);
-    // Bright streaks: thin ridges of the warped haze, running across the deck.
-    float ridge = 1.0 - abs(sin((haze * 6.0 + vUv.y * 3.0 - uTime * 1.6) * 3.14159));
-    float streak = pow(ridge, 10.0);
-    float edge = smoothstep(0.0, 0.06, vUv.x) * smoothstep(1.0, 0.94, vUv.x);
-    float thick = smoothstep(0.0, 0.32, vUv.y) * edge;
-    vec3 deep = vec3(0.10, 0.05, 0.24);
-    vec3 lit = vec3(0.62, 0.48, 1.0);
-    vec3 col = mix(deep, lit, haze * 0.55) + vec3(0.85, 0.8, 1.0) * streak * 0.7 + vec3(1.0, 0.85, 1.0) * uFlash * 0.5;
-    float alpha = thick * (0.78 + 0.2 * haze + 0.25 * streak) + uFlash * 0.35 * edge;
-    gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.97) * uLevel);
+    float ph = fogPhase(vUv);
+    float s = sin(6.2831853 * ph);
+    float c = cos(6.2831853 * ph);
+    // A crest's bright line, split into red, green and blue a hair apart: the rainbow fringe.
+    float fringe = 0.034;
+    vec3 line = vec3(crest(ph + fringe, 26.0), crest(ph, 30.0), crest(ph - fringe, 26.0));
+    // Thin-film colours over each crest's shoulders, drifting along it.
+    vec3 film = 0.5 + 0.5 * cos(6.2831853 * (ph * 0.5 + vUv.x * 0.7 + vec3(0.0, 0.33, 0.67)));
+    float shoulder = smoothstep(0.35, 0.85, s) * (1.0 - smoothstep(0.92, 1.0, s));
+    // The far side of each crest lies in its shadow.
+    float shade = smoothstep(0.0, -0.9, c) * max(0.0, s);
+    // Fine ripples between the crests, like the lines of a contour map.
+    float ripple = pow(max(0.0, sin(6.2831853 * ph * 3.0 + 1.3)), 40.0) * (1.0 - max(0.0, s));
+    vec3 milk = vec3(0.74, 0.72, 0.95);
+    vec3 col = milk * (0.55 + 0.45 * max(0.0, s)) * (1.0 - 0.65 * shade);
+    col += film * shoulder * 0.7 + line * 1.5 + milk * ripple * 0.5 + vec3(1.0, 0.92, 1.0) * uFlash * 0.6;
+    float sides = smoothstep(0.0, 0.05, vUv.x) * smoothstep(1.0, 0.95, vUv.x);
+    // Clear at the strike line, thick from a little beyond it to the horizon.
+    float reach = smoothstep(0.0, 0.14, vUv.y);
+    float alpha = (0.55 + 0.3 * max(0.0, s) + 0.3 * line.g + 0.15 * shoulder + 0.3 * shade) * sides * reach + uFlash * 0.3 * sides * reach;
+    gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.95) * uLevel);
   }
 `;
 
@@ -681,7 +705,7 @@ export class Highway {
   /** Showdown's Fog: 1 while a hit hazes the far highway, 0 otherwise (it fades between). */
   fog = 0;
   private readonly fogMat = new THREE.ShaderMaterial({
-    vertexShader: highwayVertex,
+    vertexShader: fogVertex,
     fragmentShader: fogFragment,
     transparent: true,
     depthTest: false,
@@ -818,11 +842,11 @@ export class Highway {
     track.renderOrder = -2;
     this.root.add(track);
 
-    // A Showdown hit: over the far three quarters of the deck, never the quarter nearest the strike line.
-    const fogLen = (LENGTH * 3) / 4;
-    const fog = new THREE.Mesh(new THREE.PlaneGeometry(this.width + 0.8, fogLen), this.fogMat);
+    // A Showdown hit: from a little beyond the strike line to the horizon, finely cut so its crests can stand up.
+    const fogLen = LENGTH - FOG_CLEAR;
+    const fog = new THREE.Mesh(new THREE.PlaneGeometry(this.width + 0.3, fogLen, 24, 240), this.fogMat);
     fog.rotation.x = -Math.PI / 2;
-    fog.position.set(0, 0.4, -LENGTH / 4 - fogLen / 2);
+    fog.position.set(0, 0.05, -FOG_CLEAR - fogLen / 2);
     fog.renderOrder = 5;
     fog.visible = false;
     this.fogMesh = fog;

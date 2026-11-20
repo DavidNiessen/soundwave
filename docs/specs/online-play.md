@@ -41,7 +41,8 @@ Decisions made while building, which override what follows:
   (up to 16), as their part's band member in their look; the band's island makes way. Podiums rise by place on the
   board, sink for a player who is out, and glow red under a hit. Every Strike is seen by everyone: it flies as a
   bolt from the striker's podium to the target, who shakes and flashes as it lands.
-- **Showdown hits are Fog and Drain together**, with no choice: every hit hazes the far highway and holds the
+- **Showdown hits are Fog and Drain together**, with no choice: every hit lays wavy, shimmering bands over the highway
+  from just past the strike line to the horizon (far notes are hard to read, the strike line stays clear) and holds the
   multiplier at ×2 for as long as it lasts. The setting _Showdown hits reach me as_ (4.1, 5.x) is not built.
 - **Later, not now:** the in-game server list (3.2b), local sessions hosted by the desktop app (level 1), and its
   STUN fallback.
