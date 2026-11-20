@@ -82,7 +82,7 @@ import type { SongActions } from './SongMenu';
 import { SongSheet } from './SongSheet';
 import { MetadataSheet } from './MetadataSheet';
 import { Toasts, useToasts } from './Toasts';
-import { PartyBoard, PartyScreen } from './PartyScreen';
+import { PartyBoard, PartyScreen, type LastRun } from './PartyScreen';
 import { AvatarScreen } from './AvatarScreen';
 import { setMenuAvatars } from '../render/aurora/menuStage';
 import type { Avatars } from '../render/aurora/AuroraStage';
@@ -437,6 +437,8 @@ export function App() {
   }, [known, booted]);
 
   const byId = useMemo(() => new Map(songs.map((s) => [s.id, s])), [songs]);
+  /** The player's own last song in a party, for the stats between a Showdown's songs. */
+  const [lastRun, setLastRun] = useState<LastRun | undefined>();
   const byIdRef = useRef(byId);
   byIdRef.current = byId;
   // The party sees the songs held for it as songs the player has, beside their library.
@@ -1150,6 +1152,8 @@ export function App() {
   /** A party's song is over: the score is kept here as any other, and the party gets it. */
   const finishPartySong = (run: Run, results: Results, inputs?: ReplayInputs) => {
     void keepScore(run, results, inputs);
+    const chart = run.charts[run.index];
+    setLastRun({ songIndex: run.party!.songIndex, results, part: chart.part, difficulty: chart.difficulty });
     online.finish(run.party!.songIndex, {
       score: results.score,
       stars: results.stars,
@@ -1534,6 +1538,8 @@ export function App() {
           settings={settings}
           onBack={goHome}
           onLeft={goOnline}
+          lastRun={lastRun}
+          partsOf={(id) => songParts(id, thin)}
           onPickSongs={() => setView({ name: 'library', from: 'party' })}
           onSettings={(patch) => updateSettings({ ...settings, ...patch })}
         />

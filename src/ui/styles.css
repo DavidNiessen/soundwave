@@ -8490,3 +8490,298 @@ a.btn {
 .sdr-count.held {
   color: var(--gold);
 }
+
+/* ------------------------------------------------------------------------------------------- */
+/* Between a Showdown's songs: over the stage, two tabs that turn by themselves.                */
+
+.page.party.sd-between {
+  padding-top: calc(var(--safe-t) + clamp(0.8rem, 2vh, 1.4rem));
+}
+.sdb {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(0.8rem, 2.4vh, 1.6rem);
+}
+.sdb-tabs {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.sdb-tabs .tab-row {
+  background: var(--panel-solid);
+}
+.sdb-tabs .tab-label {
+  display: inline;
+}
+.sdb-tabs .tab.on {
+  background: var(--lit);
+}
+/* How long until the tab turns, under the tabs. */
+.sdb-progress {
+  position: absolute;
+  left: 50%;
+  bottom: -0.7rem;
+  translate: -50% 0;
+  width: 70%;
+  height: 0.25rem;
+  border-radius: 1rem;
+  background: rgb(255 255 255 / 0.15);
+  overflow: hidden;
+}
+.sdb-progress span {
+  display: block;
+  height: 100%;
+  width: calc(var(--p, 0) * 100%);
+  border-radius: inherit;
+  background: var(--mint);
+  transition: width 1s linear;
+}
+
+/* Results: the round, then everyone in two columns, the cut line and those out. */
+.sdb-results {
+  flex: 1;
+  min-height: 0;
+  width: min(100%, 66rem);
+  overflow-y: auto;
+  padding: 0.6rem 0.4rem 6rem;
+  animation: fade-in 0.3s var(--ease);
+}
+.sdb-results .sdr-head {
+  align-items: center;
+  text-align: center;
+  margin-bottom: 1rem;
+}
+.sdb-results .sdr-title {
+  text-shadow: 0 0.1em 0.6em rgb(0 0 0 / 0.6);
+}
+.sdb-results .sdr-kicker {
+  padding: 0.15rem 0.7rem;
+  border-radius: 999px;
+  background: var(--panel-solid);
+  color: var(--ink);
+}
+.sdb-results .sdr-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 24rem), 1fr));
+}
+.sdb-results .sdr-row:not(.me):not(.out) {
+  background: var(--panel-solid);
+}
+.sdb-results .sdr-cut {
+  margin: 0.9rem 0;
+  color: var(--ink);
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.8));
+}
+.sdb-results .sdr-earlier {
+  margin-top: 0.8rem;
+  padding: 0.3rem 0.8rem;
+  border-radius: var(--r-m);
+  background: var(--panel-solid);
+  color: var(--ink-2);
+  text-align: center;
+}
+
+/* Next up: the next song and your choices on the left, your card on the right, the stage between. */
+.sdb-next {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr) minmax(16rem, 21rem);
+  align-items: center;
+  padding-bottom: 6rem;
+  animation: fade-in 0.3s var(--ease);
+}
+.sdb-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+}
+.sdb-right {
+  grid-column: 3;
+  align-items: stretch;
+}
+.sdb-heading {
+  font-size: clamp(1.3rem, 2vw, 1.8rem);
+  font-weight: 900;
+  font-style: italic;
+  font-stretch: 112%;
+  text-transform: uppercase;
+  line-height: 1;
+  text-shadow: 0 0.1em 0.5em rgb(0 0 0 / 0.7);
+}
+.sdb-heading.small {
+  font-size: 1rem;
+  text-shadow: none;
+}
+.sdb-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.75rem 0.85rem;
+  border-radius: var(--r-m);
+  background: var(--panel-solid);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1);
+}
+.sdb-song {
+  display: grid;
+  grid-template-columns: 4.6rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.8rem;
+}
+.sdb-song .cover {
+  width: 100%;
+  border-radius: var(--r-s);
+}
+.sdb-parts {
+  display: flex;
+  gap: 0.45rem;
+  margin-top: 0.3rem;
+}
+.sdb-parts svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+.sdb-parts .off {
+  opacity: 0.3;
+}
+.sdb-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.9rem;
+}
+.sdb-card .diff-row,
+.sdb-card .part-row {
+  background: var(--well);
+}
+.sdb-card .choice.on {
+  background: var(--lit);
+}
+.sdb-card .part-row .choice svg {
+  width: 1.3rem;
+  height: 1.3rem;
+}
+.sdb-note {
+  color: var(--ink-2);
+}
+.sdb-note .song-title svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--gold);
+  vertical-align: -0.15em;
+}
+.sdb-me {
+  align-items: center;
+  text-align: center;
+}
+.sdb-me-name {
+  color: var(--ink-2);
+  font-weight: 800;
+}
+.sdb-me.through .sdr-me-status {
+  color: var(--ok);
+}
+.sdb-me.win .sdr-me-status {
+  color: var(--gold);
+}
+.sdb-me.out .sdr-me-status {
+  color: var(--danger-2);
+}
+.sdb-me-score {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.sdb-me-line {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 1.4rem;
+}
+.sdb-me-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.sdb-me-pick svg {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+.sdb-me-pick .board-diff {
+  width: 1.6rem;
+  height: 1.6rem;
+  font-size: 0.9rem;
+}
+.sdb-badge {
+  align-self: center;
+  padding: 0.2rem 0.9rem;
+  border-radius: 999px;
+  background: var(--panel-solid);
+  box-shadow: inset 0 0 0 2px var(--gold);
+  color: var(--gold);
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+}
+/* The countdown to the next song, in the corner above the action bar. */
+.sdb-count {
+  position: absolute;
+  left: 0;
+  bottom: 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0.5rem 0.9rem 0.5rem 0.6rem;
+  border-radius: var(--r-l);
+  background: var(--panel-solid);
+}
+.sdb-count svg {
+  width: 2.2rem;
+  height: 2.2rem;
+  color: var(--mint);
+  animation: spin 3s linear infinite;
+}
+.sdb-count.held svg {
+  animation: none;
+  color: var(--gold);
+}
+.sdb-count > span {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+}
+.sdb-count-label {
+  font-size: 0.8rem;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-2);
+}
+.sdb-count-num {
+  font-size: 2rem;
+}
+@media (max-width: 900px) {
+  .sdb-next {
+    grid-template-columns: 1fr;
+    align-items: start;
+    gap: 0.8rem;
+    overflow-y: auto;
+  }
+  .sdb-right {
+    grid-column: 1;
+  }
+}
