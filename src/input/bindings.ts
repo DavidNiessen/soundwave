@@ -13,7 +13,7 @@
 import type { PadInput } from './pads';
 
 /** Where a shortcut works. */
-export type Area = 'menus' | 'home' | 'library' | 'lobby' | 'results' | 'party' | 'settings' | 'song' | 'replay' | 'editor';
+export type Area = 'menus' | 'home' | 'library' | 'lobby' | 'results' | 'party' | 'boards' | 'settings' | 'song' | 'replay' | 'editor';
 
 export const AREAS: { id: Area; label: string }[] = [
   { id: 'menus', label: 'Every menu' },
@@ -22,6 +22,7 @@ export const AREAS: { id: Area; label: string }[] = [
   { id: 'lobby', label: 'Before a song' },
   { id: 'results', label: 'After a song' },
   { id: 'party', label: 'Playing together' },
+  { id: 'boards', label: 'Leaderboards' },
   { id: 'settings', label: 'Settings' },
   { id: 'song', label: 'Playing a song' },
   { id: 'replay', label: 'Watching a replay' },
@@ -113,8 +114,7 @@ export const COMMANDS: Command[] = [
     { id: 'party.invite', label: 'Invite a friend', key: 'KeyI' },
     { id: 'party.admin', label: 'Run the server', key: 'KeyM' },
     { id: 'party.versus', label: 'Play Versus', key: 'Digit1' },
-    { id: 'party.bandMode', label: 'Play as a band', key: 'Digit2' },
-    { id: 'party.showdown', label: 'Play a Showdown', key: 'Digit3' },
+    { id: 'party.showdown', label: 'Play a Showdown', key: 'Digit2' },
     { id: 'party.changeMode', label: 'Pick another mode', key: 'KeyX' },
     { id: 'party.hits', label: 'Showdown hits on or off', key: 'KeyA' },
     { id: 'party.onePart', label: 'Showdown on one part, or any', key: 'KeyE' },
@@ -124,6 +124,14 @@ export const COMMANDS: Command[] = [
     { id: 'party.avatar', label: 'Your look on the stage', key: 'KeyV' },
     { id: 'party.avatarSave', label: 'Keep this look', key: 'KeyK' },
     { id: 'party.avatarReset', label: 'Use the band member’s own look', key: 'KeyZ' },
+  ]),
+  // The parts are the tab buttons (Q and E, the shoulder buttons), as the tabs of any menu.
+  ...cmd('boards', [
+    { id: 'boards.prevSong', label: 'Previous song', key: 'Comma', pad: 'b6' },
+    { id: 'boards.nextSong', label: 'Next song', key: 'Period', pad: 'b7' },
+    { id: 'boards.difficulty', label: 'Next difficulty', key: 'KeyF', pad: 'b2' },
+    { id: 'boards.week', label: 'This week, or all time', key: 'KeyW', pad: 'b3' },
+    { id: 'boards.replays', label: 'Song boards, or shared replays', key: 'KeyR', pad: 'b8' },
   ]),
   ...cmd('settings', [{ id: 'settings.reset', label: 'Restore defaults', key: 'KeyR', pad: 'b3' }]),
   ...cmd('song', [{ id: 'song.pause', label: 'Pause', key: 'KeyP', pad: 'b9' }]),

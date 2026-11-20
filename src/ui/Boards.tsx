@@ -1,19 +1,27 @@
 /**
- * The server's leaderboards (docs/specs/online-play.md, 3.3, 4.4): every song's boards with Watch,
- * and the replays players shared.
+ * The server's leaderboards (docs/specs/online-play.md, 3.3, 4.4). A song stands on the left, its
+ * cover, name and which board to show; the part and difficulty run across the top as tabs; the
+ * ranked runs fill the rest, each one ready to Watch. The other view lists the replays players
+ * shared.
  */
-import { ArrowLeft, Eye, Share2, Trash2, Trophy, Users } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, Crown, Eye, Share2, Trash2, Trophy } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { analysisManager } from '../analysis/manager';
+import { playSfx } from '../audio/sfx';
+import { DIFFICULTIES, PARTS, type Difficulty, type Part } from '../chart/types';
 import type { Settings } from '../game/settings';
 import { partAmong, songParts, type Pick, type ThinParts } from '../game/setlist';
-import { DIFFICULTIES, PARTS } from '../chart/types';
+import { keysOf } from '../input/bindings';
+import { TAB_EVENT } from '../input/menuNav';
+import { menuPulse } from '../input/rumble';
 import { online } from '../net/client';
-import type { BandBoard, Board, RankLine } from '../net/protocol';
+import type { Board, RankLine } from '../net/protocol';
 import { chartId } from '../net/runs';
 import type { SongMeta } from '../storage/db';
-import { useActions, useHints } from './actions';
-import { DIFFICULTY_LABEL, ICON_STROKE, PART_LABEL, Stars } from './icons';
+import { Hint, useActions, useHints } from './actions';
+import { Cover } from './Cover';
+import { DIFFICULTY_LABEL, ICON_STROKE, PART_ICON, PART_LABEL, Pips, Stars } from './icons';
+import { useSlide } from './useSlide';
 
 interface Props {
   library: SongMeta[];
@@ -29,39 +37,81 @@ interface Props {
 }
 
 type Shared = Awaited<ReturnType<typeof online.sharedRuns>>[number];
+/** One letter for a difficulty, as the rows show it. */
+const DIFF_LETTER: Record<Difficulty, string> = { easy: 'E', medium: 'M', hard: 'H', expert: 'X' };
 
 export function BoardsScreen({ library, playable, setlist, pick, thin, settings, onWatch, onBack }: Props) {
   const s = useSyncExternalStore(online.subscribe, online.snapshot);
-  useHints(settings);
+  const hints = useHints(settings);
   const mod = s.account?.role === 'owner' || s.account?.role === 'moderator';
-  const [shared, setShared] = useState<Shared[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
-  const [tick, setTick] = useState(0);
-  const refresh = () => setTick((t) => t + 1);
   const songs = useMemo(() => library.filter((x) => playable(x.id)), [library, playable]);
   const [songId, setSongId] = useState<string>(() => setlist[0]?.id ?? songs[0]?.id ?? '');
-  const song = songs.find((x) => x.id === songId);
+  const at = Math.max(
+    0,
+    songs.findIndex((x) => x.id === songId),
+  );
+  const song = songs[at];
   // The board of the part and difficulty the player plays, or of whichever they choose to look at.
   const [part, setPart] = useState(pick.part);
   const [difficulty, setDifficulty] = useState(pick.difficulty);
+  const [week, setWeek] = useState(false);
+  const [view, setView] = useState<'songs' | 'shared'>('songs');
   const own = song ? songParts(song.id, thin) : PARTS;
   const shown: Pick = { part: partAmong(part, own) ?? part, difficulty };
 
-  const guard = async <T,>(p: Promise<T>): Promise<T | undefined> => {
-    try {
-      return await p;
-    } catch (e) {
-      setProblem((e as Error).message);
-      return undefined;
-    }
+  const stepSong = (d: number) => {
+    if (songs.length < 2) return;
+    playSfx('tab');
+    setSongId(songs[(at + d + songs.length) % songs.length].id);
+  };
+  const nextDifficulty = () => {
+    playSfx('tab');
+    setDifficulty(DIFFICULTIES[(DIFFICULTIES.indexOf(difficulty) + 1) % DIFFICULTIES.length]);
   };
 
+  // The tab buttons (Q and E, the shoulder buttons) step through the parts the song has.
+  const tabRef = useRef({ own, shown });
+  tabRef.current = { own, shown };
   useEffect(() => {
-    if (!s.account) return;
-    void guard(online.sharedRuns()).then((r) => r && setShared(r));
-  }, [s.account, tick]);
+    const onTab = (e: Event) => {
+      const d = (e as CustomEvent<number>).detail;
+      const { own, shown } = tabRef.current;
+      const i = own.indexOf(shown.part) + d;
+      if (i < 0 || i >= own.length) return;
+      playSfx('tab');
+      menuPulse(d < 0 ? 'tab-left' : 'tab-right');
+      setPart(own[i]);
+    };
+    window.addEventListener(TAB_EVENT, onTab);
+    return () => window.removeEventListener(TAB_EVENT, onTab);
+  }, []);
 
-  useActions([{ id: 'back', label: 'Back', icon: ArrowLeft, kbd: 'Escape', sfx: 'back', run: onBack }]);
+  useActions([
+    { id: 'back', label: 'Back', icon: ArrowLeft, kbd: 'Escape', sfx: 'back', run: onBack },
+    { id: 'boards-prev', label: 'Previous song', icon: ChevronLeft, ...keysOf('boards.prevSong'), bar: false, run: () => stepSong(-1) },
+    { id: 'boards-next', label: 'Next song', icon: ChevronRight, ...keysOf('boards.nextSong'), bar: false, run: () => stepSong(1) },
+    { id: 'boards-difficulty', label: 'Next difficulty', icon: Trophy, ...keysOf('boards.difficulty'), bar: false, run: nextDifficulty },
+    {
+      id: 'boards-week',
+      label: week ? 'All time' : 'This week',
+      icon: Trophy,
+      ...keysOf('boards.week'),
+      bar: false,
+      run: () => setWeek((w) => !w),
+    },
+    {
+      id: 'boards-replays',
+      label: view === 'songs' ? 'Shared replays' : 'Song boards',
+      icon: Share2,
+      ...keysOf('boards.replays'),
+      bar: false,
+      run: () => setView((v) => (v === 'songs' ? 'shared' : 'songs')),
+    },
+  ]);
+
+  const partRow = useSlide<HTMLDivElement>(shown.part);
+  const diffRow = useSlide<HTMLDivElement>(difficulty);
 
   if (!s.account)
     return (
@@ -73,14 +123,31 @@ export function BoardsScreen({ library, playable, setlist, pick, thin, settings,
       </div>
     );
 
-  const have = (id: string) => library.some((x) => x.id === id);
+  const pair = <T extends string>(label: string, binding: string, value: T, options: [T, string][], set: (v: T) => void) => (
+    <div className="boards-option">
+      <span className="option-label">
+        {label}
+        <Hint {...keysOf(binding)} {...hints} />
+      </span>
+      <div className="choice-pair" role="radiogroup" aria-label={label}>
+        {options.map(([v, text]) => (
+          <button
+            key={v}
+            type="button"
+            role="radio"
+            aria-checked={value === v}
+            className={`choice ${value === v ? 'on' : ''}`}
+            onClick={() => set(v)}
+          >
+            {text}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div className="page boards">
-      <header className="page-head">
-        <h1 className="page-title">Leaderboards</h1>
-        <p className="head-count">{s.info?.name}</p>
-      </header>
       {problem && (
         <p className="party-error" role="alert">
           {problem}
@@ -89,113 +156,221 @@ export function BoardsScreen({ library, playable, setlist, pick, thin, settings,
           </button>
         </p>
       )}
-      <div className="lobby-body boards-body">
-        <div className="party-main">
-          <section className="ready-panel" aria-label="Song boards">
-            <h2 className="label">
-              <Trophy strokeWidth={ICON_STROKE} aria-hidden /> A song’s board
-            </h2>
-            {songs.length ? (
-              <>
-                <label className="meta-field">
-                  <span className="dim">Song</span>
-                  <select className="boards-select" value={songId} onChange={(e) => setSongId(e.target.value)}>
-                    {songs.map((x) => (
-                      <option key={x.id} value={x.id}>
-                        {x.title}
-                        {x.artist ? ` · ${x.artist}` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="boards-pick">
-                  <label className="meta-field">
-                    <span className="dim">Part</span>
-                    <select className="boards-select" value={shown.part} onChange={(e) => setPart(e.target.value as Pick['part'])}>
-                      {own.map((p) => (
-                        <option key={p} value={p}>
-                          {PART_LABEL[p]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="meta-field">
-                    <span className="dim">Difficulty</span>
-                    <select
-                      className="boards-select"
-                      value={difficulty}
-                      onChange={(e) => setDifficulty(e.target.value as Pick['difficulty'])}
-                    >
-                      {DIFFICULTIES.map((d) => (
-                        <option key={d} value={d}>
-                          {DIFFICULTY_LABEL[d]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              </>
-            ) : (
-              <p className="hint">Songs with charts in your library show their boards here.</p>
+      <div className="boards-layout">
+        <aside className="boards-side" data-nav-group="boards-side">
+          <header className="boards-head">
+            <h1 className="page-title">Leaderboards</h1>
+            <p className="head-count">{s.info?.name}</p>
+          </header>
+          {view === 'songs' && song ? (
+            <>
+              <div className="boards-cover">
+                <Cover blob={song.cover} title={song.title} />
+              </div>
+              <div className="boards-song">
+                <button
+                  type="button"
+                  className="icon-btn"
+                  data-action="boards-prev"
+                  aria-label="Previous song"
+                  disabled={songs.length < 2}
+                  onClick={() => stepSong(-1)}
+                >
+                  <ChevronLeft strokeWidth={ICON_STROKE} aria-hidden />
+                </button>
+                <span className="song-text">
+                  <span className="boards-title">{song.title}</span>
+                  <span className="song-artist">{song.artist || 'Unknown artist'}</span>
+                </span>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  data-action="boards-next"
+                  aria-label="Next song"
+                  disabled={songs.length < 2}
+                  onClick={() => stepSong(1)}
+                >
+                  <ChevronRight strokeWidth={ICON_STROKE} aria-hidden />
+                </button>
+              </div>
+              {songs.length > 1 && (
+                <p className="boards-step dim">
+                  <Hint {...keysOf('boards.prevSong')} {...hints} />
+                  Song {at + 1} of {songs.length}
+                  <Hint {...keysOf('boards.nextSong')} {...hints} />
+                </p>
+              )}
+            </>
+          ) : view === 'songs' ? (
+            <p className="hint">Songs with charts in your library show their boards here.</p>
+          ) : (
+            <p className="hint">Runs players chose to share, newest first. Watch any of them for a song you have.</p>
+          )}
+          <div className="boards-options">
+            {view === 'songs' &&
+              pair(
+                'Scores',
+                'boards.week',
+                week ? 'week' : 'all',
+                [
+                  ['all', 'All time'],
+                  ['week', 'This week'],
+                ],
+                (v) => setWeek(v === 'week'),
+              )}
+            {pair(
+              'Show',
+              'boards.replays',
+              view,
+              [
+                ['songs', 'Song boards'],
+                ['shared', 'Shared replays'],
+              ],
+              setView,
             )}
-            {song && <SongBoard song={song} pick={shown} mod={mod} onWatch={onWatch} onProblem={setProblem} onChange={refresh} />}
-          </section>
-          {song && <BandBoards songId={song.id} />}
-        </div>
+          </div>
+        </aside>
 
-        <div className="party-main">
-          <section className="ready-panel" aria-label="Shared replays">
-            <h2 className="label">
-              <Share2 strokeWidth={ICON_STROKE} aria-hidden /> Replays players shared
-            </h2>
-            {shared.length === 0 && <p className="hint">Nobody has shared a replay yet. Share yours from a song’s board.</p>}
-            <ol className="boards-lines">
-              {shared.map((r) => (
-                <li key={r.scoreId} className="boards-line">
-                  <span className="party-name">
-                    {r.name} · {r.title}
-                  </span>
-                  <span className="dim">
-                    {PART_LABEL[r.part]} · {DIFFICULTY_LABEL[r.difficulty]}
-                  </span>
-                  <span className="num">{r.score.toLocaleString()}</span>
-                  <button
-                    type="button"
-                    className="btn small"
-                    disabled={!have(r.songId)}
-                    title={have(r.songId) ? undefined : 'You don’t have this song'}
-                    onClick={() => onWatch(r.scoreId)}
-                  >
-                    <Eye strokeWidth={ICON_STROKE} aria-hidden />
-                    Watch
-                  </button>
-                </li>
-              ))}
-            </ol>
-          </section>
-        </div>
+        <main className="boards-main">
+          {view === 'songs' ? (
+            <>
+              <div className="boards-tabs">
+                <span className="boards-tabs-label">
+                  {PART_LABEL[shown.part]} · {DIFFICULTY_LABEL[difficulty]}
+                </span>
+                <div className="boards-tab-strip">
+                  <Hint {...keysOf('menus.tabPrev')} {...hints} />
+                  <div className="part-row slide boards-parts" ref={partRow} role="radiogroup" aria-label="Part">
+                    <span className="sel" aria-hidden />
+                    {PARTS.map((p) => {
+                      const Icon = PART_ICON[p];
+                      const on = shown.part === p;
+                      return (
+                        <button
+                          key={p}
+                          type="button"
+                          role="radio"
+                          aria-checked={on}
+                          aria-label={PART_LABEL[p]}
+                          title={PART_LABEL[p]}
+                          data-on={on}
+                          className={`choice ${on ? 'on' : ''}`}
+                          disabled={!own.includes(p)}
+                          onClick={() => setPart(p)}
+                        >
+                          <Icon strokeWidth={ICON_STROKE} aria-hidden />
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <Hint {...keysOf('menus.tabNext')} {...hints} />
+                  <div className="diff-row slide boards-diffs" ref={diffRow} role="radiogroup" aria-label="Difficulty">
+                    <span className="sel" aria-hidden />
+                    {DIFFICULTIES.map((d) => {
+                      const on = difficulty === d;
+                      return (
+                        <button
+                          key={d}
+                          type="button"
+                          role="radio"
+                          aria-checked={on}
+                          aria-label={DIFFICULTY_LABEL[d]}
+                          title={DIFFICULTY_LABEL[d]}
+                          data-on={on}
+                          className={`choice ${on ? 'on' : ''}`}
+                          onClick={() => setDifficulty(d)}
+                        >
+                          <Pips difficulty={d} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <Hint {...keysOf('boards.difficulty')} {...hints} />
+                </div>
+              </div>
+              {song ? (
+                <SongBoard song={song} pick={shown} week={week} mod={mod} onWatch={onWatch} onProblem={setProblem} />
+              ) : (
+                <p className="hint boards-empty">Add a song and play it to see its board.</p>
+              )}
+            </>
+          ) : (
+            <SharedRuns library={library} onWatch={onWatch} onProblem={setProblem} />
+          )}
+        </main>
       </div>
     </div>
   );
 }
 
-/** One song's board on the player's part and difficulty, for the chart their library makes. */
+/** A run's line: rank, name, stars, accuracy, difficulty and score, and Watch. */
+function Row({
+  l,
+  me,
+  difficulty,
+  onWatch,
+  onRemove,
+}: {
+  l: RankLine;
+  me: boolean;
+  difficulty: Difficulty;
+  onWatch(): void;
+  onRemove?: () => void;
+}) {
+  const accuracy = Math.round(l.accuracy * 100);
+  return (
+    <li
+      className={`board-row ${me ? 'me' : ''} ${l.rank <= 3 ? `top top-${l.rank}` : ''}`}
+      style={{ ['--i' as string]: Math.min(l.rank, 20) }}
+    >
+      <span className="board-rank num">{l.rank === 1 ? <Crown strokeWidth={ICON_STROKE} aria-label="First" /> : l.rank}</span>
+      <span className="board-name">
+        {l.name}
+        {me && <span className="dim"> · you</span>}
+        {l.shared && <Share2 className="board-shared" strokeWidth={ICON_STROKE} aria-label="Shared replay" />}
+      </span>
+      <Stars n={l.stars} />
+      <span
+        className={`board-pill ${l.fullCombo ? 'fc' : ''} ${accuracy === 100 ? 'perfect' : ''}`}
+        title={l.fullCombo ? 'Full combo' : 'Accuracy'}
+      >
+        {l.fullCombo && accuracy < 100 ? 'FC' : `${accuracy}%`}
+      </span>
+      <span className="board-diff" title={DIFFICULTY_LABEL[difficulty]}>
+        {DIFF_LETTER[difficulty]}
+      </span>
+      <span className="board-score num">{l.score.toLocaleString()}</span>
+      <span className="board-acts">
+        <button type="button" className="btn small" onClick={onWatch}>
+          <Eye strokeWidth={ICON_STROKE} aria-hidden />
+          Watch
+        </button>
+        {onRemove && (
+          <button type="button" className="icon-btn" aria-label={`Remove ${l.name}’s run`} onClick={onRemove}>
+            <Trash2 strokeWidth={ICON_STROKE} aria-hidden />
+          </button>
+        )}
+      </span>
+    </li>
+  );
+}
+
+/** One song's board on a part and difficulty, for the chart the player's library makes. */
 function SongBoard({
   song,
   pick,
+  week,
   mod,
   onWatch,
   onProblem,
-  onChange,
 }: {
   song: SongMeta;
   pick: Pick;
+  week: boolean;
   mod: boolean;
   onWatch(id: string): void;
   onProblem(m: string): void;
-  onChange(): void;
 }) {
-  const [week, setWeek] = useState(false);
   const [board, setBoard] = useState<Board | null>(null);
   const [none, setNone] = useState(false);
   const [version, setVersion] = useState(0);
@@ -221,60 +396,48 @@ function SongBoard({
     };
   }, [song.id, pick.part, pick.difficulty, week, version]);
 
-  if (none) return <p className="hint">This song has no {PART_LABEL[pick.part].toLowerCase()} notes at this difficulty.</p>;
-  if (!board) return <p className="hint">Loading the board…</p>;
+  if (none) return <p className="hint boards-empty">This song has no {PART_LABEL[pick.part].toLowerCase()} notes at this difficulty.</p>;
+  if (!board) return <p className="hint boards-empty">Loading the board…</p>;
   const mine = board.me;
-  const row = (l: RankLine, me: boolean) => (
-    <li key={l.scoreId} className={`boards-line ${me ? 'me' : ''}`}>
-      <span className="num rank">{l.rank}</span>
-      <span className="party-name">{l.name}</span>
-      <Stars n={l.stars} />
-      <span className="num">{l.score.toLocaleString()}</span>
-      <button type="button" className="btn small" onClick={() => onWatch(l.scoreId)}>
-        <Eye strokeWidth={ICON_STROKE} aria-hidden />
-        Watch
-      </button>
-      {mod && !me && (
-        <button
-          type="button"
-          className="btn small"
-          aria-label={`Remove ${l.name}’s run`}
-          onClick={() =>
-            void online.removeScore(l.scoreId, 'Removed from the leaderboard by a moderator').then(
-              () => setVersion((v) => v + 1),
-              (e) => onProblem((e as Error).message),
-            )
-          }
-        >
-          <Trash2 strokeWidth={ICON_STROKE} aria-hidden />
-        </button>
-      )}
-    </li>
+  const remove = (l: RankLine) => () =>
+    void online.removeScore(l.scoreId, 'Removed from the leaderboard by a moderator').then(
+      () => setVersion((v) => v + 1),
+      (e) => onProblem((e as Error).message),
+    );
+  const row = (l: RankLine) => (
+    <Row
+      key={l.scoreId}
+      l={l}
+      me={l.scoreId === mine?.scoreId}
+      difficulty={pick.difficulty}
+      onWatch={() => onWatch(l.scoreId)}
+      onRemove={mod && l.scoreId !== mine?.scoreId ? remove(l) : undefined}
+    />
   );
   return (
-    <>
-      <div className="choice-pair" role="radiogroup" aria-label="Which scores">
-        <button type="button" role="radio" aria-checked={!week} className={`choice ${!week ? 'on' : ''}`} onClick={() => setWeek(false)}>
-          All time
-        </button>
-        <button type="button" role="radio" aria-checked={week} className={`choice ${week ? 'on' : ''}`} onClick={() => setWeek(true)}>
-          This week
-        </button>
-      </div>
+    <div className="boards-list">
       {board.lines.length === 0 ? (
-        <p className="hint">Nobody has played this chart on this server yet. Finish it to be first.</p>
+        <p className="hint boards-empty">
+          {week ? 'Nobody has played this chart here this week.' : 'Nobody has played this chart on this server yet.'} Finish it to be
+          first.
+        </p>
       ) : (
-        <ol className="boards-lines">{board.lines.map((l) => row(l, l.scoreId === mine?.scoreId))}</ol>
+        <ol className="board-rows" aria-label="Rankings">
+          {board.lines.map(row)}
+        </ol>
       )}
-      {mine && mine.rank > board.lines.length && <ol className="boards-lines">{row(mine, true)}</ol>}
+      {mine && mine.rank > board.lines.length && <ol className="board-rows pinned">{row(mine)}</ol>}
       {mine && (
-        <div className="party-row">
+        <div className="boards-foot">
+          <span className="dim">
+            Your best: rank {mine.rank}, {mine.score.toLocaleString()}
+          </span>
           <button
             type="button"
             className="btn small"
             onClick={() =>
               void online.share(mine.scoreId, !mine.shared).then(
-                () => (setVersion((v) => v + 1), onChange()),
+                () => setVersion((v) => v + 1),
                 (e) => onProblem((e as Error).message),
               )
             }
@@ -284,50 +447,57 @@ function SongBoard({
           </button>
         </div>
       )}
-    </>
+    </div>
   );
 }
 
-/** A song's band boards: one per line-up (the parts and difficulties played), each best first. */
-function BandBoards({ songId }: { songId: string }) {
-  const [board, setBoard] = useState<BandBoard | null>(null);
+/** The replays players shared, newest first. */
+function SharedRuns({ library, onWatch, onProblem }: { library: SongMeta[]; onWatch(id: string): void; onProblem(m: string): void }) {
+  const [shared, setShared] = useState<Shared[] | null>(null);
+  const problemRef = useRef(onProblem);
+  problemRef.current = onProblem;
   useEffect(() => {
-    let live = true;
-    setBoard(null);
-    online.bandBoard(songId).then(
-      (b) => live && setBoard(b),
-      () => live && setBoard({ lineups: [] }),
-    );
-    return () => {
-      live = false;
-    };
-  }, [songId]);
+    void online.sharedRuns().then(setShared, (e) => (setShared([]), problemRef.current((e as Error).message)));
+  }, []);
+  const have = (id: string) => library.some((x) => x.id === id);
+  if (!shared) return <p className="hint boards-empty">Loading the shared replays…</p>;
+  if (!shared.length) return <p className="hint boards-empty">Nobody has shared a replay yet. Share yours from a song’s board.</p>;
   return (
-    <section className="ready-panel" aria-label="Band boards">
-      <h2 className="label">
-        <Users strokeWidth={ICON_STROKE} aria-hidden /> Bands
-      </h2>
-      {!board ? (
-        <p className="hint">Loading the bands…</p>
-      ) : board.lineups.length === 0 ? (
-        <p className="hint">No band has played this song yet. Make a party a band to be the first.</p>
-      ) : (
-        board.lineups.map((l) => (
-          <div key={l.key} className="band-lineup">
-            <span className="dim">{l.parts.map((p) => `${PART_LABEL[p.part]} ${DIFFICULTY_LABEL[p.difficulty]}`).join(' · ')}</span>
-            <ol className="boards-lines">
-              {l.lines.map((line, i) => (
-                <li key={`${line.at}-${i}`} className="boards-line">
-                  <span className="num rank">{i + 1}</span>
-                  <span className="party-name">{line.players.map((p) => p.name).join(', ')}</span>
-                  <Stars n={line.stars} />
-                  <span className="num">{line.score.toLocaleString()}</span>
-                </li>
-              ))}
-            </ol>
-          </div>
-        ))
-      )}
-    </section>
+    <div className="boards-list">
+      <ol className="board-rows" aria-label="Shared replays">
+        {shared.map((r, i) => {
+          const Icon = PART_ICON[r.part as Part];
+          return (
+            <li key={r.scoreId} className="board-row shared" style={{ ['--i' as string]: Math.min(i, 20) }}>
+              <span className="board-rank">
+                <Icon strokeWidth={ICON_STROKE} aria-label={PART_LABEL[r.part]} />
+              </span>
+              <span className="board-name">
+                {r.name}
+                <span className="dim"> · {r.title}</span>
+              </span>
+              <Stars n={r.stars} />
+              <span className="board-pill">{Math.round(r.accuracy * 100)}%</span>
+              <span className="board-diff" title={DIFFICULTY_LABEL[r.difficulty]}>
+                {DIFF_LETTER[r.difficulty]}
+              </span>
+              <span className="board-score num">{r.score.toLocaleString()}</span>
+              <span className="board-acts">
+                <button
+                  type="button"
+                  className="btn small"
+                  disabled={!have(r.songId)}
+                  title={have(r.songId) ? undefined : 'You don’t have this song'}
+                  onClick={() => onWatch(r.scoreId)}
+                >
+                  <Eye strokeWidth={ICON_STROKE} aria-hidden />
+                  Watch
+                </button>
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }
