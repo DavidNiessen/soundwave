@@ -1280,8 +1280,8 @@ function ShowdownOptionsPanel({
       id: 'party-one-part',
       binding: 'party.onePart',
       icon: PART_ICON[onePart],
-      label: 'Parts',
-      value: sd.part ? `${PART_LABEL[onePart]} only` : 'Any',
+      label: sd.part ? 'Only part' : 'Parts',
+      value: sd.part ? PART_LABEL[onePart] : 'Any',
       run: on.toggleOnePart,
     },
     {
@@ -1289,7 +1289,7 @@ function ShowdownOptionsPanel({
       binding: 'party.rotation',
       icon: ListMusic,
       label: 'Songs',
-      value: sd.rotation ? 'Server rotation' : 'The host’s',
+      value: sd.rotation ? 'Rotation' : 'Host’s',
       run: on.toggleRotation,
     },
   ];
