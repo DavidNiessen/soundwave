@@ -7111,7 +7111,7 @@ a.btn {
 }
 .party-code-text {
   font-size: clamp(2rem, 4vw, 3.2rem);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.16em;
   color: var(--pink-2);
   user-select: all;
 }
@@ -8217,11 +8217,32 @@ a.btn {
   display: flex;
   align-items: center;
   gap: 0.55rem;
-  padding: 0.4rem 0.6rem 0.4rem 0.9rem;
+  padding: 0.4rem 0.9rem;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--violet), var(--pink));
-  box-shadow: 0 0 1.4rem rgb(255 77 157 / 0.45);
+  background: var(--panel-solid);
+  box-shadow: inset 0 0 0 1.5px rgb(255 255 255 / 0.12);
   font-weight: 800;
+  transition:
+    background 0.25s,
+    box-shadow 0.25s;
+}
+/* Charged: the target lights up, and the key to strike shows. */
+.sd-ready.ready .sd-ready-target {
+  background: linear-gradient(90deg, var(--violet), var(--pink));
+  box-shadow: 0 0 1.4rem rgb(255 77 157 / 0.55);
+  animation: sd-ready-pulse 1.2s ease-in-out infinite;
+}
+@keyframes sd-ready-pulse {
+  50% {
+    box-shadow: 0 0 2.2rem rgb(255 77 157 / 0.8);
+  }
+}
+.sd-ready.lead .sd-ready-target {
+  box-shadow: inset 0 0 0 2px rgb(255 210 61 / 0.6);
+  color: var(--gold);
+}
+.sd-ready:not(.ready) .sd-ready-name {
+  color: var(--ink-2);
 }
 .sd-ready-rank {
   font-size: 1.2rem;
@@ -8784,4 +8805,13 @@ a.btn {
   .sdb-right {
     grid-column: 1;
   }
+}
+/* A few players: one column in the middle, the cut line as wide as it. */
+.sdb-results .sdr-grid.few {
+  grid-template-columns: minmax(0, 34rem);
+  justify-content: center;
+}
+.sdb-results .sdr-cut.few {
+  width: min(100%, 34rem);
+  margin-inline: auto;
 }

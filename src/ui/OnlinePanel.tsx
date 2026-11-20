@@ -240,8 +240,15 @@ function SignedIn({ settings, setlist, onParty, onBoards, onSongs, onAvatar, bas
                     <input
                       ref={codeInput}
                       value={code}
-                      onChange={(e) => setCode(e.target.value.toUpperCase())}
-                      placeholder="KITE-42"
+                      onChange={(e) =>
+                        setCode(
+                          e.target.value
+                            .toUpperCase()
+                            .replace(/[^A-Z0-9]/g, '')
+                            .slice(0, 5),
+                        )
+                      }
+                      placeholder="B7KQX"
                       aria-label="The party’s code, from its host"
                       maxLength={12}
                       spellCheck={false}

@@ -6,7 +6,7 @@
  * same notes), names the moment it starts on the server's clock, and passes the scores around ten
  * times a second. Each player's hits are judged on their own machine; only scores travel.
  *
- * A party can be a Showdown (4.1): scores become shares of each chart's par, the overdrive button
+ * A party can be a Showdown (4.1): players are ranked by score, the overdrive button
  * strikes the player above, and the lowest players go out after each song. The server decides whom
  * a Strike hits and how long the hit lasts, by the fairness rules below; the players' games apply
  * the hits.
@@ -14,6 +14,7 @@
  * This holds no sockets: it is given a way to send a message to a player and a clock, so it can be
  * tested on its own (server/tests).
  */
+import { randomInt } from 'node:crypto';
 import type { Chart } from '../../src/chart/types.ts';
 import { GameSession } from '../../src/game/GameSession.ts';
 import {
@@ -64,32 +65,14 @@ export function hitLength(charge: number, repeat: boolean): number {
   return repeat ? Math.round(ms / 2) : ms;
 }
 
-const WORDS = [
-  'KITE',
-  'BASS',
-  'DRUM',
-  'TAPE',
-  'NEON',
-  'ECHO',
-  'RIFF',
-  'BEAT',
-  'HYMN',
-  'JAZZ',
-  'LOOP',
-  'MOOD',
-  'PEAK',
-  'SOLO',
-  'TONE',
-  'WAVE',
-  'VIBE',
-  'GLOW',
-  'STAR',
-  'FUZZ',
-  'HUSH',
-  'LUTE',
-  'REED',
-  'SYNC',
-];
+/**
+ * A party's code: five letters and digits from those that cannot be mistaken for one another when
+ * read aloud or off a screen (no O and 0, no I, L and 1). 31^5, some 28 million codes.
+ */
+const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const CODE_LENGTH = 5;
+/** A code as typed: upper case, without spaces or dashes. */
+export const cleanCode = (code: string) => code.toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 export interface Player {
   id: string;
@@ -203,7 +186,7 @@ export class Parties {
         return;
       }
       case 'party-join': {
-        const p = this.parties.get(msg.code.trim().toUpperCase());
+        const p = this.parties.get(cleanCode(msg.code));
         if (!p) return fail('There is no party with that code. Check it with the host.');
         if (p === party) return this.share(p);
         if (p.state.members.length >= PARTY_MAX) return fail(`That party is full: it has ${PARTY_MAX} players.`);
@@ -384,26 +367,26 @@ export class Parties {
   }
 
   /**
-   * Showdown, after a song: every player still in gets their share (a result still missing counts
-   * as their last score on the board), and the lowest go out, down to the number the set's cut
-   * leaves. Players level at the cut all stay.
+   * Showdown, after a song: the players still in are ranked by score (a result still missing
+   * counts as their last score on the board), and the lowest go out, down to the number the set's
+   * cut leaves. Players level at the cut all stay. Each line also carries its share of par.
    */
   private eliminate(party: Party, song: Song, lines: ResultLine[]) {
     const s = party.state;
     const member = (id: string) => s.members.find((m) => m.id === id);
-    for (const l of lines)
-      if (song.playing.has(l.id)) l.share = this.shareOf(song, l.id, l.result?.score ?? song.board.get(l.id)?.score ?? 0);
+    const scoreOf = (l: ResultLine) => (song.playing.has(l.id) ? (l.result?.score ?? song.board.get(l.id)?.score ?? 0) : -1);
+    for (const l of lines) if (song.playing.has(l.id)) l.share = this.shareOf(song, l.id, scoreOf(l));
     const alive = lines.filter((l) => !member(l.id)?.eliminated);
-    alive.sort((a, b) => (b.share ?? 0) - (a.share ?? 0));
+    alive.sort((a, b) => scoreOf(b) - scoreOf(a));
     const keep = Math.min(alive.length, survivors(party.started || alive.length, song.index, s.set.length));
-    const bar = alive[keep - 1]?.share ?? 0;
+    const bar = alive[keep - 1] ? scoreOf(alive[keep - 1]) : 0;
     for (const l of alive)
-      if ((l.share ?? 0) < bar) {
+      if (scoreOf(l) < bar) {
         l.eliminated = true;
         member(l.id)!.eliminated = true;
       }
-    // Still in first, by share; then those out.
-    lines.sort((a, b) => Number(!!member(a.id)?.eliminated) - Number(!!member(b.id)?.eliminated) || (b.share ?? -1) - (a.share ?? -1));
+    // Still in first, by score; then those out.
+    lines.sort((a, b) => Number(!!member(a.id)?.eliminated) - Number(!!member(b.id)?.eliminated) || scoreOf(b) - scoreOf(a));
   }
 
   /** Showdown: a score as a share of the player's chart's par. */
@@ -419,7 +402,7 @@ export class Parties {
   }
 
   /**
-   * Showdown: whom each player's Strike would hit now. Ranked by share, each player aims at the
+   * Showdown: whom each player's Strike would hit now. Ranked by score, each player aims at the
    * nearest player above who can be hit and is not already the target of two others; first place
    * aims at nobody. Players who finished, or are not playing, neither strike nor are struck.
    */
@@ -430,7 +413,7 @@ export class Parties {
     const now = this.now();
     const ranked = [...song.board.values()]
       .filter((l) => !l.out && !l.done && song.playing.has(l.id))
-      .sort((a, b) => (b.share ?? 0) - (a.share ?? 0) || (a.id < b.id ? -1 : 1));
+      .sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : 1));
     const count = new Map<string, number>();
     for (let i = 1; i < ranked.length; i++)
       for (let j = i - 1; j >= 0; j--) {
@@ -593,7 +576,7 @@ export class Parties {
 
   private newCode(): string {
     for (;;) {
-      const code = `${WORDS[Math.floor(Math.random() * WORDS.length)]}-${10 + Math.floor(Math.random() * 90)}`;
+      const code = Array.from({ length: CODE_LENGTH }, () => CODE_CHARS[randomInt(CODE_CHARS.length)]).join('');
       if (!this.parties.has(code)) return code;
     }
   }

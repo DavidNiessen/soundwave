@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { showSong } from '../app/discord';
 import { getEngine } from '../audio/engine';
 import { playSfx } from '../audio/sfx';
+import { playShowdownSfx } from '../audio/showdownSfx';
 import type { Chart } from '../chart/types';
 import type { Results } from '../game/GameSession';
 import type { ReplayInputs } from '../game/replay';
@@ -204,11 +205,15 @@ export function PlayScreen({
         asking = false;
         if (!e.target) return ctrl.overdriveNow();
         ctrl.spendCharge();
+        playShowdownSfx('strike');
         setNote({ text: `Strike on ${name(e.target)}`, key: performance.now() });
         return;
       }
       ctrl.hit(e.at, e.ms);
       setHit({ from: e.from, at: e.at, ms: e.ms });
+      // The warning now, the impact when it lands.
+      playShowdownSfx('incoming');
+      window.setTimeout(() => playShowdownSfx('impact'), Math.max(0, e.at - performance.now()));
     });
   }
 
@@ -458,9 +463,9 @@ function HitBanner({ hit, onOver }: { hit: HitNote; onOver(): void }) {
 }
 
 /**
- * Showdown: once the player has charge enough for a Strike and someone above to aim at, a banner
- * over the highway names the target and their place, with the charge it would spend (a quarter of
- * the meter at least; the fuller, the longer the hit).
+ * Showdown: who the player's Strike would hit, all through the song, over the highway. The target
+ * is the player just above (the leader has none); the four segments are the charge, and a quarter
+ * of the meter makes the Strike ready, the fuller the longer its hit.
  */
 function StrikeReady({
   me,
@@ -475,33 +480,47 @@ function StrikeReady({
 }) {
   const board = useSyncExternalStore(online.subscribeBoard, online.board);
   const [charge, setCharge] = useState(0);
+  const [od, setOd] = useState(false);
   useEffect(() => {
     const t = window.setInterval(() => {
       const s = ctrl.current?.session;
-      setCharge(s && !s.overdriveActive ? Math.round(s.overdrive * 20) / 20 : 0);
+      setCharge(s ? Math.round(s.overdrive * 20) / 20 : 0);
+      setOd(!!s?.overdriveActive);
     }, 150);
     return () => clearInterval(t);
   }, [ctrl]);
   const lines = board?.lines ?? [];
-  const aim = lines.find((l) => l.id === me)?.aim;
-  if (!aim || charge < STRIKE_MIN_CHARGE) return null;
-  const ranked = lines.filter((l) => !l.out).sort((a, b) => (b.share ?? 0) - (a.share ?? 0));
-  const rank = ranked.findIndex((l) => l.id === aim) + 1;
-  const name = online.snapshot().party?.members.find((m) => m.id === aim)?.name ?? 'the player above';
+  const ranked = lines.filter((l) => !l.out).sort((a, b) => b.score - a.score);
+  const at = ranked.findIndex((l) => l.id === me);
+  if (at < 0 || lines.find((l) => l.id === me)?.done) return null;
+  const aim = ranked[at].aim;
+  const ready = !!aim && !od && charge >= STRIKE_MIN_CHARGE;
+  const name = (id: string) => online.snapshot().party?.members.find((m) => m.id === id)?.name ?? 'the player above';
+  const label = at === 0 ? 'You lead' : !aim ? 'Target out of reach' : ready ? 'Ready to strike' : 'Target';
   return (
-    <div className="sd-ready" role="status">
-      <span className="sd-ready-label">Ready to strike</span>
+    <div className={`sd-ready ${ready ? 'ready' : ''} ${at === 0 ? 'lead' : ''}`} role="status">
+      <span className="sd-ready-label">{label}</span>
       <span className="sd-ready-target">
-        <span className="sd-ready-rank num">{rank}</span>
-        <Crosshair strokeWidth={ICON_STROKE} aria-hidden />
-        <span className="sd-ready-name">{name}</span>
-        <span className="sd-ready-key">{usingPad ? 'Overdrive' : keyLabel(settings.overdriveKey)}</span>
+        {at === 0 ? (
+          <span className="sd-ready-name">Nobody above you to strike</span>
+        ) : aim ? (
+          <>
+            <span className="sd-ready-rank num">{ranked.findIndex((l) => l.id === aim) + 1}</span>
+            <Crosshair strokeWidth={ICON_STROKE} aria-hidden />
+            <span className="sd-ready-name">{name(aim)}</span>
+            {ready && <span className="sd-ready-key">{usingPad ? 'Overdrive' : keyLabel(settings.overdriveKey)}</span>}
+          </>
+        ) : (
+          <span className="sd-ready-name">Protected after a hit, or struck by two already</span>
+        )}
       </span>
-      <span className="sd-ready-charge" aria-label={`Charge ${Math.round(charge * 100)}%`}>
-        {[0.25, 0.5, 0.75, 1].map((q) => (
-          <span key={q} className={charge >= q ? 'on' : ''} />
-        ))}
-      </span>
+      {at > 0 && (
+        <span className="sd-ready-charge" aria-label={`Charge ${Math.round(charge * 100)}%`}>
+          {[0.25, 0.5, 0.75, 1].map((q) => (
+            <span key={q} className={charge >= q ? 'on' : ''} />
+          ))}
+        </span>
+      )}
     </div>
   );
 }

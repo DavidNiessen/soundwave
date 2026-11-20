@@ -86,7 +86,7 @@ describe('Showdown', () => {
     expect(hitLength(1, true)).toBe(4000);
   });
 
-  it('ranks by the share of par and knocks out the lowest after a song', () => {
+  it('ranks by score and knocks out the lowest after a song', () => {
     const { say, start, state } = showdown(6);
     start(0);
     // Shares 1.0, 0.9, … 0.5: the two lowest go out (6 → 4).

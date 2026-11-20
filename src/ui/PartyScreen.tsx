@@ -72,6 +72,7 @@ import { Hint, keyName, useActions, useHints, type Action } from './actions';
 import { Calibration } from './Calibration';
 import { Cover } from './Cover';
 import { Dialog } from './Dialog';
+import { playShowdownSfx } from '../audio/showdownSfx';
 import { HoldButton } from './HoldButton';
 import { DIFFICULTY_LABEL, ICON_STROKE, PART_ICON, PART_LABEL, Pips, Stars } from './icons';
 import { useSlide } from './useSlide';
@@ -1200,7 +1201,7 @@ function ShowdownOptionsPanel({
         )}
       </h2>
       <p className="hint">
-        Scores count as a share of each chart’s best, and the lowest go out after each song.
+        The best scores stay in, and the lowest go out after each song.
         {sd.hits &&
           ' Your overdrive button strikes the player just above you. A hit fogs the far highway and holds the multiplier at ×2 while it lasts.'}
       </p>
@@ -1247,9 +1248,7 @@ export function PartyBoard({ me }: { me: string }) {
   const board = useSyncExternalStore(online.subscribeBoard, online.board);
   const showdown = !!s.party?.showdown;
   if (showdown) return <ShowdownBoard me={me} />;
-  const all = [...(board?.lines ?? [])]
-    .filter((l) => !l.out || l.score > 0)
-    .sort((a, b) => (showdown ? (b.share ?? 0) - (a.share ?? 0) : b.score - a.score));
+  const all = [...(board?.lines ?? [])].filter((l) => !l.out || l.score > 0).sort((a, b) => b.score - a.score);
   if (!all.length) return null;
   const mine = all.find((l) => l.id === me);
   // A Showdown's board keeps to the top five and the players around you, and says how many play.
@@ -1264,7 +1263,6 @@ export function PartyBoard({ me }: { me: string }) {
           rank={all.indexOf(l) + 1}
           name={nameOf(s.party, l.id)}
           me={l.id === me}
-          showdown={showdown}
           target={!!mine?.aim && mine.aim === l.id}
           threat={l.aim === me}
         />
@@ -1289,7 +1287,7 @@ export const ordinal = (n: number) => {
 function ShowdownBoard({ me }: { me: string }) {
   const s = useOnline();
   const board = useSyncExternalStore(online.subscribeBoard, online.board);
-  const ranked = [...(board?.lines ?? [])].filter((l) => !l.out).sort((a, b) => (b.share ?? 0) - (a.share ?? 0));
+  const ranked = [...(board?.lines ?? [])].filter((l) => !l.out).sort((a, b) => b.score - a.score);
   if (!ranked.length) return null;
   const at = ranked.findIndex((l) => l.id === me);
   const mine = ranked[at];
@@ -1299,15 +1297,11 @@ function ShowdownBoard({ me }: { me: string }) {
   if (at >= 0) for (let i = Math.max(0, at - 2); i <= Math.min(ranked.length - 1, at + 1); i++) shown.add(i);
   else for (let i = 1; i < Math.min(4, ranked.length); i++) shown.add(i);
   const rows = [...shown].sort((a, b) => a - b);
-  // How far you are from the cut, in share of par: above it, ahead of the first who would go out;
+  // How far you are from the cut, in points: above it, ahead of the first who would go out;
   // below it, behind the last who would stay.
   const safe = at >= 0 && at < cut;
   const margin =
-    at < 0 || cut >= ranked.length
-      ? null
-      : safe
-        ? (mine.share ?? 0) - (ranked[cut]?.share ?? 0)
-        : (ranked[cut - 1]?.share ?? 0) - (mine.share ?? 0);
+    at < 0 || cut >= ranked.length ? null : safe ? mine.score - (ranked[cut]?.score ?? 0) : (ranked[cut - 1]?.score ?? 0) - mine.score;
   const name = (id: string) => nameOf(s.party, id);
   const cutRow = (
     <li key="cut" className={`sd-cut ${safe ? 'safe' : 'danger'}`} aria-label={`The cut: ${cut} go through`}>
@@ -1315,7 +1309,7 @@ function ShowdownBoard({ me }: { me: string }) {
       <span className="sd-cut-line" aria-hidden />
       {margin !== null && (
         <span className="sd-cut-margin num">
-          {safe ? '▲' : '▼'} {percent(Math.max(0, margin))}
+          {safe ? '▲' : '▼'} {Math.max(0, margin).toLocaleString()}
         </span>
       )}
       <span className="sd-cut-line" aria-hidden />
@@ -1337,7 +1331,7 @@ function ShowdownBoard({ me }: { me: string }) {
           {l.aim === me && <Swords className="aim" strokeWidth={ICON_STROKE} aria-label="Their Strike would hit you" />}
           {name(l.id)}
         </span>
-        <span className="sd-share num">{percent(l.share ?? 0)}</span>
+        <span className="sd-share num">{l.score.toLocaleString()}</span>
       </li>,
     );
   });
@@ -1365,7 +1359,6 @@ function BoardRow({
   rank,
   name,
   me,
-  showdown,
   target,
   threat,
 }: {
@@ -1373,7 +1366,6 @@ function BoardRow({
   rank: number;
   name: string;
   me: boolean;
-  showdown: boolean;
   /** Showdown: your Strike would hit this player. */
   target: boolean;
   /** Showdown: this player's Strike would hit you. */
@@ -1386,7 +1378,7 @@ function BoardRow({
         {target && <Crosshair className="aim" strokeWidth={ICON_STROKE} aria-label="Your Strike would hit them" />}
         {threat && <Swords className="aim" strokeWidth={ICON_STROKE} aria-label="Their Strike would hit you" />} {name}
       </span>
-      <span className="num">{showdown ? percent(l.share ?? 0) : l.score.toLocaleString()}</span>
+      <span className="num">{l.score.toLocaleString()}</span>
       <span className="dim num">{l.done ? 'done' : l.out ? 'left' : l.hit ? 'hit' : `×${l.streak}`}</span>
     </li>
   );
@@ -1457,15 +1449,17 @@ function ShowdownBetween({
   const [tab, setTab] = useState<'results' | 'next'>('results');
   const [asking, setAsking] = useState(false);
   const next = () => onStartSong(party.songIndex + 1);
-  // The countdown; the results turn into Next up on their own after a while.
+  // The countdown; the results turn into Next up (or, after the final, The end) on their own after a
+  // while. After the final it stops there: no song comes next.
+  const turnAt = AUTO_NEXT_S - RESULTS_S;
   useEffect(() => {
-    if (held || last) return;
-    const t = window.setInterval(() => setLeft((n) => Math.max(0, n - 1)), 1000);
+    if (held) return;
+    const t = window.setInterval(() => setLeft((n) => Math.max(last ? turnAt : 0, n - 1)), 1000);
     return () => clearInterval(t);
-  }, [held, last]);
+  }, [held, last, turnAt]);
   useEffect(() => {
-    if (!last && left === AUTO_NEXT_S - RESULTS_S) setTab('next');
-  }, [left, last]);
+    if (left === turnAt) setTab('next');
+  }, [left, turnAt]);
   const startRef = useRef(next);
   startRef.current = next;
   useEffect(() => {
@@ -1542,6 +1536,22 @@ function ShowdownBetween({
           ? { text: `Through · ${ordinal(place)}`, tone: 'through' }
           : { text: `Out · ${ordinal(place)}`, tone: 'out' };
   const mine = lastRun && lastRun.songIndex === party.songIndex ? lastRun : null;
+  // The result in sound as the results open; the tabs turning; the last seconds ticking.
+  useEffect(() => {
+    if (status.tone === 'win') playShowdownSfx('win');
+    else if (status.tone === 'through') playShowdownSfx('through');
+    else if (status.tone === 'out') playShowdownSfx('out');
+    // Once, as the results open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const firstTab = useRef(true);
+  useEffect(() => {
+    if (firstTab.current) return void (firstTab.current = false);
+    playShowdownSfx('turn');
+  }, [tab]);
+  useEffect(() => {
+    if (!held && left > 0 && left <= 5) playShowdownSfx('tick');
+  }, [left, held]);
 
   const row = (l: ResultLine, rank: number, i: number) => {
     const m = member(l.id);
@@ -1553,12 +1563,14 @@ function ShowdownBetween({
         <span className={`sdr-acc ${l.result && l.result.accuracy >= 1 ? 'perfect' : ''}`}>
           {l.result ? `${Math.round(l.result.accuracy * 100)}%` : '–'}
         </span>
-        <span className="sdr-share num">{l.share !== undefined ? percent(l.share) : '–'}</span>
+        <span className="sdr-share num">{l.result ? l.result.score.toLocaleString() : '–'}</span>
         <span className="sdr-part">{Icon && <Icon strokeWidth={ICON_STROKE} aria-label={PART_LABEL[m!.part]} />}</span>
       </li>
     );
   };
   const pct = (n: number, of: number) => (of > 0 ? ` (${Math.round((n / of) * 100)}%)` : '');
+  // A few players fit in one column, in the middle; a full party takes two.
+  const few = lines.length <= 8;
 
   return (
     <div className="sdb">
@@ -1584,7 +1596,7 @@ function ShowdownBetween({
           ))}
         </div>
         <Hint {...keysOf('menus.tabNext')} {...hints} />
-        {!last && !held && (
+        {!held && (!last || left > turnAt) && (
           <span className="sdb-progress" aria-hidden>
             <span
               style={{ ['--p' as string]: tab === 'results' ? (AUTO_NEXT_S - left) / RESULTS_S : 1 - left / (AUTO_NEXT_S - RESULTS_S) }}
@@ -1599,16 +1611,16 @@ function ShowdownBetween({
             <span className="sdr-kicker">{decided ? 'The Showdown is decided' : last ? 'The final' : `Top ${stays.length} continue`}</span>
             <h2 className="sdr-title">{last && party.songIndex > 0 ? 'Final' : `Round ${party.songIndex + 1}`}</h2>
           </header>
-          <ol className="sdr-grid" aria-label="Standings after this song">
+          <ol className={`sdr-grid ${few ? 'few' : ''}`} aria-label="Standings after this song">
             {stays.map((l, i) => row(l, i + 1, i))}
           </ol>
           {outNow.length > 0 && (
             <>
-              <div className="sdr-cut" aria-label="The cut">
+              <div className={`sdr-cut ${few ? 'few' : ''}`} aria-label="The cut">
                 <Scissors strokeWidth={ICON_STROKE} aria-hidden />
                 <span />
               </div>
-              <ol className="sdr-grid" aria-label="Out after this song">
+              <ol className={`sdr-grid ${few ? 'few' : ''}`} aria-label="Out after this song">
                 {outNow.map((l, i) => row(l, stays.length + i + 1, stays.length + i))}
               </ol>
             </>
@@ -1735,8 +1747,6 @@ function ShowdownBetween({
               <div className="sdb-card">
                 <h3 className="sdb-heading small">Stats</h3>
                 <dl className="sdr-stats">
-                  <dt>Share of par</dt>
-                  <dd className="num">{mineLine.share !== undefined ? percent(mineLine.share) : '–'}</dd>
                   {mine && (
                     <>
                       <dt>Total notes</dt>
@@ -1774,12 +1784,14 @@ function ShowdownBetween({
         </section>
       )}
 
-      {!last && (
+      {(!last || left > turnAt) && (
         <p className={`sdb-count ${held ? 'held' : ''}`} aria-live="polite">
           <Disc3 strokeWidth={ICON_STROKE} aria-hidden />
           <span>
-            <span className="sdb-count-label">{held ? 'On hold' : 'Next song in'}</span>
-            {!held && <span className="sdb-count-num num">{left}</span>}
+            <span className="sdb-count-label">
+              {held ? 'On hold' : last ? 'The end in' : tab === 'results' ? 'Next up in' : 'Next song in'}
+            </span>
+            {!held && <span className="sdb-count-num num">{last || tab === 'results' ? left - turnAt : left}</span>}
           </span>
         </p>
       )}
@@ -1896,10 +1908,9 @@ function ResultTable({ lines, me }: { lines: ResultLine[]; me: string }) {
             {l.result && (
               <>
                 <Stars n={l.result.stars} />
-                <span className="num">{l.share !== undefined ? percent(l.share) : l.result.score.toLocaleString()}</span>
+                <span className="num">{l.result.score.toLocaleString()}</span>
               </>
             )}
-            {!l.result && l.share !== undefined && <span className="num">{percent(l.share)}</span>}
           </span>
         </li>
       ))}

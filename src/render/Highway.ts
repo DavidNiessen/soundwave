@@ -176,19 +176,43 @@ const highwayFragment = /* glsl */ `
  * brightest at the edge, with slow swells running down it toward the player and a fine shimmer.
  */
 /**
- * Showdown's Fog: a haze lying over the far part of the deck, thick at the horizon and thinning to
- * nothing well before the strike line, so notes come out of it later but nothing that has to be hit
- * now is hidden. It drifts a little, slowly.
+ * A Showdown hit: a storm over the far part of the deck. Bands of haze warp and roll toward the
+ * player with bright streaks running through them, thick at the horizon and thinning to nothing
+ * before the strike line, so notes come out of it late but nothing that has to be hit now is
+ * hidden. It flashes as it lands (uFlash).
  */
 const fogFragment = /* glsl */ `
   uniform float uLevel;
   uniform float uTime;
+  uniform float uFlash;
   varying vec2 vUv;
+  float hash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+  float noise(vec2 p) {
+    vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
+  }
+  float fbm(vec2 p) {
+    float v = 0.0;
+    float a = 0.5;
+    for (int i = 0; i < 4; i++) { v += a * noise(p); p *= 2.03; a *= 0.5; }
+    return v;
+  }
   void main() {
-    float drift = 0.5 + 0.5 * sin(vUv.x * 7.0 + uTime * 0.6) * sin(vUv.y * 5.0 - uTime * 0.4);
-    float edge = smoothstep(0.0, 0.08, vUv.x) * smoothstep(1.0, 0.92, vUv.x);
-    float thick = smoothstep(0.0, 0.3, vUv.y) * (0.9 + 0.08 * drift) * edge;
-    gl_FragColor = vec4(mix(vec3(0.08, 0.05, 0.18), vec3(0.24, 0.18, 0.4), drift * 0.4), thick * uLevel);
+    // along: 0 nearest the strike line, 1 at the horizon. The haze rolls toward the player.
+    vec2 p = vec2(vUv.x * 3.0, vUv.y * 4.0 + uTime * 0.9);
+    // Warped by itself, so the bands bend and swirl rather than slide.
+    vec2 warp = vec2(fbm(p + vec2(0.0, uTime * 0.3)), fbm(p + vec2(5.2, -uTime * 0.25)));
+    float haze = fbm(p + warp * 2.2);
+    // Bright streaks: thin ridges of the warped haze, running across the deck.
+    float ridge = 1.0 - abs(sin((haze * 6.0 + vUv.y * 3.0 - uTime * 1.6) * 3.14159));
+    float streak = pow(ridge, 10.0);
+    float edge = smoothstep(0.0, 0.06, vUv.x) * smoothstep(1.0, 0.94, vUv.x);
+    float thick = smoothstep(0.0, 0.32, vUv.y) * edge;
+    vec3 deep = vec3(0.10, 0.05, 0.24);
+    vec3 lit = vec3(0.62, 0.48, 1.0);
+    vec3 col = mix(deep, lit, haze * 0.55) + vec3(0.85, 0.8, 1.0) * streak * 0.7 + vec3(1.0, 0.85, 1.0) * uFlash * 0.5;
+    float alpha = thick * (0.78 + 0.2 * haze + 0.25 * streak) + uFlash * 0.35 * edge;
+    gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.97) * uLevel);
   }
 `;
 
@@ -662,7 +686,7 @@ export class Highway {
     transparent: true,
     depthTest: false,
     depthWrite: false,
-    uniforms: { uLevel: { value: 0 }, uTime: { value: 0 } },
+    uniforms: { uLevel: { value: 0 }, uTime: { value: 0 }, uFlash: { value: 0 } },
   });
   private fogMesh: THREE.Mesh | null = null;
   private readonly glow = new THREE.Group();
@@ -794,11 +818,11 @@ export class Highway {
     track.renderOrder = -2;
     this.root.add(track);
 
-    // Showdown's Fog: over the far two thirds of the deck, never the third nearest the strike line.
-    const fogLen = (LENGTH * 2) / 3;
+    // A Showdown hit: over the far three quarters of the deck, never the quarter nearest the strike line.
+    const fogLen = (LENGTH * 3) / 4;
     const fog = new THREE.Mesh(new THREE.PlaneGeometry(this.width + 0.8, fogLen), this.fogMat);
     fog.rotation.x = -Math.PI / 2;
-    fog.position.set(0, 0.4, -LENGTH / 3 - fogLen / 2);
+    fog.position.set(0, 0.4, -LENGTH / 4 - fogLen / 2);
     fog.renderOrder = 5;
     fog.visible = false;
     this.fogMesh = fog;
@@ -1292,7 +1316,10 @@ export class Highway {
     // The facets move with the notes; 16 units is a whole number of their repeats.
     u.uTravel.value = (t * speed) % 16;
     const fu = this.fogMat.uniforms;
-    fu.uLevel.value += (this.fog - fu.uLevel.value) * Math.min(1, dt * 4);
+    // A hit rolls in fast, with a flash, and clears more slowly.
+    if (this.fog > 0.5 && fu.uLevel.value < 0.05) fu.uFlash.value = 1;
+    fu.uFlash.value = Math.max(0, fu.uFlash.value - dt * 2.5);
+    fu.uLevel.value += (this.fog - fu.uLevel.value) * Math.min(1, dt * (this.fog > fu.uLevel.value ? 9 : 3));
     fu.uTime.value = u.uTime.value;
     if (this.fogMesh) this.fogMesh.visible = fu.uLevel.value > 0.01;
     this.pulse = Math.max(0, this.pulse - dt * 2);

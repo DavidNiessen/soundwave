@@ -209,9 +209,10 @@ describe('parties over the network', () => {
     host.send({ type: 'party-create' });
     const made = await host.next('party', (m) => !!m.party);
     const code = made.party!.code;
-    expect(code).toMatch(/^[A-Z]{4}-\d{2}$/);
+    expect(code).toMatch(/^[A-HJ-KMNP-Z2-9]{5}$/);
 
-    guest.send({ type: 'party-join', code: code.toLowerCase() });
+    // Typed in lower case with a space, as someone might, it still finds the party.
+    guest.send({ type: 'party-join', code: `${code.slice(0, 2)} ${code.slice(2)}`.toLowerCase() });
     await host.next('party', (m) => m.party?.members.length === 2);
 
     // A party is just its players until the host picks what to play.
