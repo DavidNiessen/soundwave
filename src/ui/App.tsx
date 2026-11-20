@@ -1162,12 +1162,35 @@ export function App() {
       (message) => toast(`Your songs could not all be shared: ${message}`),
     );
   }, [serverSharing, settings.shareLibrary, server.ready, songs, analysisStatus, toast]);
+  const origin = (song: SharedSong) => ({ url: serverSongs.url ?? '', uid: song.uid, hash: song.hash });
+  // The server is the single point of truth for songs downloaded from it: one whose copy there
+  // changed (its hash) takes the server's details over.
+  useEffect(() => {
+    if (!server.ready) return;
+    void serverSongs.syncCopies(songs, async (song, file) => {
+      const pkg = await readSongPackage(file, file.name);
+      if (pkg.meta.id !== song.id) return;
+      await updateSongMeta(song.id, {
+        title: pkg.meta.title,
+        artist: pkg.meta.artist,
+        album: pkg.meta.album,
+        cover: pkg.meta.cover ?? null,
+        server: origin(song),
+      });
+      await refresh();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [server.ready, server.list, songs]);
   /** A server song pressed in the library: streamed and opened to play, or downloaded, as the player chose. */
   const playServerSong = async (song: SharedSong) => {
     try {
       if (settingsRef.current.serverSongs === 'download') {
         const got = await importFiles([await serverSongs.download(song)]);
-        if (got.length) toast(`"${got[0].title}" is in your library.`);
+        if (!got.length) return;
+        // It remembers where it came from, so it follows the server's copy from now on.
+        await updateSongMeta(got[0].id, { title: got[0].title, artist: got[0].artist, album: got[0].album, server: origin(song) });
+        await refresh();
+        toast(`"${got[0].title}" is in your library.`);
         return;
       }
       await serverSongs.stream(song);
@@ -1560,12 +1583,13 @@ export function App() {
           onAdd={addSongs}
           actions={songActions}
           server={
-            serverSharing
+            onlineState.account && (serverSharing || server.list.length > 0)
               ? {
                   songs: server.list.filter((x) => !byId.has(x.id)),
                   busy: server.busy,
                   stream: settings.serverSongs === 'stream',
                   sharing: settings.shareLibrary,
+                  canShare: !!serverSharing,
                   left: server.sharing,
                   name: onlineState.info?.name ?? 'the server',
                   onPlay: (x) => void playServerSong(x),

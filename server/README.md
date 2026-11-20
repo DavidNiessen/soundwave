@@ -107,6 +107,12 @@ report a song, and the uploader, you or a moderator can remove it everywhere at 
 With `publicCovers` (`SOUNDWAVE_PUBLIC_COVERS`) on, song covers are served without signing in, so a
 player's Discord status can show the cover of the song they play. Only covers, never audio.
 
+The owner and moderators keep the server's own library (Admin → Server library), whatever players
+may share: songs they add keep their audio and count against no quota. Every song has its own id
+on the server (`uid`) and the SHA-256 of the file the server keeps (`hash`). Renaming a song
+writes its file anew, so its hash changes, and every game that downloaded it takes the new details
+over the next time it signs in: the server is the single point of truth for its songs.
+
 ## A party's songs
 
 A player can only play a song they have. So, on by default, a party's songs are passed on through the
@@ -192,6 +198,7 @@ player's access token (`Authorization: Bearer …`). Bodies and answers are JSON
 | `GET /replays?song=…`                                | The replays players shared                                                  |
 | `GET /showdown/rotation`, `POST /showdown/rotation`  | The Showdown rotation; set it (owner and moderators): `{ songs }`           |
 | `GET /songs?query=…`, `POST /songs`                  | Shared songs; share one (the `.soundwave` file as the body)                 |
+| `POST /songs/:id/edit`                               | Rename a song (owner, moderators): its file and hash change, copies follow  |
 | `GET /songs/:id/file`, `GET /songs/:id/charts`       | A shared song's file, or its charts without the audio                       |
 | `POST /songs/:id/report`, `DELETE /songs/:id`        | Report a song; remove it (its uploader, the owner, moderators)              |
 | `GET /covers/:songId.jpg`                            | A shared song's cover (public with `publicCovers`)                          |

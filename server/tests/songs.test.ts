@@ -44,6 +44,31 @@ async function songFile(seed = 1) {
 }
 
 describe('shared songs', () => {
+  it('let the owner build the library with sharing off, each song with its own id and a hash that follows edits', async () => {
+    await start();
+    const owner = await signUp('Owner', { invite: server.accounts.ownerCode });
+    const ana = await signUp('Ana');
+    const f = await songFile(5);
+    const added = await api<SharedSong>('POST', '/songs', f.bytes, owner.access);
+    expect(added.status).toBe(200);
+    expect(added.body).toMatchObject({ id: f.id, audio: true, title: 'Song 5' });
+    expect(added.body.uid).toMatch(/^[0-9a-f-]{36}$/);
+    expect(added.body.hash).toMatch(/^[0-9a-f]{64}$/);
+
+    // Players still cannot share here, but they see the owner's songs.
+    expect((await api('POST', '/songs', (await songFile(6)).bytes, ana.access)).status).toBe(403);
+    expect((await api<SharedSong[]>('GET', '/songs', undefined, ana.access)).body.map((x) => x.uid)).toEqual([added.body.uid]);
+
+    // An edit keeps the song's own id and gives its file a new hash, and the file says the new title.
+    expect((await api('POST', `/songs/${f.id}/edit`, { title: 'Renamed' }, ana.access)).status).toBe(403);
+    const edited = await api<SharedSong>('POST', `/songs/${f.id}/edit`, { title: 'Renamed', artist: 'New Band' }, owner.access);
+    expect(edited.body).toMatchObject({ uid: added.body.uid, title: 'Renamed', artist: 'New Band' });
+    expect(edited.body.hash).not.toBe(added.body.hash);
+    const file = await api<Uint8Array<ArrayBuffer>>('GET', `/songs/${f.id}/file`, undefined, ana.access);
+    expect(createHash('sha256').update(file.body).digest('hex')).toBe(edited.body.hash);
+    expect((await readSoundwave(new Blob([file.body]))).meta).toMatchObject({ title: 'Renamed', artist: 'New Band' });
+  });
+
   it('are off until the owner turns them on', async () => {
     await start();
     const a = await signUp('Ana');

@@ -1738,7 +1738,7 @@ function onlineSections(s: Settings, set: (patch: Partial<Settings>) => void): S
         onOff(
           'shareLibrary',
           'Share my songs with the server',
-          'Your songs go to the server you sign in to (where its owner takes songs), so everyone on it finds them in their library. Songs you add later go too. Off: nothing of yours is shared.',
+          'Your songs go to the server you sign in to (where its admin takes songs), so everyone on it finds them in their library. Songs you add later go too. Off: nothing of yours is shared.',
           s.shareLibrary,
           (v) => set({ shareLibrary: v }),
         ),

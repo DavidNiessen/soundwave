@@ -8,11 +8,11 @@
  * Files live in the data folder: songs/<id>.soundwave (whole songs), charts/<id>.json (details,
  * analysis and hand-made charts) and covers/<id> (the cover, which the Discord status can show).
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readSoundwave } from '../../src/storage/soundwaveFile.ts';
+import { readSoundwave, writeSoundwave } from '../../src/storage/soundwaveFile.ts';
 import type { SharedSong } from '../../src/net/protocol.ts';
 import { Refusal } from './accounts.ts';
 import type { Config } from './config.ts';
@@ -23,6 +23,10 @@ const canModerate = (u: UserRow) => u.role === 'owner' || u.role === 'moderator'
 
 interface SongRow {
   id: string;
+  /** The song's own id on this server, which never changes. */
+  uid: string;
+  /** SHA-256 of the file the server keeps now: it changes with every edit, so a copy can be checked. */
+  hash: string;
   uploader: string | null;
   title: string;
   artist: string;
@@ -57,7 +61,9 @@ export class Songs {
         size INTEGER NOT NULL,
         audio INTEGER NOT NULL,
         cover_type TEXT,
-        created INTEGER NOT NULL
+        created INTEGER NOT NULL,
+        uid TEXT,
+        hash TEXT
       );
       CREATE TABLE IF NOT EXISTS reports (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,6 +73,28 @@ export class Songs {
         at INTEGER NOT NULL
       );
     `);
+    this.migrate();
+  }
+
+  /** Gives songs stored before internal ids and hashes theirs (a server updated from an older version). */
+  private migrate() {
+    const cols = (this.store.db.prepare('PRAGMA table_info(songs)').all() as { name: string }[]).map((c) => c.name);
+    if (!cols.includes('uid')) this.store.db.exec('ALTER TABLE songs ADD COLUMN uid TEXT');
+    if (!cols.includes('hash')) this.store.db.exec('ALTER TABLE songs ADD COLUMN hash TEXT');
+    const missing = this.store.db.prepare('SELECT id, audio FROM songs WHERE uid IS NULL OR hash IS NULL').all() as {
+      id: string;
+      audio: number;
+    }[];
+    for (const r of missing)
+      this.store.db
+        .prepare('UPDATE songs SET uid = COALESCE(uid, ?), hash = COALESCE(hash, ?) WHERE id = ?')
+        .run(randomUUID(), this.fileHash(r.id, !!r.audio), r.id);
+  }
+
+  /** The hash of what the server keeps of a song: its whole file, or its charts without the audio. */
+  private fileHash(id: string, audio: boolean): string {
+    const path = audio ? join(this.dirs.songs, `${id}.soundwave`) : join(this.dirs.charts, `${id}.json`);
+    return existsSync(path) ? createHash('sha256').update(readFileSync(path)).digest('hex') : '';
   }
 
   /** Whether players can share songs here, and what of them is kept. */
@@ -81,6 +109,8 @@ export class Songs {
   private shared(r: SongRow & { name?: string | null }): SharedSong {
     return {
       id: r.id,
+      uid: r.uid,
+      hash: r.hash,
       title: r.title,
       artist: r.artist,
       duration: r.duration,
@@ -97,7 +127,10 @@ export class Songs {
    * share a song under another's id; on a charts-only server the audio is then thrown away.
    */
   async share(user: UserRow, body: Buffer): Promise<SharedSong> {
-    if (this.sharing === 'off') throw new Refusal(403, 'This server does not take shared songs. Its owner can turn sharing on.');
+    // The owner and moderators build the server's library whatever players may share.
+    const curator = canModerate(user);
+    if (this.sharing === 'off' && !curator)
+      throw new Refusal(403, 'This server does not take shared songs. Its owner can turn sharing on.');
     if (body.length > this.config.songMaxMb * MB) throw new Refusal(413, `A shared song can be at most ${this.config.songMaxMb} MB here.`);
     let c;
     try {
@@ -110,11 +143,11 @@ export class Songs {
       .digest('hex');
     const had = this.row(id);
     if (had) return this.shared({ ...had, name: this.store.userById(had.uploader ?? '')?.name });
-    const keepAudio = this.sharing === 'songs';
+    const keepAudio = curator || this.sharing === 'songs';
     const size = keepAudio ? body.length : 0;
     const used = (this.store.db.prepare('SELECT COALESCE(SUM(size), 0) AS n FROM songs WHERE uploader = ?').get(user.id) as { n: number })
       .n;
-    if (used + size > this.config.quotaMb * MB)
+    if (!curator && used + size > this.config.quotaMb * MB)
       throw new Refusal(413, `That would take you past the ${this.config.quotaMb} MB each player can share here. Remove a song first.`);
     if (keepAudio) writeFileSync(join(this.dirs.songs, `${id}.soundwave`), body);
     writeFileSync(
@@ -128,9 +161,21 @@ export class Songs {
     }
     this.store.db
       .prepare(
-        'INSERT INTO songs (id, uploader, title, artist, duration, size, audio, cover_type, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO songs (id, uploader, title, artist, duration, size, audio, cover_type, created, uid, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       )
-      .run(id, user.id, c.meta.title, c.meta.artist, c.meta.duration, size, keepAudio ? 1 : 0, coverType, this.now());
+      .run(
+        id,
+        user.id,
+        c.meta.title,
+        c.meta.artist,
+        c.meta.duration,
+        size,
+        keepAudio ? 1 : 0,
+        coverType,
+        this.now(),
+        randomUUID(),
+        this.fileHash(id, keepAudio),
+      );
     return this.shared({ ...this.row(id)!, name: user.name });
   }
 
@@ -166,6 +211,40 @@ export class Songs {
     const path = join(this.dirs.covers, id);
     if (!r?.cover_type || !existsSync(path)) throw new Refusal(404, 'That song has no cover here.');
     return { type: r.cover_type, body: readFileSync(path) };
+  }
+
+  /**
+   * The owner or a moderator changes a song's title and artist on the server. Its file is written
+   * anew, so its hash changes and every downloaded copy updates itself (the game checks).
+   */
+  async edit(actor: UserRow, id: string, change: { title?: unknown; artist?: unknown }): Promise<SharedSong> {
+    if (!canModerate(actor)) throw new Refusal(403, 'Only the owner and moderators edit the server’s songs.');
+    const r = this.row(id);
+    if (!r) throw new Refusal(404, 'That song is not on this server.');
+    const title = typeof change.title === 'string' ? change.title.trim().slice(0, 200) : r.title;
+    const artist = typeof change.artist === 'string' ? change.artist.trim().slice(0, 200) : r.artist;
+    if (!title) throw new Refusal(400, 'A song needs a title.');
+    const chartsPath = join(this.dirs.charts, `${id}.json`);
+    const charts = JSON.parse(readFileSync(chartsPath, 'utf8')) as { meta: Record<string, unknown> };
+    charts.meta = { ...charts.meta, title, artist };
+    writeFileSync(chartsPath, JSON.stringify(charts));
+    if (r.audio) {
+      const path = join(this.dirs.songs, `${id}.soundwave`);
+      const c = await readSoundwave(new Blob([new Uint8Array(readFileSync(path))]));
+      const file = await writeSoundwave({ ...c, meta: { ...c.meta, title, artist } });
+      writeFileSync(path, new Uint8Array(await file.arrayBuffer()));
+    }
+    this.store.db
+      .prepare('UPDATE songs SET title = ?, artist = ?, hash = ? WHERE id = ?')
+      .run(title, artist, this.fileHash(id, !!r.audio), id);
+    this.store.log({
+      at: this.now(),
+      actor: actor.id,
+      action: `edit song "${r.title}"`,
+      target: r.uploader ?? actor.id,
+      reason: `now "${title}" by ${artist}`,
+    });
+    return this.shared({ ...this.row(id)!, name: this.store.userById(r.uploader ?? '')?.name });
   }
 
   /** Removes a song everywhere at once: its uploader can, and the owner and moderators. */

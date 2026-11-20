@@ -3,10 +3,12 @@
  * remove and ban players, name moderators, reset a forgotten password, and read
  * the log of every moderation action. And, for everyone, invite links.
  */
-import { Copy, Gavel, ListMusic, ScrollText, Swords, UserPlus } from 'lucide-react';
+import { Check, Copy, Gavel, ListMusic, Pencil, Plus, ScrollText, Swords, Trash2, UserPlus, X } from 'lucide-react';
+import { serverSongs } from '../net/serverSongs';
+import { songFile } from '../storage/songFile';
 import { useEffect, useState } from 'react';
 import { online } from '../net/client';
-import type { Invite, SetSong } from '../net/protocol';
+import type { Invite, SetSong, SharedSong } from '../net/protocol';
 import type { SongMeta } from '../storage/db';
 import { ICON_STROKE } from './icons';
 
@@ -80,7 +82,7 @@ export function InvitePanel({ mod }: { mod: boolean }) {
   );
 }
 
-export function AdminPanel({ owner, setlist }: { owner: boolean; setlist: SongMeta[] }) {
+export function AdminPanel({ owner, setlist, library }: { owner: boolean; setlist: SongMeta[]; library: SongMeta[] }) {
   const [name, setName] = useState('');
   const [reason, setReason] = useState('');
   const [hours, setHours] = useState('');
@@ -109,6 +111,7 @@ export function AdminPanel({ owner, setlist }: { owner: boolean; setlist: SongMe
     );
   return (
     <section className="ready-panel admin">
+      <ServerLibrary library={library} />
       <h2 className="label">
         <Gavel strokeWidth={ICON_STROKE} aria-hidden /> Run the server
       </h2>
@@ -224,6 +227,139 @@ function ReportedSongs() {
             </button>
           </li>
         ))}
+      </ol>
+    </>
+  );
+}
+
+/**
+ * The server's own library, which the owner and moderators keep: songs added from their library
+ * (whatever players may share), renamed (every downloaded copy follows: the game checks each
+ * song's hash), or removed everywhere at once.
+ */
+function ServerLibrary({ library }: { library: SongMeta[] }) {
+  const [list, setList] = useState<SharedSong[]>([]);
+  const [pick, setPick] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ id: string; title: string; artist: string } | null>(null);
+  const load = () => void online.songs('').then(setList, (e) => setNote((e as Error).message));
+  useEffect(load, []);
+  const onServer = new Set(list.map((x) => x.id));
+  const addable = library.filter((x) => !onServer.has(x.id));
+  const run = async (what: () => Promise<unknown>, done: string) => {
+    setBusy(true);
+    setNote(null);
+    try {
+      await what();
+      setNote(done);
+      load();
+      void serverSongs.refresh();
+    } catch (e) {
+      setNote((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const add = (id: string) => {
+    const song = library.find((x) => x.id === id);
+    if (!song) return;
+    void run(async () => online.shareSong(await songFile(song.id)), `"${song.title}" is in the server's library.`);
+    setPick('');
+  };
+  return (
+    <>
+      <h2 className="label">
+        <ListMusic strokeWidth={ICON_STROKE} aria-hidden /> Server library · {list.length}
+      </h2>
+      <p className="hint">Songs here show in the library of everyone on the server, to stream or download.</p>
+      <div className="party-row">
+        <select className="boards-select" value={pick} onChange={(e) => setPick(e.target.value)} aria-label="A song from your library">
+          <option value="">
+            {addable.length
+              ? 'Add a song from your library…'
+              : library.length
+                ? 'Every song of yours is on the server'
+                : 'Your library has no songs yet'}
+          </option>
+          {addable.map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.title}
+              {x.artist ? ` · ${x.artist}` : ''}
+            </option>
+          ))}
+        </select>
+        <button type="button" className="btn small primary" disabled={!pick || busy} onClick={() => add(pick)}>
+          <Plus strokeWidth={ICON_STROKE} aria-hidden />
+          Add
+        </button>
+      </div>
+      {note && <p className="hint">{note}</p>}
+      <ol className="boards-lines">
+        {list.map((x) =>
+          editing?.id === x.id ? (
+            <li key={x.id} className="boards-line admin-edit">
+              <input
+                value={editing.title}
+                onChange={(e) => setEditing({ ...editing, title: e.target.value })}
+                aria-label="Title"
+                placeholder="Title"
+              />
+              <input
+                value={editing.artist}
+                onChange={(e) => setEditing({ ...editing, artist: e.target.value })}
+                aria-label="Artist"
+                placeholder="Artist"
+              />
+              <button
+                type="button"
+                className="btn small primary"
+                aria-label="Save"
+                disabled={busy || !editing.title.trim()}
+                onClick={() =>
+                  void run(
+                    () => online.editSong(x.id, editing.title, editing.artist),
+                    `Renamed. Every copy players downloaded follows.`,
+                  ).then(() => setEditing(null))
+                }
+              >
+                <Check strokeWidth={ICON_STROKE} aria-hidden />
+              </button>
+              <button type="button" className="btn small" aria-label="Cancel" onClick={() => setEditing(null)}>
+                <X strokeWidth={ICON_STROKE} aria-hidden />
+              </button>
+            </li>
+          ) : (
+            <li key={x.id} className="boards-line">
+              <span className="party-name">
+                {x.title}
+                <span className="dim">
+                  {' '}
+                  · {x.artist}
+                  {x.by ? ` · added by ${x.by}` : ''}
+                  {x.audio ? '' : ' · charts only'}
+                </span>
+              </span>
+              <button
+                type="button"
+                className="btn small"
+                aria-label={`Rename ${x.title}`}
+                onClick={() => setEditing({ id: x.id, title: x.title, artist: x.artist })}
+              >
+                <Pencil strokeWidth={ICON_STROKE} aria-hidden />
+              </button>
+              <button
+                type="button"
+                className="btn small danger"
+                aria-label={`Remove ${x.title} from the server`}
+                disabled={busy}
+                onClick={() => void run(() => online.removeSong(x.id, 'Removed by an admin'), `"${x.title}" was removed from the server.`)}
+              >
+                <Trash2 strokeWidth={ICON_STROKE} aria-hidden />
+              </button>
+            </li>
+          ),
+        )}
       </ol>
     </>
   );

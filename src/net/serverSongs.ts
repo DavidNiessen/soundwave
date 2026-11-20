@@ -51,6 +51,7 @@ class ServerSongs {
     if (server === this.server) return;
     this.server = server;
     this.sent.clear();
+    this.synced.clear();
     for (const id of Object.keys(this.state.held)) {
       lendSongAudio(id, null);
       analysisManager.forget(id);
@@ -61,7 +62,7 @@ class ServerSongs {
 
   /** Asks the server for its songs again. */
   async refresh() {
-    if (!this.server || online.snapshot().info?.sharing === 'off') return this.set({ list: [] });
+    if (!this.server) return this.set({ list: [] });
     try {
       const list = await online.songs('');
       this.set({ list: list.filter((x) => x.audio), ready: true });
@@ -97,6 +98,35 @@ class ServerSongs {
     } finally {
       const { [song.id]: _, ...busy } = this.state.busy;
       this.set({ busy });
+    }
+  }
+
+  /** The server this list is from (its address), while signed in. */
+  get url() {
+    return this.server;
+  }
+
+  /** Copies already brought up to date (by uid and hash), so each change is fetched once. */
+  private synced = new Set<string>();
+
+  /**
+   * The server is the single point of truth for the songs downloaded from it: a copy whose song
+   * changed there since (a new hash for the same uid) is fetched again and handed to `apply`.
+   */
+  async syncCopies(mine: SongMeta[], apply: (song: SharedSong, file: File) => Promise<void>) {
+    if (!this.server || !this.state.ready) return;
+    const byUid = new Map(this.state.list.map((x) => [x.uid, x]));
+    for (const local of mine) {
+      const origin = local.server;
+      if (!origin || origin.url !== this.server) continue;
+      const there = byUid.get(origin.uid);
+      if (!there || there.hash === origin.hash || this.synced.has(`${there.uid}:${there.hash}`)) continue;
+      this.synced.add(`${there.uid}:${there.hash}`);
+      try {
+        await apply(there, await this.download(there));
+      } catch {
+        /* tried again after the next sign-in */
+      }
     }
   }
 

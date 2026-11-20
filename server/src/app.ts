@@ -290,6 +290,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
         return { ok: true };
       },
     ],
+    ['POST', /^\/songs\/([0-9a-f]{64})\/edit$/, (req, body, _ip, [id]) => songs.edit(me(req), id, body)],
     [
       'POST',
       /^\/songs\/([0-9a-f]{64})\/report$/,

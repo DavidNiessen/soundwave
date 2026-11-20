@@ -55,7 +55,7 @@ interface Props {
   onSet(ids: string[]): void;
   onAdd(): void;
   /** What the Online tab needs: the party, the server's boards and songs, the player's look. */
-  online: Omit<OnlinePanelProps, 'base' | 'settings' | 'setlist'>;
+  online: Omit<OnlinePanelProps, 'base' | 'settings' | 'setlist' | 'library'>;
   /** The player is in a party: the Online tab shows a dot. */
   inParty: boolean;
   /** What the Edit tab's list of tracks needs to bring songs in and open them in the editor. */
@@ -189,60 +189,64 @@ export function HomeScreen({
     ...(onExit ? [{ id: 'exit', label: 'Exit', icon: Power, kbd: 'Escape', bar: false, run: onExit }] : []),
   ];
 
-  useActions([
-    ...(tab === 'play'
-      ? [{ id: 'add', label: importing ? `Importing ${importing}…` : 'Add songs', icon: Upload, ...keysOf('home.add'), run: onAdd }]
-      : tab === 'online'
-        ? []
-        : tab === 'replays'
-          ? replays.length
-            ? [
+  useActions(
+    [
+      ...(tab === 'play'
+        ? [{ id: 'add', label: importing ? `Importing ${importing}…` : 'Add songs', icon: Upload, ...keysOf('home.add'), run: onAdd }]
+        : tab === 'online'
+          ? []
+          : tab === 'replays'
+            ? replays.length
+              ? [
+                  {
+                    id: 'replay-options',
+                    label: 'Options',
+                    icon: Ellipsis,
+                    ...keysOf('home.replayOptions'),
+                    run: () => replayCommands.current?.options(),
+                  },
+                  {
+                    id: 'replay-export',
+                    label: 'Export video',
+                    icon: Film,
+                    ...keysOf('home.replayExport'),
+                    bar: false,
+                    run: () => replayCommands.current?.exportVideo(),
+                  },
+                  {
+                    id: 'replay-keep',
+                    label: 'Keep',
+                    icon: Pin,
+                    ...keysOf('home.replayKeep'),
+                    bar: false,
+                    run: () => replayCommands.current?.keep(),
+                  },
+                  {
+                    id: 'replay-delete',
+                    label: 'Delete',
+                    icon: Trash2,
+                    ...keysOf('home.replayDelete'),
+                    bar: false,
+                    run: () => replayCommands.current?.remove(),
+                  },
+                ]
+              : []
+            : [
                 {
-                  id: 'replay-options',
-                  label: 'Options',
-                  icon: Ellipsis,
-                  ...keysOf('home.replayOptions'),
-                  run: () => replayCommands.current?.options(),
-                },
-                {
-                  id: 'replay-export',
-                  label: 'Export video',
-                  icon: Film,
-                  ...keysOf('home.replayExport'),
+                  id: 'search',
+                  label: 'Search',
+                  icon: Search,
+                  ...keysOf('home.search'),
                   bar: false,
-                  run: () => replayCommands.current?.exportVideo(),
+                  run: () => document.querySelector<HTMLInputElement>('.track-picker input[type=search]')?.focus(),
                 },
-                {
-                  id: 'replay-keep',
-                  label: 'Keep',
-                  icon: Pin,
-                  ...keysOf('home.replayKeep'),
-                  bar: false,
-                  run: () => replayCommands.current?.keep(),
-                },
-                {
-                  id: 'replay-delete',
-                  label: 'Delete',
-                  icon: Trash2,
-                  ...keysOf('home.replayDelete'),
-                  bar: false,
-                  run: () => replayCommands.current?.remove(),
-                },
-              ]
-            : []
-          : [
-              {
-                id: 'search',
-                label: 'Search',
-                icon: Search,
-                ...keysOf('home.search'),
-                bar: false,
-                run: () => document.querySelector<HTMLInputElement>('.track-picker input[type=search]')?.focus(),
-              },
-              { id: 'new', label: 'New track', icon: FilePlus2, ...keysOf('home.new'), primary: true, run: () => setPicks((n) => n + 1) },
-            ]),
-    ...common,
-  ]);
+                { id: 'new', label: 'New track', icon: FilePlus2, ...keysOf('home.new'), primary: true, run: () => setPicks((n) => n + 1) },
+              ]),
+      ...common,
+      // The Online tab declares its actions itself (with these); this one stands aside for it.
+    ],
+    { passive: tab === 'online' },
+  );
 
   const tabRow = useSlide<HTMLDivElement>(tab);
 
@@ -316,7 +320,7 @@ export function HomeScreen({
         ) : tab === 'online' ? (
           <>
             <h2 className="page-title">Play online</h2>
-            <OnlinePanel {...online} settings={settings} setlist={setlist} base={common} />
+            <OnlinePanel {...online} settings={settings} setlist={setlist} library={songs} base={common} />
           </>
         ) : tab === 'play' ? (
           <>

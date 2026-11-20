@@ -419,6 +419,10 @@ class OnlineClient {
       auth: true,
     });
   }
+  /** The owner or a moderator renames a song on the server (its hash changes; copies follow). */
+  editSong(id: string, title: string, artist: string) {
+    return this.request<SharedSong>(`/songs/${id}/edit`, { body: { title, artist }, auth: true });
+  }
   removeSong(id: string, reason = '') {
     return this.request<unknown>(`/songs/${id}?reason=${encodeURIComponent(reason)}`, { method: 'DELETE', auth: true });
   }

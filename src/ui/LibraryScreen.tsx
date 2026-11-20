@@ -65,6 +65,8 @@ export interface ServerLibrary {
   stream: boolean;
   /** The player's songs are shared to the server. */
   sharing: boolean;
+  /** The server takes players' songs (else only its admin adds them). */
+  canShare: boolean;
   /** How many of them are still to go, while sharing runs. */
   left: number;
   /** The server's name. */
@@ -270,7 +272,7 @@ export function LibraryScreen({
     selecting
       ? { id: 'back', label: 'Clear selection', icon: X, kbd: 'Escape', sfx: 'back', run: () => setSelected(new Set()) }
       : { id: 'back', label: 'Back', icon: ArrowLeft, kbd: 'Escape', sfx: 'back', run: onBack },
-    ...(server
+    ...(server?.canShare
       ? [
           {
             id: 'share',
@@ -370,7 +372,7 @@ export function LibraryScreen({
           <Upload strokeWidth={ICON_STROKE} aria-hidden />
           <span className="btn-label">{importing ? `Importing ${importing}…` : 'Add songs'}</span>
         </button>
-        {server && (
+        {server?.canShare && (
           <button
             type="button"
             className={`btn ${server.sharing ? 'is-on' : ''}`}

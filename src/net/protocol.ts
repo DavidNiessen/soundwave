@@ -76,7 +76,12 @@ export interface Online {
 
 /** A song in a server's library. */
 export interface SharedSong {
+  /** The hash of the song's audio: the same song is the same id everywhere. */
   id: string;
+  /** The song's own id on the server, which never changes. */
+  uid: string;
+  /** SHA-256 of the file the server keeps now: it changes when the server's copy is edited. */
+  hash: string;
   title: string;
   artist: string;
   duration: number;

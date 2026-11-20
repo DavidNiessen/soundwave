@@ -22,7 +22,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { Settings } from '../game/settings';
 import { keysOf } from '../input/bindings';
 import { online } from '../net/client';
-import { PARTY_MAX } from '../net/protocol';
+import { PARTY_MAX, type Role } from '../net/protocol';
 import type { SongMeta } from '../storage/db';
 import { Hint, useActions, useHints, type Action } from './actions';
 import type { Part } from '../chart/types';
@@ -33,10 +33,15 @@ import { OnlineSidebar } from './OnlineSidebar';
 import { MODES } from './PartyScreen';
 import { AdminPanel, download, InvitePanel } from './ServerAdmin';
 
+/** A role as players read it: the server's owner is its admin. */
+const ROLE_LABEL: Record<Role, string> = { owner: 'Admin', moderator: 'Moderator', player: 'Player' };
+
 export interface OnlinePanelProps {
   settings: Settings;
   /** The player's setlist (the server tools can make it the Showdown rotation). */
   setlist: SongMeta[];
+  /** The player's library (the admin adds songs from it to the server). */
+  library: SongMeta[];
   /** Opens the Play together screen: signing in, or the party's lobby. */
   onParty(): void;
   onBoards(): void;
@@ -99,7 +104,7 @@ function SignedOut({ settings, onParty, base }: OnlinePanelProps) {
 }
 
 /** Signed in: the party, the server's boards and songs, who is online, and the account. */
-function SignedIn({ settings, setlist, onParty, onBoards, onAvatar, base, part }: OnlinePanelProps) {
+function SignedIn({ settings, setlist, library, onParty, onBoards, onAvatar, base, part }: OnlinePanelProps) {
   const s = useSyncExternalStore(online.subscribe, online.snapshot);
   const hints = useHints(settings);
   /** The window open over the tab: the account, an invite, or the server's tools. */
@@ -273,7 +278,7 @@ function SignedIn({ settings, setlist, onParty, onBoards, onAvatar, base, part }
             <span className={`online-dot ${s.status === 'online' ? 'on' : ''}`} aria-hidden />
             <span className="nametag-name">{s.account!.name}</span>
             <span className="nametag-sub">
-              {mod ? `${s.account!.role} · ` : ''}
+              {mod ? `${ROLE_LABEL[s.account!.role]} · ` : ''}
               {s.status === 'online' ? (s.info?.name ?? 'Soundwave server') : 'Reconnecting…'}
             </span>
             <Hint {...keysOf('party.signOut')} {...hints} />
@@ -292,7 +297,7 @@ function SignedIn({ settings, setlist, onParty, onBoards, onAvatar, base, part }
               <span className="online-dot on" aria-hidden />
               <h2 className="display">{s.account!.name}</h2>
               <p className="hint">
-                {mod ? `${s.account!.role[0].toUpperCase()}${s.account!.role.slice(1)} · ` : ''}
+                {mod ? `${ROLE_LABEL[s.account!.role]} · ` : ''}
                 {s.status === 'online' ? `Signed in to ${s.info?.name ?? s.server}` : 'Connection lost, trying again…'}
               </p>
               <button type="button" className="btn wide" data-autofocus onClick={() => void saveData()}>
@@ -340,11 +345,11 @@ function SignedIn({ settings, setlist, onParty, onBoards, onAvatar, base, part }
         </Dialog>
       )}
       {modal === 'admin' && mod && (
-        <Dialog title="Run the server" className="admin-sheet" onClose={() => setModal(null)}>
+        <Dialog title="Admin" className="admin-sheet" onClose={() => setModal(null)}>
           {() => (
             <div className="window-body">
-              <h2 className="display">Run the server</h2>
-              <AdminPanel owner={s.account!.role === 'owner'} setlist={setlist} />
+              <h2 className="display">Admin</h2>
+              <AdminPanel owner={s.account!.role === 'owner'} setlist={setlist} library={library} />
             </div>
           )}
         </Dialog>
