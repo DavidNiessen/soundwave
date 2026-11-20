@@ -716,10 +716,13 @@ class OnlineClient {
 export const online = new OnlineClient();
 
 /** Reads a response's body, telling `progress` how much of it has come (when its length is known). */
-async function readWithProgress(res: Response, progress: (done: number) => void): Promise<Blob> {
-  const size = Number(res.headers.get('Content-Length')) || 0;
+export async function readWithProgress(res: Response, progress: (done: number) => void): Promise<Blob> {
+  // The server says the size in a header of its own too: a proxy that compresses or chunks the
+  // answer drops Content-Length (and then it is the compressed size anyway).
+  const size = Number(res.headers.get('X-File-Size')) || Number(res.headers.get('Content-Length')) || 0;
+  // Asked once: a stream read in pieces cannot be read again whole.
   const reader = res.body?.getReader();
-  if (!reader || !size) return res.blob();
+  if (!reader) return res.blob();
   const parts: Uint8Array<ArrayBuffer>[] = [];
   let got = 0;
   for (;;) {
@@ -727,7 +730,8 @@ async function readWithProgress(res: Response, progress: (done: number) => void)
     if (done) break;
     parts.push(value);
     got += value.length;
-    progress(Math.min(1, got / size));
+    // Without a size there is no share of it to tell.
+    if (size) progress(Math.min(1, got / size));
   }
   return new Blob(parts, { type: res.headers.get('Content-Type') ?? '' });
 }

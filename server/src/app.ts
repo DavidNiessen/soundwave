@@ -343,6 +343,8 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Max-Age', '86400');
+    // A file's size, readable by the game: a proxy that compresses answers drops Content-Length.
+    res.setHeader('Access-Control-Expose-Headers', 'X-File-Size');
     // The game's page is cross-origin isolated (for analysis threads): answers must say they may be read there.
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     if (req.method === 'OPTIONS') return void res.writeHead(204).end();
@@ -396,6 +398,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
         res.writeHead(200, {
           'Content-Type': answer.type,
           'Content-Length': answer.body.length,
+          'X-File-Size': answer.body.length,
           'Cache-Control': path.startsWith('/covers/') ? 'public, max-age=86400' : 'no-store',
           ...(answer.name ? { 'Content-Disposition': `attachment; filename="${answer.name}"` } : {}),
         });
