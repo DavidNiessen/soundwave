@@ -25,6 +25,14 @@ docker run -d --name soundwave -p 7420:7420 -v soundwave-data:/data \
   -e SOUNDWAVE_NAME="Our server" -e SOUNDWAVE_PUBLIC_URL=https://play.example.com soundwave-server
 ```
 
+With Docker Compose, or on **Coolify**: the repository's `docker-compose.yml` builds the same image,
+keeps everything in the named volume `soundwave-data` (so accounts, scores and songs survive
+redeploys) and checks the server's health at `GET /health`. On Coolify, add a resource of the type
+_Docker Compose_ from this repository; it gives the service a domain (`SERVICE_FQDN_SOUNDWAVE_7420`),
+which also becomes the address in invite links. Set `SOUNDWAVE_NAME`, `SOUNDWAVE_MODE` and the rest
+as environment variables there. Elsewhere: `docker compose up -d`, after adding
+`ports: ["7420:7420"]` and `SOUNDWAVE_PUBLIC_URL`.
+
 The first start prints a **set-up code**. In the game, open **Play together**, connect to the
 server, choose **Make an account** and enter the code: that account becomes the owner. It works
 once. (`docker logs soundwave` shows it.)

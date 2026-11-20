@@ -96,6 +96,13 @@ describe('accounts', () => {
     store.close();
   });
 
+  it('answers its healthcheck once it is up', async () => {
+    await start();
+    const res = await fetch(server.url + '/health');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, users: 0 });
+  });
+
   it('sign up, sign in, refresh once, and refuse a wrong password', async () => {
     await start();
     const s = await signUp('Robin');

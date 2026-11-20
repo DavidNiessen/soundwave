@@ -8815,3 +8815,32 @@ a.btn {
   width: min(100%, 34rem);
   margin-inline: auto;
 }
+
+/* The Online tab's windows: your account, an invite, and the server's tools. */
+.overlay.card.wide-card .dialog {
+  width: min(40rem, 100%);
+}
+.overlay.sheet.admin-sheet .dialog {
+  width: min(46rem, 100%);
+}
+.window-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  padding: 1.2rem;
+}
+.account-card .online-dot {
+  width: 0.8rem;
+  height: 0.8rem;
+}
+/* A long name never runs into what the player is doing. */
+.online-list .party-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.online-list li > .dim {
+  font-size: 0.8rem;
+  white-space: nowrap;
+}

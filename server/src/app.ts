@@ -139,6 +139,8 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     '?';
 
   const routes: Record<string, Handler> = {
+    // For a container's healthcheck (Docker, Coolify): the server answers, and its database too.
+    'GET /health': () => ({ ok: true, players: sockets.size, parties: parties.count, users: store.countUsers() }),
     'GET /info': (): ServerInfo => ({
       name: config.name,
       description: config.description,

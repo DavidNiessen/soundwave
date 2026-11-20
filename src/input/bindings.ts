@@ -100,7 +100,7 @@ export const COMMANDS: Command[] = [
   ...cmd('party', [
     { id: 'party.create', label: 'Start a party', key: 'KeyC', pad: 'b3' },
     { id: 'party.join', label: 'Join a party', key: 'KeyJ', pad: 'b2' },
-    { id: 'party.signOut', label: 'Sign out', key: 'KeyO' },
+    { id: 'party.signOut', label: 'Your account (sign out, save your data)', key: 'KeyO' },
     { id: 'party.export', label: 'Save my data from the server', key: 'KeyD' },
     { id: 'party.ready', label: 'Ready, or not', key: 'KeyR', pad: 'b9' },
     { id: 'party.pickSongs', label: 'Pick the party’s songs', key: 'KeyU', pad: 'b8' },

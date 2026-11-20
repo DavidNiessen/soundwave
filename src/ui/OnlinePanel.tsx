@@ -4,7 +4,21 @@
  * songs, the player's look, who is online and their account. The party itself (its lobby and
  * songs) and signing in are on the Play together screen, which this opens.
  */
-import { Download, Gavel, LogIn, LogOut, Music, PartyPopper, Shirt, Trophy, UserPlus, Users, type LucideIcon } from 'lucide-react';
+import {
+  Download,
+  Gavel,
+  LogIn,
+  LogOut,
+  Music,
+  PartyPopper,
+  Send,
+  Shirt,
+  Trophy,
+  UserPlus,
+  UserRound,
+  Users,
+  type LucideIcon,
+} from 'lucide-react';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { Settings } from '../game/settings';
 import { keysOf } from '../input/bindings';
@@ -12,6 +26,7 @@ import { online } from '../net/client';
 import { PARTY_MAX, PARTY_MODES } from '../net/protocol';
 import type { SongMeta } from '../storage/db';
 import { Hint, useActions, useHints, type Action } from './actions';
+import { Dialog } from './Dialog';
 import { ICON_STROKE } from './icons';
 import { OnlineSidebar } from './OnlineSidebar';
 import { MODES } from './PartyScreen';
@@ -85,7 +100,8 @@ function SignedOut({ settings, onParty, base }: OnlinePanelProps) {
 function SignedIn({ settings, setlist, onParty, onBoards, onSongs, onAvatar, base }: OnlinePanelProps) {
   const s = useSyncExternalStore(online.subscribe, online.snapshot);
   const hints = useHints(settings);
-  const [admin, setAdmin] = useState(false);
+  /** The window open over the tab: the account, an invite, or the server's tools. */
+  const [modal, setModal] = useState<'account' | 'invite' | 'admin' | null>(null);
   const [deleting, setDeleting] = useState(false);
   const mod = s.account!.role !== 'player';
   const party = s.party;
@@ -139,14 +155,12 @@ function SignedIn({ settings, setlist, onParty, onBoards, onSongs, onAvatar, bas
       bar: false,
       run: () => (code.trim() ? join() : codeInput.current?.focus()),
     },
-    { id: 'party-sign-out', label: 'Sign out', icon: LogOut, ...keysOf('party.signOut'), bar: false, run: () => online.signOut() },
-    { id: 'party-export', label: 'Save my data', icon: Download, ...keysOf('party.export'), bar: false, run: () => void saveData() },
+    { id: 'party-account', label: s.account!.name, icon: UserRound, ...keysOf('party.signOut'), run: () => setModal('account') },
+    { id: 'party-invite', label: 'Invite', icon: Send, ...keysOf('party.invite'), run: () => setModal('invite') },
     { id: 'party-boards', label: 'Leaderboards', icon: Trophy, ...keysOf('party.boards'), bar: false, run: onBoards },
     { id: 'party-songs', label: 'Shared songs', icon: Music, ...keysOf('party.songs'), bar: false, run: onSongs },
     { id: 'party-avatar', label: 'Your look', icon: Shirt, ...keysOf('party.avatar'), bar: false, run: onAvatar },
-    ...(mod
-      ? [{ id: 'party-admin', label: 'Run the server', icon: Gavel, ...keysOf('party.admin'), bar: false, run: () => setAdmin((a) => !a) }]
-      : []),
+    ...(mod ? [{ id: 'party-admin', label: 'Admin', icon: Gavel, ...keysOf('party.admin'), run: () => setModal('admin') }] : []),
   ]);
 
   const more: [string, string, LucideIcon, string, string, () => void][] = [
@@ -281,56 +295,70 @@ function SignedIn({ settings, setlist, onParty, onBoards, onSongs, onAvatar, bas
         <OnlineSidebar onBoards={onBoards} />
       </div>
 
-      <section className="party-account" aria-label="Your account">
-        <span className="online-dot on" aria-hidden />
-        <span className="song-text">
-          <span className="song-title">
-            {s.account!.name}
-            {mod && <span className="dim"> · {s.account!.role}</span>}
-          </span>
-          <span className="song-artist">
-            {s.status === 'online' ? `Signed in to ${s.info?.name ?? s.server}` : 'Connection lost, trying again…'}
-          </span>
-        </span>
-        <span className="party-row">
-          <button type="button" className="btn small" data-action="party-export" onClick={() => void saveData()}>
-            <Hint kbd={keysOf('party.export').kbd} {...hints} />
-            <Download strokeWidth={ICON_STROKE} aria-hidden />
-            Save my data
-          </button>
-          {mod && (
-            <button type="button" className="btn small" data-action="party-admin" onClick={() => setAdmin((a) => !a)}>
-              <Hint kbd={keysOf('party.admin').kbd} {...hints} />
-              <Gavel strokeWidth={ICON_STROKE} aria-hidden />
-              {admin ? 'Hide the server tools' : 'Run the server'}
-            </button>
+      {modal === 'account' && (
+        <Dialog title="Your account" variant="card" onClose={() => setModal(null)}>
+          {(close) => (
+            <div className="pause-card account-card">
+              <span className="online-dot on" aria-hidden />
+              <h2 className="display">{s.account!.name}</h2>
+              <p className="hint">
+                {mod ? `${s.account!.role[0].toUpperCase()}${s.account!.role.slice(1)} · ` : ''}
+                {s.status === 'online' ? `Signed in to ${s.info?.name ?? s.server}` : 'Connection lost, trying again…'}
+              </p>
+              <button type="button" className="btn wide" data-autofocus onClick={() => void saveData()}>
+                <Download strokeWidth={ICON_STROKE} aria-hidden />
+                Save my data
+              </button>
+              <button type="button" className="btn wide" data-sfx="back" onClick={() => online.signOut()}>
+                <LogOut strokeWidth={ICON_STROKE} aria-hidden />
+                Sign out
+              </button>
+              <button type="button" className="btn wide quiet" data-sfx="back" onClick={() => online.forget()}>
+                Forget this server
+              </button>
+              {s.account!.role !== 'owner' &&
+                (deleting ? (
+                  <button
+                    type="button"
+                    className="btn wide danger"
+                    onClick={() => void online.deleteAccount().catch((e) => online.report((e as Error).message))}
+                  >
+                    Delete it, with all my scores
+                  </button>
+                ) : (
+                  <button type="button" className="btn wide quiet" onClick={() => setDeleting(true)}>
+                    Delete my account
+                  </button>
+                ))}
+              <button type="button" className="btn primary wide" onClick={close}>
+                Done
+              </button>
+            </div>
           )}
-          <button type="button" className="btn small" data-action="party-sign-out" data-sfx="back" onClick={() => online.signOut()}>
-            <Hint kbd={keysOf('party.signOut').kbd} {...hints} />
-            <LogOut strokeWidth={ICON_STROKE} aria-hidden />
-            Sign out
-          </button>
-          <button type="button" className="btn small quiet" data-sfx="back" onClick={() => online.forget()}>
-            Forget this server
-          </button>
-          {s.account!.role !== 'owner' &&
-            (deleting ? (
-              <button
-                type="button"
-                className="btn small danger"
-                onClick={() => void online.deleteAccount().catch((e) => online.report((e as Error).message))}
-              >
-                Delete it, with all my scores
+        </Dialog>
+      )}
+      {modal === 'invite' && (
+        <Dialog title="Invite friends" variant="card" className="wide-card" onClose={() => setModal(null)}>
+          {(close) => (
+            <div className="window-body">
+              <InvitePanel mod={mod} />
+              <button type="button" className="btn primary wide" onClick={close}>
+                Done
               </button>
-            ) : (
-              <button type="button" className="btn small quiet" onClick={() => setDeleting(true)}>
-                Delete my account
-              </button>
-            ))}
-        </span>
-      </section>
-      {(s.info?.mode === 'invite' || mod) && <InvitePanel mod={mod} />}
-      {mod && admin && <AdminPanel owner={s.account!.role === 'owner'} setlist={setlist} />}
+            </div>
+          )}
+        </Dialog>
+      )}
+      {modal === 'admin' && mod && (
+        <Dialog title="Run the server" className="admin-sheet" onClose={() => setModal(null)}>
+          {() => (
+            <div className="window-body">
+              <h2 className="display">Run the server</h2>
+              <AdminPanel owner={s.account!.role === 'owner'} setlist={setlist} />
+            </div>
+          )}
+        </Dialog>
+      )}
     </div>
   );
 }
