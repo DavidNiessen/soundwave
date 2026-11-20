@@ -199,6 +199,16 @@ export class AnalysisManager {
    * Drops everything known about a song (removed, or re-imported). A running analysis of it is
    * cancelled, and anything it still produces is ignored, so no stale error or cache survives.
    */
+  /**
+   * A song played without being in the library (streamed from a server, or held for a party): its
+   * analysis and hand-made charts, kept in memory so its charts can be made, until `forget`.
+   */
+  lend(id: string, analysis: AnalysisResult | undefined, edits: SongEdits | undefined) {
+    if (analysis) this.results.set(id, analysis);
+    this.edits.set(id, edits ?? null);
+    for (const k of Array.from(this.charts.keys())) if (k.startsWith(`${id}:`)) this.charts.delete(k);
+  }
+
   forget(id: string) {
     this.generation.set(id, (this.generation.get(id) ?? 0) + 1);
     this.queue = this.queue.filter((q) => q !== id);

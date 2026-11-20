@@ -88,13 +88,11 @@ import { setMenuAvatars, setMenuRing } from '../render/aurora/menuStage';
 import type { Avatars } from '../render/aurora/AuroraStage';
 import type { RingSeat } from '../render/aurora/ring';
 import { BoardsScreen } from './Boards';
-import { SongsScreen } from './SongsScreen';
-import { hashBytes } from '../storage/hash';
-import { writeSoundwave } from '../storage/soundwaveFile';
 import { decodeRun, encodeRun } from '../net/runs';
 import { replayResults } from '../game/replay';
 import { joinSecret, online, parseInvite, parseJoinSecret, type PartyStart } from '../net/client';
 import { partySongs } from '../net/partySongs';
+import { serverSongs } from '../net/serverSongs';
 import { PARTY_MAX, type SharedSong, type WireChart } from '../net/protocol';
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { installUiSounds } from './uiSounds';
@@ -129,8 +127,6 @@ type View =
   /** The server's leaderboards and shared replays. */
   /** `from`: where Back returns to (Play together, unless opened from the main menu). */
   | { name: 'boards'; from?: 'home' }
-  /** The server's library of shared songs. */
-  | { name: 'songs' }
   /** The player's look on the stage. */
   | { name: 'avatar' }
   | { name: 'settings'; back: View }
@@ -167,7 +163,6 @@ const DEPTH: Record<View['name'], number> = {
   lobby: 2,
   party: 2,
   boards: 3,
-  songs: 3,
   avatar: 3,
   editor: 2,
   play: 3,
@@ -444,6 +439,7 @@ export function App() {
   byIdRef.current = byId;
   // The party sees the songs held for it as songs the player has, beside their library.
   const held = useSyncExternalStore(partySongs.subscribe, partySongs.songs);
+  const server = useSyncExternalStore(serverSongs.subscribe, serverSongs.snapshot);
   const partyLibrary = useMemo(() => {
     const ids = Object.keys(held);
     if (!ids.length) return byId;
@@ -751,7 +747,7 @@ export function App() {
       plan.ext,
     );
     // Back to where the export was asked for: a replay starts over, the list stays as it was.
-    const back: View = view.name === 'replay' ? { ...view, key: Date.now() } : view;
+    const from = view;
     void chooseSaveTarget(fileName, plan.ext === 'mp4' ? 'video-mp4' : 'video-webm')
       .then((target) => {
         if (!target) return;
@@ -759,6 +755,7 @@ export function App() {
         menuPulse('launch');
         void wipeTo(async () => {
           const { data, buffer } = await loadReplay(meta);
+          const back: View = from.name === 'replay' ? { ...from, key: Date.now() } : from;
           return { name: 'export', meta, data, buffer, video, plan, target, fileName, back, key: Date.now() };
         });
       })
@@ -805,7 +802,7 @@ export function App() {
       // song after it is played on that part, or on the first one it has notes on when it has none
       // on that one (the next song's part can be changed between songs). A song without a note on
       // any part sits the set out.
-      const ids = lobby.ids.filter((id) => byId.has(id) && canPlay(analysisStatus[id]));
+      const ids = lobby.ids.filter(playable);
       const found: { song: SongMeta; charts: Map<Part, Chart> }[] = [];
       for (const id of ids) {
         const charts = new Map<Part, Chart>();
@@ -813,7 +810,7 @@ export function App() {
           const chart = await analysisManager.chart(id, p, pick.difficulty);
           if (chart && chart.notes.length > 0) charts.set(p, chart);
         }
-        if (charts.size) found.push({ song: byId.get(id)!, charts });
+        if (charts.size) found.push({ song: byId.get(id) ?? server.held[id], charts });
       }
       const use: Pick = { ...pick, part: partAmong(pick.part, [...(found[0]?.charts.keys() ?? [])]) ?? pick.part };
       const entries = found.map(({ song, charts }) => {
@@ -1152,22 +1149,35 @@ export function App() {
 
   /* Shared songs ---------------------------------------------------------------------------- */
 
-  /** Downloads a whole shared song into the library. */
-  const getShared = async (song: { id: string; title: string }) => {
-    const blob = await online.downloadSong(song.id);
-    const got = await importFiles([new File([blob], `${song.title}.soundwave`)]);
-    if (!got.length) throw new Error(`"${song.title}" could not be added.`);
+  // The server's songs: in the library to stream or download, and the player's own shared to it
+  // when they chose to (src/net/serverSongs.ts).
+  useEffect(() => serverSongs.connect(onlineState.account ? onlineState.server : null), [onlineState.account, onlineState.server]);
+  const serverSharing = onlineState.account && onlineState.info && onlineState.info.sharing !== 'off';
+  useEffect(() => {
+    if (!serverSharing || !settings.shareLibrary || !server.ready) return;
+    // Only songs with their charts: one shared before its analysis would have no notes for anyone.
+    void serverSongs.share(
+      songs.filter((x) => canPlay(analysisStatus[x.id])),
+      (id) => songFile(id),
+      (message) => toast(`Your songs could not all be shared: ${message}`),
+    );
+  }, [serverSharing, settings.shareLibrary, server.ready, songs, analysisStatus, toast]);
+  /** A server song pressed in the library: streamed and opened to play, or downloaded, as the player chose. */
+  const playServerSong = async (song: SharedSong) => {
+    try {
+      if (settingsRef.current.serverSongs === 'download') {
+        const got = await importFiles([await serverSongs.download(song)]);
+        if (got.length) toast(`"${got[0].title}" is in your library.`);
+        return;
+      }
+      await serverSongs.stream(song);
+      setView({ name: 'lobby', ids: [song.id], from: 'library' });
+    } catch (e) {
+      toast((e as Error).message);
+    }
   };
-  /** A charts-only song: the player's own audio, checked to be the very same file, with the server's charts. */
-  const useOwnCopy = async (song: SharedSong, audio: File) => {
-    if ((await hashBytes(await audio.arrayBuffer())) !== song.id)
-      throw new Error(`That file is not the same recording as "${song.title}": it has to be the very same file to use its charts.`);
-    const c = await online.songCharts(song.id);
-    const file = await writeSoundwave({ meta: c.meta, analysis: c.analysis ?? undefined, edits: c.edits ?? undefined, audio });
-    const got = await importFiles([new File([file], `${song.title}.soundwave`)]);
-    if (!got.length) throw new Error(`"${song.title}" could not be added.`);
-  };
-  const shareSong = async (song: SongMeta) => void (await online.shareSong(await songFile(song.id)));
+  /** A song the player can play: from the library (analysed, with notes), or streamed from the server. */
+  const playable = (id: string) => (byId.has(id) && canPlay(analysisStatus[id])) || !!server.held[id];
   // A party's songs reach every player by themselves: the host's game sends a song someone lacks,
   // and the games without it download it from the server, held for the party or kept in the
   // library (src/net/partySongs.ts).
@@ -1183,12 +1193,12 @@ export function App() {
       me: onlineState.account?.id,
       serverOn: !!onlineState.info?.partySongs,
       share: settings.shareSongs,
-      keep: settings.keepPartySongs,
+      keep: settings.serverSongs === 'download',
       has: (id) => byId.has(id),
       file: (id) => songFile(id),
       add: (file) => partyAdd.current(file),
     });
-  }, [onlineState.party, onlineState.account, onlineState.info, settings.shareSongs, settings.keepPartySongs, byId]);
+  }, [onlineState.party, onlineState.account, onlineState.info, settings.shareSongs, settings.serverSongs, byId]);
 
   /** A party's song is over: the score is kept here as any other, and the party gets it. */
   const finishPartySong = (run: Run, results: Results, inputs?: ReplayInputs) => {
@@ -1387,8 +1397,6 @@ export function App() {
         return showScene({ details: 'Playing together' });
       case 'boards':
         return showScene({ details: 'Looking at the leaderboards' });
-      case 'songs':
-        return showScene({ details: 'Browsing shared songs' });
       case 'avatar':
         return showScene({ details: 'Choosing a look' });
       case 'editor':
@@ -1551,11 +1559,25 @@ export function App() {
           onBack={view.from === 'party' ? () => setView({ name: 'party' }) : goHome}
           onAdd={addSongs}
           actions={songActions}
+          server={
+            serverSharing
+              ? {
+                  songs: server.list.filter((x) => !byId.has(x.id)),
+                  busy: server.busy,
+                  stream: settings.serverSongs === 'stream',
+                  sharing: settings.shareLibrary,
+                  left: server.sharing,
+                  name: onlineState.info?.name ?? 'the server',
+                  onPlay: (x) => void playServerSong(x),
+                  onShare: () => updateSettings({ ...settingsRef.current, shareLibrary: !settingsRef.current.shareLibrary }),
+                }
+              : undefined
+          }
         />
       );
     } else if (view.name === 'lobby') {
       // A song without a note on any part cannot be played, so it is not in the set.
-      const list = view.ids.map((id) => byId.get(id)).filter((s): s is SongMeta => !!s && canPlay(analysisStatus[s.id]));
+      const list = view.ids.map((id) => byId.get(id) ?? server.held[id]).filter((s): s is SongMeta => !!s && playable(s.id));
       screen = (
         <LobbyScreen
           songs={list}
@@ -1588,17 +1610,6 @@ export function App() {
       );
     } else if (view.name === 'avatar') {
       screen = <AvatarScreen part={pick.part} settings={settings} onBack={goOnline} />;
-    } else if (view.name === 'songs') {
-      screen = (
-        <SongsScreen
-          library={songs}
-          settings={settings}
-          onGet={getShared}
-          onUseOwnCopy={useOwnCopy}
-          onShare={shareSong}
-          onBack={goOnline}
-        />
-      );
     } else if (view.name === 'boards') {
       screen = (
         <BoardsScreen
@@ -1653,8 +1664,8 @@ export function App() {
           online={{
             onParty: () => setView({ name: 'party' }),
             onBoards: () => setView({ name: 'boards' }),
-            onSongs: () => setView({ name: 'songs' }),
             onAvatar: () => setView({ name: 'avatar' }),
+            part: pick.part,
           }}
           inParty={!!onlineState.party}
           onAdd={addSongs}
@@ -1749,6 +1760,46 @@ export function App() {
           onClose={() => setExportAsk(null)}
         />
       )}
+      {/* Once per server that takes songs: whether to share the player's own (Settings → Online changes it). */}
+      {serverSharing &&
+        !settings.shareLibrary &&
+        onlineState.server &&
+        !settings.shareAsked.includes(onlineState.server) &&
+        ['home', 'library', 'party'].includes(view.name) &&
+        launch === null && (
+          <Dialog
+            title="Share your songs?"
+            variant="card"
+            closeLabel="Not now"
+            onClose={() => updateSettings({ ...settingsRef.current, shareAsked: [...settingsRef.current.shareAsked, onlineState.server!] })}
+          >
+            {(close) => (
+              <div className="pause-card">
+                <h2 className="display">Share your songs?</h2>
+                <p className="hint">
+                  {onlineState.info?.name ?? 'This server'} takes songs. Shared, yours show up in the library of everyone on it, to stream
+                  or download, and theirs in yours either way. You can change it any time in the library or in Settings → Online.
+                </p>
+                <button type="button" className="btn wide" data-autofocus data-sfx="back" onClick={close}>
+                  Not now
+                </button>
+                <button
+                  type="button"
+                  className="btn primary wide"
+                  onClick={() =>
+                    updateSettings({
+                      ...settingsRef.current,
+                      shareLibrary: true,
+                      shareAsked: [...settingsRef.current.shareAsked, onlineState.server!],
+                    })
+                  }
+                >
+                  Share my songs
+                </button>
+              </div>
+            )}
+          </Dialog>
+        )}
       {exitAsk && (
         <Dialog title="Close the game" variant="card" closeLabel="Stay" onClose={() => setExitAsk(false)}>
           {(close) => (

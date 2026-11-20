@@ -5,7 +5,7 @@
  * - once the server holds it (the set's `cached`), the game of every player without it downloads it.
  *
  * A downloaded song is kept for the party only, in memory, and goes when the player leaves it: their
- * library stays theirs. The player can keep one (`keep`), or every one (settings.keepPartySongs),
+ * library stays theirs. The player can keep one (`keep`), or every one (settings.serverSongs === 'download'),
  * and then it is added to the library like any song.
  *
  * Not streamed: a song is decoded whole before it starts, so every player starts it on time and a
@@ -14,6 +14,7 @@
  * App calls `update` whenever the party, the library or the settings change; the party screen shows
  * each song's transfer from `transfers`, and the songs held for the party from `songs`.
  */
+import { analysisManager } from '../analysis/manager';
 import { lendSongAudio } from '../audio/songAudio';
 import type { SongMeta } from '../storage/db';
 import { readSongPackage } from '../storage/songFile';
@@ -164,6 +165,7 @@ class PartySongSync {
         const pkg = await readSongPackage(file, file.name);
         if (pkg.meta.id !== songId) throw new Error(`"${title}" came back as a different song.`);
         lendSongAudio(songId, pkg.audio);
+        analysisManager.lend(songId, pkg.analysis, pkg.edits);
         this.held = { ...this.held, [songId]: { meta: pkg.meta, file } };
       }
       this.set(songId, null);

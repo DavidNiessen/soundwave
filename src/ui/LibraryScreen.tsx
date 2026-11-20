@@ -1,4 +1,20 @@
-import { ArrowLeft, ArrowUpDown, Check, CheckSquare, Ellipsis, Info, Play, Plus, Search, Upload, Volume2, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowUpDown,
+  Check,
+  CheckSquare,
+  Cloud,
+  Download,
+  Ellipsis,
+  Info,
+  Play,
+  Plus,
+  Search,
+  Share2,
+  Upload,
+  Volume2,
+  X,
+} from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { isTextField } from '../input/inputMode';
 import { canPlay, type AnalysisStatus } from '../analysis/manager';
@@ -6,6 +22,7 @@ import { PARTS } from '../chart/types';
 import type { Settings } from '../game/settings';
 import { formatTime, SET_MAX } from '../game/setlist';
 import type { BestScore, SongMeta } from '../storage/db';
+import type { SharedSong } from '../net/protocol';
 import { Hint, useActions, useHints } from './actions';
 import { Cover } from './Cover';
 import { DIFFICULTY_LABEL, ICON_STROKE, PART_ICON, PART_LABEL, Stars } from './icons';
@@ -34,6 +51,26 @@ interface Props {
   onAdd(): void;
   /** What a song's menu can do (the same as its detail sheet). */
   actions: SongActions;
+  /** Signed in to a server that takes songs: its songs the player lacks, and sharing their own. */
+  server?: ServerLibrary;
+}
+
+/** The server's side of the library. */
+export interface ServerLibrary {
+  /** The server's songs the player does not have. */
+  songs: SharedSong[];
+  /** Songs being fetched now. */
+  busy: Record<string, true>;
+  /** Pressing one streams it (true) or downloads it into the library. */
+  stream: boolean;
+  /** The player's songs are shared to the server. */
+  sharing: boolean;
+  /** How many of them are still to go, while sharing runs. */
+  left: number;
+  /** The server's name. */
+  name: string;
+  onPlay(song: SharedSong): void;
+  onShare(): void;
 }
 
 type Sort = 'title' | 'artist' | 'newest' | 'length' | 'stars';
@@ -91,6 +128,7 @@ export function LibraryScreen({
   onBack,
   onAdd,
   actions,
+  server,
 }: Props) {
   const [query, setQuery] = useState('');
   /** Songs picked for a menu that acts on several at once, and where a Shift-click range starts. */
@@ -110,6 +148,12 @@ export function LibraryScreen({
     return m;
   }, [scores]);
 
+  // The server's songs, narrowed by the search too.
+  const serverShown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = server?.songs ?? [];
+    return q ? list.filter((s) => `${s.title} ${s.artist}`.toLowerCase().includes(q)) : list;
+  }, [server?.songs, query]);
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = q ? songs.filter((s) => `${s.title} ${s.artist} ${s.album ?? ''}`.toLowerCase().includes(q)) : [...songs];
@@ -226,6 +270,18 @@ export function LibraryScreen({
     selecting
       ? { id: 'back', label: 'Clear selection', icon: X, kbd: 'Escape', sfx: 'back', run: () => setSelected(new Set()) }
       : { id: 'back', label: 'Back', icon: ArrowLeft, kbd: 'Escape', sfx: 'back', run: onBack },
+    ...(server
+      ? [
+          {
+            id: 'share',
+            label: server.sharing ? 'Stop sharing' : 'Share my songs',
+            icon: Share2,
+            ...keysOf('library.share'),
+            bar: false,
+            run: server.onShare,
+          },
+        ]
+      : []),
     {
       id: 'details',
       label: 'Song details',
@@ -314,6 +370,22 @@ export function LibraryScreen({
           <Upload strokeWidth={ICON_STROKE} aria-hidden />
           <span className="btn-label">{importing ? `Importing ${importing}…` : 'Add songs'}</span>
         </button>
+        {server && (
+          <button
+            type="button"
+            className={`btn ${server.sharing ? 'is-on' : ''}`}
+            data-action="share"
+            aria-pressed={server.sharing}
+            title={`Your songs ${server.sharing ? 'are' : 'are not'} shared with ${server.name}`}
+            onClick={server.onShare}
+          >
+            <Hint {...keysOf('library.share')} {...hints} />
+            <Share2 strokeWidth={ICON_STROKE} aria-hidden />
+            <span className="btn-label">
+              {server.sharing ? (server.left ? `Sharing · ${server.left} to go` : 'Sharing my songs') : 'Share my songs'}
+            </span>
+          </button>
+        )}
       </div>
 
       <div className="library-body">
@@ -427,6 +499,52 @@ export function LibraryScreen({
               </button>
             </li>
           )}
+          {/* The server's songs the player does not have: pressed, streamed to play, or downloaded. */}
+          {server && serverShown.length > 0 && (
+            <li className="song-list-head" aria-hidden>
+              <Cloud strokeWidth={ICON_STROKE} />
+              On {server.name} · {serverShown.length} {serverShown.length === 1 ? 'song' : 'songs'}
+              <span className="dim">{server.stream ? 'Press one to stream it' : 'Press one to download it'}</span>
+            </li>
+          )}
+          {server &&
+            serverShown.map((x) => {
+              const busy = !!server.busy[x.id];
+              return (
+                <li key={x.id} className="song-item server-song">
+                  <button
+                    type="button"
+                    className="song-row"
+                    disabled={busy}
+                    aria-label={`${x.title} by ${x.artist}, on the server${x.by ? `, shared by ${x.by}` : ''}. Press to ${server.stream ? 'stream and play it' : 'download it'}.`}
+                    onClick={() => server.onPlay(x)}
+                  >
+                    <Cover title={x.title} />
+                    <span className="song-text">
+                      <span className="song-title">{x.title}</span>
+                      <span className="song-artist">
+                        {x.artist}
+                        {x.duration > 0 && ` · ${formatTime(x.duration)}`}
+                        {x.by && ` · shared by ${x.by}`}
+                      </span>
+                    </span>
+                    <span className="server-song-act">
+                      {busy ? (
+                        <span className="dim">Fetching…</span>
+                      ) : server.stream ? (
+                        <>
+                          <Play strokeWidth={ICON_STROKE} aria-hidden /> Stream
+                        </>
+                      ) : (
+                        <>
+                          <Download strokeWidth={ICON_STROKE} aria-hidden /> Download
+                        </>
+                      )}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
         </ul>
 
         <aside className="side" aria-label="Setlist">

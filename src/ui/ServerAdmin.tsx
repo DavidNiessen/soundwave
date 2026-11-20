@@ -191,6 +191,40 @@ export function AdminPanel({ owner, setlist }: { owner: boolean; setlist: SongMe
           </li>
         ))}
       </ol>
+      <ReportedSongs />
     </section>
+  );
+}
+
+/** Songs players reported (a takedown, say), with removal from the server everywhere at once. */
+function ReportedSongs() {
+  const [reports, setReports] = useState<Awaited<ReturnType<typeof online.songReports>>>([]);
+  const refresh = () => void online.songReports().then(setReports, () => {});
+  useEffect(refresh, []);
+  if (!reports.length) return null;
+  return (
+    <>
+      <h2 className="label">Reported songs</h2>
+      <ol className="boards-lines">
+        {reports.map((r) => (
+          <li key={r.id} className="boards-line">
+            <span className="party-name">
+              {r.title} · {r.artist}
+              <span className="dim"> · shared by {r.uploader ?? 'a removed account'}</span>
+            </span>
+            <span className="dim">
+              {r.by ?? 'Someone'}: {r.reason}
+            </span>
+            <button
+              type="button"
+              className="btn small danger"
+              onClick={() => void online.removeSong(r.songId, r.reason).then(refresh, () => {})}
+            >
+              Remove
+            </button>
+          </li>
+        ))}
+      </ol>
+    </>
   );
 }

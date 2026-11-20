@@ -75,8 +75,16 @@ export interface Settings {
   discordJoin: boolean;
   /** The songs of a party this player hosts go to the players who lack them, through the server (src/net/partySongs.ts). */
   shareSongs: boolean;
-  /** A party's songs this player gets are added to their library, not only held for the party. */
-  keepPartySongs: boolean;
+  /**
+   * Songs that come from a server (another player's shared song, or a party's song this player
+   * lacks): streamed (held for as long as they are played, never stored) or downloaded into the
+   * library.
+   */
+  serverSongs: 'stream' | 'download';
+  /** This player's songs are shared to the servers they sign in to (where the server takes songs). */
+  shareLibrary: boolean;
+  /** The servers already asked whether to share this player's songs, by address. */
+  shareAsked: string[];
   /** The output device the offset was last calibrated on ('' for the system default), or null: never calibrated. */
   calibratedOn: string | null;
   /** Which volume defaults the stored volumes have been brought up to (not shown; see normalizeSettings). */
@@ -161,7 +169,9 @@ export const DEFAULT_SETTINGS: Settings = {
   postScores: true,
   discordJoin: false,
   shareSongs: true,
-  keepPartySongs: false,
+  serverSongs: 'stream',
+  shareLibrary: false,
+  shareAsked: [],
   calibratedOn: null,
   volumeDefaults: VOLUME_DEFAULTS,
 };
@@ -210,7 +220,12 @@ export function normalizeSettings(raw: Partial<Settings>): Settings {
   s.postScores = s.postScores !== false;
   s.discordJoin = Boolean(s.discordJoin);
   s.shareSongs = s.shareSongs !== false;
-  s.keepPartySongs = s.keepPartySongs === true;
+  // Keeping a party's songs was the setting before songs could be streamed or downloaded.
+  const legacy = (s as unknown as { keepPartySongs?: boolean }).keepPartySongs;
+  if (s.serverSongs !== 'stream' && s.serverSongs !== 'download') s.serverSongs = legacy ? 'download' : 'stream';
+  delete (s as unknown as { keepPartySongs?: boolean }).keepPartySongs;
+  s.shareLibrary = s.shareLibrary === true;
+  s.shareAsked = Array.isArray(s.shareAsked) ? s.shareAsked.filter((x): x is string => typeof x === 'string').slice(-50) : [];
   if (typeof s.calibratedOn !== 'string') s.calibratedOn = null;
   if (typeof s.outputDevice !== 'string') s.outputDevice = '';
   if (typeof s.outputDeviceName !== 'string' || !s.outputDevice) s.outputDeviceName = '';

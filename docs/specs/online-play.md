@@ -47,6 +47,11 @@ Decisions made while building, which override what follows:
 - **Showdown hits are Fog and Drain together**, with no choice: every hit lays wavy, shimmering bands over the highway
   from just past the strike line to the horizon (far notes are hard to read, the strike line stays clear) and holds the
   multiplier at ×2 for as long as it lasts. The setting _Showdown hits reach me as_ (4.1, 5.x) is not built.
+- **Shared songs live in the library**, not on a screen of their own: where the server takes songs, its songs the
+  player lacks are listed under the player's own, to stream (fetched and held for the session, never stored) or
+  download, as Settings → Online → _Songs from the server_ says (the same choice for a party's songs). A player's
+  own songs go to the server when they turn on _Share my songs_ (off by default; asked once per server; a button in
+  the library), once each is analysed. Moderators find reported songs in the Admin window.
 - **Later, not now:** the in-game server list (3.2b), local sessions hosted by the desktop app (level 1), and its
   STUN fallback.
 

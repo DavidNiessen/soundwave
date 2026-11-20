@@ -80,6 +80,7 @@ export const COMMANDS: Command[] = [
     { id: 'library.sort', label: 'Sort', key: 'KeyS', pad: 'b7' },
     { id: 'library.add', label: 'Add songs', key: 'KeyA', pad: 'b8' },
     { id: 'library.ready', label: 'Ready up', key: 'KeyR', pad: 'b9' },
+    { id: 'library.share', label: 'Share my songs with the server, or stop', key: 'KeyH' },
   ]),
   ...cmd('lobby', [
     { id: 'lobby.part', label: 'Next part', pad: 'b3' },
@@ -111,7 +112,6 @@ export const COMMANDS: Command[] = [
     { id: 'party.lobby', label: 'Back to the party lobby', key: 'KeyB', pad: 'b8' },
     { id: 'party.leave', label: 'Leave the party', key: 'KeyL' },
     { id: 'party.boards', label: 'Leaderboards', key: 'KeyG', pad: 'b10' },
-    { id: 'party.songs', label: 'Shared songs', key: 'KeyH' },
     { id: 'party.invite', label: 'Invite a friend', key: 'KeyI' },
     { id: 'party.admin', label: 'Run the server', key: 'KeyM' },
     { id: 'party.versus', label: 'Play Versus', key: 'Digit1' },

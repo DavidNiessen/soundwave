@@ -125,7 +125,7 @@ const FIELDS: Record<Tab, readonly (keyof Settings)[]> = {
   controller: ['glyphs', 'rumble', 'rumbleHits', 'rumbleMisses', 'rumbleSustains', 'rumbleOverdrive', 'ps5Haptics'],
   touch: ['touchHaptics', 'touchOverdriveSide'],
   shortcuts: ['keys4', 'keys5', 'overdriveKey', 'pad4', 'pad5', 'padOverdrive', 'bindings'],
-  online: ['displayName', 'postScores', 'discordJoin', 'shareSongs', 'keepPartySongs'],
+  online: ['displayName', 'postScores', 'discordJoin', 'shareSongs', 'shareLibrary', 'serverSongs'],
   advanced: ['checkUpdates', 'discordStatus'],
 };
 
@@ -1736,12 +1736,24 @@ function onlineSections(s: Settings, set: (patch: Partial<Settings>) => void): S
           (v) => set({ shareSongs: v }),
         ),
         onOff(
-          'keepPartySongs',
-          'Keep the songs I get in a party',
-          'A party’s song you do not have is downloaded for the party and goes when you leave it, so your library stays yours. On: each one is added to your library instead. You can also keep one from the party’s set.',
-          s.keepPartySongs,
-          (v) => set({ keepPartySongs: v }),
+          'shareLibrary',
+          'Share my songs with the server',
+          'Your songs go to the server you sign in to (where its owner takes songs), so everyone on it finds them in their library. Songs you add later go too. Off: nothing of yours is shared.',
+          s.shareLibrary,
+          (v) => set({ shareLibrary: v }),
         ),
+        {
+          kind: 'choice',
+          id: 'serverSongs',
+          label: 'Songs from the server',
+          help: 'Stream plays another player’s song (or a party’s song you lack) straight from the server, without keeping it: your library stays yours. Download adds each one to your library, to play it offline later.',
+          value: s.serverSongs,
+          options: [
+            { value: 'stream', label: 'Stream' },
+            { value: 'download', label: 'Download' },
+          ],
+          set: (v) => set({ serverSongs: v as Settings['serverSongs'] }),
+        },
       ],
     },
     {
