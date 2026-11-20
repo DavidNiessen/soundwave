@@ -7971,3 +7971,43 @@ a.btn {
   max-width: none;
   min-height: 0;
 }
+
+/* The main menu's Online tab: a dot on the tab while the player is in a party. */
+.tab-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0.5rem var(--ok);
+  flex: none;
+}
+.online-panel {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.8rem, 2vh, 1.4rem);
+  min-height: 0;
+  overflow-y: auto;
+}
+.online-panel .play-row {
+  height: auto;
+  min-height: min(26rem, 52vh);
+}
+.online-panel .party-tiles {
+  min-height: 0;
+}
+.tile.hero.in-party .party-code-text {
+  margin: 0.3rem 0;
+}
+/* Signed out the Connect tile stands alone: it keeps a tile's height, and the menu's width. */
+.online-panel.signed-out .party-tiles {
+  height: min(26rem, 52vh);
+  max-width: 64rem;
+}
+.online-panel .tile-title .nowrap {
+  white-space: nowrap;
+}
+.online-panel .tile-title .keycap-hint,
+.online-panel .tile-title .hint-glyph {
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}

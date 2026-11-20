@@ -17,7 +17,6 @@ import {
   Crosshair,
   Crown,
   Download,
-  Gavel,
   KeyRound,
   Link as LinkIcon,
   LoaderCircle,
@@ -32,16 +31,12 @@ import {
   LogIn,
   LogOut,
   Megaphone,
-  Music,
-  PartyPopper,
   RefreshCw,
-  Shirt,
   SkipForward,
   Swords,
   Trophy,
   Undo2,
   UserMinus,
-  UserPlus,
   Users,
   WifiOff,
   type LucideIcon,
@@ -73,7 +68,6 @@ import { Calibration } from './Calibration';
 import { Cover } from './Cover';
 import { HoldButton } from './HoldButton';
 import { DIFFICULTY_LABEL, ICON_STROKE, PART_ICON, PART_LABEL, Pips, Stars } from './icons';
-import { AdminPanel, download, InvitePanel } from './ServerAdmin';
 import { useSlide } from './useSlide';
 
 interface Props {
@@ -89,23 +83,19 @@ interface Props {
   onStartSong(index: number): void;
   settings: Settings;
   onBack(): void;
-  /** Opens the server's leaderboards. */
-  onBoards(): void;
-  /** Opens the server's shared songs. */
-  onSongs(): void;
-  /** Opens the player's look on the stage. */
-  onAvatar(): void;
   /** The host picks the party's songs in their library (their setlist is the party's set). */
   onPickSongs(): void;
   /** Changes settings (the audio offset, calibrated from the lobby). */
   onSettings(patch: Partial<Settings>): void;
+  /** Signed in and in no party (just signed in, or left one): the main menu's Online tab takes over. */
+  onLeft(): void;
 }
 
 const useOnline = () => useSyncExternalStore(online.subscribe, online.snapshot);
 type Hints = ReturnType<typeof useHints>;
 
 /** Each mode as the room offers it: what it is in a sentence, and who it is for. */
-const MODES: Record<PartyMode, { label: string; icon: LucideIcon; cap: string; who: string; binding: string }> = {
+export const MODES: Record<PartyMode, { label: string; icon: LucideIcon; cap: string; who: string; binding: string }> = {
   versus: {
     label: 'Versus',
     icon: Trophy,
@@ -146,7 +136,7 @@ export function PartyScreen(props: Props) {
       ) : (
         <Connect s={s} settings={settings} onBack={onBack} />
       );
-  } else if (!party) body = <NoParty {...props} s={s} />;
+  } else if (!party) body = <NoParty onLeft={props.onLeft} />;
   else {
     title = party.mode ? MODES[party.mode].label : 'Your party';
     const n = party.members.length;
@@ -445,189 +435,10 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
 
 /* Signed in, in no party ------------------------------------------------------------------- */
 
-function NoParty({ s, settings, setlist, onBack, onBoards, onSongs, onAvatar }: Props & { s: OnlineState }) {
-  const hints = useHints(settings);
-  const [admin, setAdmin] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const mod = s.account!.role !== 'player';
-  const [code, setCode] = useState('');
-  const codeInput = useRef<HTMLInputElement>(null);
-  const saveData = async () => {
-    try {
-      const data = await online.exportData();
-      download(`soundwave-${s.info?.name ?? 'server'}-my-data.zip`.replace(/[^\w.-]+/g, '-'), data);
-    } catch (e) {
-      online.report((e as Error).message);
-    }
-  };
-  const join = () => code.trim() && online.joinParty(code);
-
-  useActions([
-    backAction(onBack),
-    {
-      id: 'party-create',
-      label: 'Start a party',
-      icon: PartyPopper,
-      ...keysOf('party.create'),
-      bar: false,
-      primary: true,
-      run: () => online.createParty(),
-    },
-    {
-      id: 'party-join',
-      label: 'Join a party',
-      icon: UserPlus,
-      ...keysOf('party.join'),
-      bar: false,
-      run: () => (code.trim() ? join() : codeInput.current?.focus()),
-    },
-    { id: 'party-sign-out', label: 'Sign out', icon: LogOut, ...keysOf('party.signOut'), bar: false, run: () => online.signOut() },
-    { id: 'party-export', label: 'Save my data', icon: Download, ...keysOf('party.export'), bar: false, run: () => void saveData() },
-    { id: 'party-boards', label: 'Leaderboards', icon: Trophy, ...keysOf('party.boards'), bar: false, run: onBoards },
-    { id: 'party-songs', label: 'Shared songs', icon: Music, ...keysOf('party.songs'), bar: false, run: onSongs },
-    { id: 'party-avatar', label: 'Your look', icon: Shirt, ...keysOf('party.avatar'), bar: false, run: onAvatar },
-    ...(mod
-      ? [{ id: 'party-admin', label: 'Run the server', icon: Gavel, ...keysOf('party.admin'), bar: false, run: () => setAdmin((a) => !a) }]
-      : []),
-  ]);
-
-  const more: [string, string, LucideIcon, string, string, () => void][] = [
-    [
-      'party-boards',
-      'party.boards',
-      Trophy,
-      'Leaderboards',
-      'The best runs of every song on this server, and the week’s challenge.',
-      onBoards,
-    ],
-    ['party-songs', 'party.songs', Music, 'Shared songs', 'Songs the players here share, to add to your library.', onSongs],
-    ['party-avatar', 'party.avatar', Shirt, 'Your look', 'Your colours on the band member at your part, for everyone to see.', onAvatar],
-  ];
-
-  return (
-    <div className="party-home">
-      <div className="tiles party-tiles" data-nav-group="tiles">
-        <button type="button" className="tile hero" data-action="party-create" data-autofocus onClick={() => online.createParty()}>
-          <span className="mosaic blank" aria-hidden>
-            <PartyPopper strokeWidth={ICON_STROKE} />
-          </span>
-          <span className="tile-text">
-            <span className="tile-title">
-              Start a party
-              <Hint {...keysOf('party.create')} {...hints} />
-            </span>
-            <span className="tile-cap">Friends join with its code. Then you pick what to play together: Versus or Showdown.</span>
-            <span className="tile-meta">Up to {PARTY_MAX} players</span>
-            <span className="hero-songs">
-              {PARTY_MODES.map((m, i) => (
-                <span key={m} className="hero-song">
-                  <span className="hero-num">{i + 1}</span>
-                  <span className="hero-name">{MODES[m].label}</span>
-                  <span className="hero-by">{MODES[m].who}</span>
-                </span>
-              ))}
-            </span>
-          </span>
-        </button>
-        <div className="tile-stack">
-          <form
-            className="tile party-join"
-            style={{ ['--i' as string]: 1 }}
-            onSubmit={(e) => {
-              e.preventDefault();
-              join();
-            }}
-          >
-            <span className="tile-text">
-              <span className="tile-title">
-                Join a party
-                <Hint {...keysOf('party.join')} {...hints} />
-              </span>
-              <span className="party-join-row">
-                <input
-                  ref={codeInput}
-                  value={code}
-                  onChange={(e) => setCode(e.target.value.toUpperCase())}
-                  placeholder="KITE-42"
-                  aria-label="The party’s code, from its host"
-                  maxLength={12}
-                  spellCheck={false}
-                  autoCapitalize="characters"
-                />
-                <button type="submit" className="btn primary" data-action="party-join" disabled={!code.trim()}>
-                  <UserPlus strokeWidth={ICON_STROKE} aria-hidden />
-                  Join
-                </button>
-              </span>
-            </span>
-          </form>
-          {more.map(([id, binding, Icon, label, cap, run], i) => (
-            <button key={id} type="button" className="tile small" data-action={id} style={{ ['--i' as string]: i + 2 }} onClick={run}>
-              <span className="tile-icon" aria-hidden>
-                <Icon strokeWidth={ICON_STROKE} />
-              </span>
-              <span className="tile-text">
-                <span className="tile-title">
-                  {label}
-                  <Hint {...keysOf(binding)} {...hints} />
-                </span>
-                <span className="tile-cap">{cap}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <section className="party-account" aria-label="Your account">
-        <span className="online-dot on" aria-hidden />
-        <span className="song-text">
-          <span className="song-title">
-            {s.account!.name}
-            {mod && <span className="dim"> · {s.account!.role}</span>}
-          </span>
-          <span className="song-artist">Signed in to {s.info?.name ?? s.server}</span>
-        </span>
-        <span className="party-row">
-          <button type="button" className="btn small" data-action="party-export" onClick={() => void saveData()}>
-            <Hint kbd={keysOf('party.export').kbd} {...hints} />
-            <Download strokeWidth={ICON_STROKE} aria-hidden />
-            Save my data
-          </button>
-          {mod && (
-            <button type="button" className="btn small" data-action="party-admin" onClick={() => setAdmin((a) => !a)}>
-              <Hint kbd={keysOf('party.admin').kbd} {...hints} />
-              <Gavel strokeWidth={ICON_STROKE} aria-hidden />
-              {admin ? 'Hide the server tools' : 'Run the server'}
-            </button>
-          )}
-          <button type="button" className="btn small" data-action="party-sign-out" data-sfx="back" onClick={() => online.signOut()}>
-            <Hint kbd={keysOf('party.signOut').kbd} {...hints} />
-            <LogOut strokeWidth={ICON_STROKE} aria-hidden />
-            Sign out
-          </button>
-          <button type="button" className="btn small quiet" data-sfx="back" onClick={() => online.forget()}>
-            Forget this server
-          </button>
-          {s.account!.role !== 'owner' &&
-            (deleting ? (
-              <button
-                type="button"
-                className="btn small danger"
-                onClick={() => void online.deleteAccount().catch((e) => online.report((e as Error).message))}
-              >
-                Delete it, with all my scores
-              </button>
-            ) : (
-              <button type="button" className="btn small quiet" onClick={() => setDeleting(true)}>
-                Delete my account
-              </button>
-            ))}
-        </span>
-      </section>
-      {(s.info?.mode === 'invite' || mod) && <InvitePanel mod={mod} />}
-      {mod && admin && <AdminPanel owner={s.account!.role === 'owner'} setlist={setlist} />}
-    </div>
-  );
+/** Signed in, in no party: the Online tab is where parties start, so the screen hands over to it. */
+function NoParty({ onLeft }: { onLeft(): void }) {
+  useEffect(() => onLeft(), [onLeft]);
+  return null;
 }
 
 /* In a party ------------------------------------------------------------------------------ */

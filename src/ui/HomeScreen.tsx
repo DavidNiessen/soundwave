@@ -13,7 +13,7 @@ import {
   Search,
   Settings as SettingsIcon,
   Upload,
-  Users,
+  Globe,
   Download,
   MonitorDown,
   type LucideIcon,
@@ -29,9 +29,9 @@ import { focusStart, TAB_EVENT } from '../input/menuNav';
 import { backInput } from '../input/pads';
 import { menuPulse } from '../input/rumble';
 import { useGlyphStyle } from '../input/usePads';
-import { Hint, useActions } from './actions';
+import { Hint, useActions, type Action } from './actions';
 import { Mosaic } from './Cover';
-import { OnlineSidebar } from './OnlineSidebar';
+import { OnlinePanel, type OnlinePanelProps } from './OnlinePanel';
 import { ICON_STROKE } from './icons';
 import { TrackPicker, type TrackPickerProps } from './TrackPicker';
 import { ReplaysPanel, type ReplayActions, type ReplayCommands } from './ReplaysPanel';
@@ -54,12 +54,10 @@ interface Props {
   onLibrary(): void;
   onSet(ids: string[]): void;
   onAdd(): void;
-  /** Opens playing together (on a server). */
-  onTogether(): void;
-  /** Opens the server's leaderboards (from the connected sidebar). */
-  onBoards(): void;
-  /** Where the player stands online, for the Play together tile ("In party KITE-42"); absent offline. */
-  together?: string;
+  /** What the Online tab needs: the party, the server's boards and songs, the player's look. */
+  online: Omit<OnlinePanelProps, 'base' | 'settings' | 'setlist'>;
+  /** The player is in a party: the Online tab shows a dot. */
+  inParty: boolean;
   /** What the Edit tab's list of tracks needs to bring songs in and open them in the editor. */
   tracks: Omit<TrackPickerProps, 'songs' | 'status' | 'settings'>;
   /** The saved replays, newest first, and what can be done with them (the Replays tab). */
@@ -77,9 +75,10 @@ interface Props {
 }
 
 /** The parts of the main menu: playing sets, making charts, and watching runs again. */
-type Tab = 'play' | 'edit' | 'replays';
+type Tab = 'play' | 'online' | 'edit' | 'replays';
 const TABS: [Tab, string, LucideIcon][] = [
   ['play', 'Play', Play],
+  ['online', 'Online', Globe],
   ['edit', 'Edit', PencilRuler],
   ['replays', 'Replays', Clapperboard],
 ];
@@ -89,6 +88,10 @@ const tabIndex = (t: Tab) => TABS.findIndex(([id]) => id === t);
  * on Edit again, back from a replay on Replays, and a fresh start is always Play.
  */
 let lastTab: Tab = 'play';
+/** Opens the main menu on the Online tab next time (leaving a party lands there). */
+export function showOnlineTab() {
+  lastTab = 'online';
+}
 
 const total = (songs: SongMeta[]) => formatTime(songs.reduce((t, s) => t + s.duration, 0));
 /** "3 songs · 9:12", or just "3 songs" while the length is not known yet. */
@@ -106,9 +109,8 @@ export function HomeScreen({
   onLibrary,
   onSet,
   onAdd,
-  onTogether,
-  onBoards,
-  together,
+  online,
+  inParty,
   tracks,
   replays,
   replayActions,
@@ -172,59 +174,10 @@ export function HomeScreen({
   opening.current ??= new Set([...sets.map((s) => s.id), ...(empty ? ['add'] : [])]);
   const late = (id: string) => (opening.current!.has(id) ? '' : 'late');
 
-  useActions([
-    ...(tab === 'play'
-      ? [{ id: 'add', label: importing ? `Importing ${importing}…` : 'Add songs', icon: Upload, ...keysOf('home.add'), run: onAdd }]
-      : tab === 'replays'
-        ? replays.length
-          ? [
-              {
-                id: 'replay-options',
-                label: 'Options',
-                icon: Ellipsis,
-                ...keysOf('home.replayOptions'),
-                run: () => replayCommands.current?.options(),
-              },
-              {
-                id: 'replay-export',
-                label: 'Export video',
-                icon: Film,
-                ...keysOf('home.replayExport'),
-                bar: false,
-                run: () => replayCommands.current?.exportVideo(),
-              },
-              {
-                id: 'replay-keep',
-                label: 'Keep',
-                icon: Pin,
-                ...keysOf('home.replayKeep'),
-                bar: false,
-                run: () => replayCommands.current?.keep(),
-              },
-              {
-                id: 'replay-delete',
-                label: 'Delete',
-                icon: Trash2,
-                ...keysOf('home.replayDelete'),
-                bar: false,
-                run: () => replayCommands.current?.remove(),
-              },
-            ]
-          : []
-        : [
-            {
-              id: 'search',
-              label: 'Search',
-              icon: Search,
-              ...keysOf('home.search'),
-              bar: false,
-              run: () => document.querySelector<HTMLInputElement>('.track-picker input[type=search]')?.focus(),
-            },
-            { id: 'new', label: 'New track', icon: FilePlus2, ...keysOf('home.new'), primary: true, run: () => setPicks((n) => n + 1) },
-          ]),
-    ...(tab === 'play'
-      ? [{ id: 'together', label: 'Play together', icon: Users, ...keysOf('home.together'), bar: false, run: onTogether }]
-      : []),
+  // What every tab has: T for Online, the settings, an update, the app, and the way out. The
+  // Online tab declares its own actions over these (OnlinePanel), so it is handed them.
+  const common: Action[] = [
+    { id: 'together', label: 'Online', icon: Globe, ...keysOf('home.together'), bar: false, run: () => setTab('online') },
     { id: 'settings', label: 'Settings', icon: SettingsIcon, ...keysOf('home.settings'), run: onSettings },
     ...(update
       ? [{ id: 'update', label: `Update to ${update}`, icon: Download, ...keysOf('home.update'), bar: false, run: onUpdate }]
@@ -234,6 +187,61 @@ export function HomeScreen({
       : []),
     // Esc and the controller's back button: there is nowhere further back than out.
     ...(onExit ? [{ id: 'exit', label: 'Exit', icon: Power, kbd: 'Escape', bar: false, run: onExit }] : []),
+  ];
+
+  useActions([
+    ...(tab === 'play'
+      ? [{ id: 'add', label: importing ? `Importing ${importing}…` : 'Add songs', icon: Upload, ...keysOf('home.add'), run: onAdd }]
+      : tab === 'online'
+        ? []
+        : tab === 'replays'
+          ? replays.length
+            ? [
+                {
+                  id: 'replay-options',
+                  label: 'Options',
+                  icon: Ellipsis,
+                  ...keysOf('home.replayOptions'),
+                  run: () => replayCommands.current?.options(),
+                },
+                {
+                  id: 'replay-export',
+                  label: 'Export video',
+                  icon: Film,
+                  ...keysOf('home.replayExport'),
+                  bar: false,
+                  run: () => replayCommands.current?.exportVideo(),
+                },
+                {
+                  id: 'replay-keep',
+                  label: 'Keep',
+                  icon: Pin,
+                  ...keysOf('home.replayKeep'),
+                  bar: false,
+                  run: () => replayCommands.current?.keep(),
+                },
+                {
+                  id: 'replay-delete',
+                  label: 'Delete',
+                  icon: Trash2,
+                  ...keysOf('home.replayDelete'),
+                  bar: false,
+                  run: () => replayCommands.current?.remove(),
+                },
+              ]
+            : []
+          : [
+              {
+                id: 'search',
+                label: 'Search',
+                icon: Search,
+                ...keysOf('home.search'),
+                bar: false,
+                run: () => document.querySelector<HTMLInputElement>('.track-picker input[type=search]')?.focus(),
+              },
+              { id: 'new', label: 'New track', icon: FilePlus2, ...keysOf('home.new'), primary: true, run: () => setPicks((n) => n + 1) },
+            ]),
+    ...common,
   ]);
 
   const tabRow = useSlide<HTMLDivElement>(tab);
@@ -260,6 +268,7 @@ export function HomeScreen({
               >
                 <Icon strokeWidth={ICON_STROKE} aria-hidden />
                 <span className="tab-label">{label}</span>
+                {id === 'online' && inParty && <span className="tab-dot" aria-label="In a party" />}
               </button>
             ))}
           </div>
@@ -304,117 +313,91 @@ export function HomeScreen({
             onSettings={onSettings}
             commands={replayCommands}
           />
+        ) : tab === 'online' ? (
+          <>
+            <h2 className="page-title">Play online</h2>
+            <OnlinePanel {...online} settings={settings} setlist={setlist} base={common} />
+          </>
         ) : tab === 'play' ? (
           <>
             <h2 className="page-title">Pick a set</h2>
-            {/* Signed in to a server, the connected sidebar stands beside the tiles. */}
-            <div className="play-row">
-              <div className="tiles" data-nav-group="tiles">
-                {/* The feature: the player's own set, with its covers, and its songs in order. */}
-                <button
-                  type="button"
-                  className="tile hero"
-                  data-autofocus
-                  aria-label={
-                    setlist.length
-                      ? `Your setlist: ${summary(setlist).replace(' · ', ', ')}`
-                      : 'Your setlist: empty. Pick up to four songs from your library.'
-                  }
-                  onClick={onLibrary}
-                >
-                  {setlist.length ? (
-                    <Mosaic songs={setlist} />
-                  ) : (
-                    <span className="mosaic blank" aria-hidden>
-                      <ListMusic strokeWidth={ICON_STROKE} />
-                    </span>
-                  )}
-                  <span className="tile-text">
-                    <span className="tile-title">Your setlist</span>
-                    <span className="tile-cap">{setlist.length ? summary(setlist) : 'Pick up to four songs from your library'}</span>
-                    <span className="hero-songs">
-                      {Array.from({ length: SET_MAX }, (_, i) => {
-                        const s = setlist[i];
-                        return (
-                          <span key={i} className={`hero-song ${s ? '' : 'open'}`}>
-                            <span className="hero-num">{i + 1}</span>
-                            <span className="hero-name">{s ? s.title : 'Open slot'}</span>
-                            {s && <span className="hero-by">{s.artist}</span>}
-                          </span>
-                        );
-                      })}
-                    </span>
+            <div className="tiles" data-nav-group="tiles">
+              {/* The feature: the player's own set, with its covers, and its songs in order. */}
+              <button
+                type="button"
+                className="tile hero"
+                data-autofocus
+                aria-label={
+                  setlist.length
+                    ? `Your setlist: ${summary(setlist).replace(' · ', ', ')}`
+                    : 'Your setlist: empty. Pick up to four songs from your library.'
+                }
+                onClick={onLibrary}
+              >
+                {setlist.length ? (
+                  <Mosaic songs={setlist} />
+                ) : (
+                  <span className="mosaic blank" aria-hidden>
+                    <ListMusic strokeWidth={ICON_STROKE} />
                   </span>
-                </button>
-                <div className="tile-stack">
-                  {/* Playing together, on a Soundwave server: a set with friends, at the same moment. */}
+                )}
+                <span className="tile-text">
+                  <span className="tile-title">Your setlist</span>
+                  <span className="tile-cap">{setlist.length ? summary(setlist) : 'Pick up to four songs from your library'}</span>
+                  <span className="hero-songs">
+                    {Array.from({ length: SET_MAX }, (_, i) => {
+                      const s = setlist[i];
+                      return (
+                        <span key={i} className={`hero-song ${s ? '' : 'open'}`}>
+                          <span className="hero-num">{i + 1}</span>
+                          <span className="hero-name">{s ? s.title : 'Open slot'}</span>
+                          {s && <span className="hero-by">{s.artist}</span>}
+                        </span>
+                      );
+                    })}
+                  </span>
+                </span>
+              </button>
+              <div className="tile-stack">
+                {sets.map((set, i) => {
+                  const list = set.songs.map((id) => byId.get(id)!).filter(Boolean);
+                  return (
+                    <button
+                      type="button"
+                      key={set.id}
+                      className={`tile ${late(set.id)}`}
+                      style={{ ['--i' as string]: i + 2 }}
+                      onClick={() => onSet(set.songs)}
+                    >
+                      <Mosaic songs={list} />
+                      <span className="tile-text">
+                        <span className="tile-title">{set.title}</span>
+                        <span className="tile-cap">{set.caption}</span>
+                        <span className="tile-meta">{summary(list)}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+                {empty && (
                   <button
                     type="button"
-                    className="tile together"
-                    data-action="together"
-                    style={{ ['--i' as string]: 1 }}
-                    onClick={onTogether}
+                    className={`tile add ${late('add')}`}
+                    style={{ ['--i' as string]: sets.length + 2 }}
+                    onClick={onAdd}
                   >
-                    <span className="together-art" aria-hidden>
-                      <Users strokeWidth={ICON_STROKE} />
+                    <span className="mosaic blank dashed" aria-hidden>
+                      <Plus strokeWidth={ICON_STROKE} />
                     </span>
                     <span className="tile-text">
-                      <span className="tile-title together-title">
-                        Play{' '}
-                        <span className="nowrap">
-                          together
-                          <Hint {...keysOf('home.together')} mode={mode} style={style} />
-                        </span>
-                      </span>
-                      <span className="tile-cap">A set with friends, all at the same moment: Versus or Showdown.</span>
-                      {/* Where the player stands online, or what it takes to start. */}
-                      <span className={`together-status ${together ? 'on' : ''}`}>
-                        <span className={`online-dot ${together ? 'on' : ''}`} aria-hidden />
-                        {together ?? 'On a Soundwave server you or a friend runs'}
+                      <span className="tile-title">Add your music</span>
+                      <span className="tile-cap">
+                        {touch ? 'Pick files from this device.' : 'Drop files anywhere or browse.'} MP3, WAV, FLAC, OGG and M4A. Each song
+                        takes about a minute to turn into charts.
                       </span>
                     </span>
                   </button>
-                  {sets.map((set, i) => {
-                    const list = set.songs.map((id) => byId.get(id)!).filter(Boolean);
-                    return (
-                      <button
-                        type="button"
-                        key={set.id}
-                        className={`tile ${late(set.id)}`}
-                        style={{ ['--i' as string]: i + 2 }}
-                        onClick={() => onSet(set.songs)}
-                      >
-                        <Mosaic songs={list} />
-                        <span className="tile-text">
-                          <span className="tile-title">{set.title}</span>
-                          <span className="tile-cap">{set.caption}</span>
-                          <span className="tile-meta">{summary(list)}</span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                  {empty && (
-                    <button
-                      type="button"
-                      className={`tile add ${late('add')}`}
-                      style={{ ['--i' as string]: sets.length + 2 }}
-                      onClick={onAdd}
-                    >
-                      <span className="mosaic blank dashed" aria-hidden>
-                        <Plus strokeWidth={ICON_STROKE} />
-                      </span>
-                      <span className="tile-text">
-                        <span className="tile-title">Add your music</span>
-                        <span className="tile-cap">
-                          {touch ? 'Pick files from this device.' : 'Drop files anywhere or browse.'} MP3, WAV, FLAC, OGG and M4A. Each song
-                          takes about a minute to turn into charts.
-                        </span>
-                      </span>
-                    </button>
-                  )}
-                </div>
+                )}
               </div>
-              <OnlineSidebar onTogether={onTogether} onBoards={onBoards} />
             </div>
           </>
         ) : (

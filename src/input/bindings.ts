@@ -66,7 +66,7 @@ export const COMMANDS: Command[] = [
     { id: 'home.search', label: 'Search tracks', key: 'Slash' },
     { id: 'home.update', label: 'Update the game', key: 'KeyU' },
     { id: 'home.install', label: 'Get the app', key: 'KeyI' },
-    { id: 'home.together', label: 'Play together', key: 'KeyT', pad: 'b8' },
+    { id: 'home.together', label: 'Online tab', key: 'KeyT', pad: 'b8' },
     { id: 'home.replayOptions', label: 'Replay options', key: 'KeyO', pad: 'b2', mouse: 'm1' },
     { id: 'home.replayKeep', label: 'Keep a replay', key: 'KeyK' },
     { id: 'home.replayDelete', label: 'Delete a replay', key: 'Delete', key2: 'Backspace' },

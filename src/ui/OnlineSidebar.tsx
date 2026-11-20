@@ -1,15 +1,14 @@
 /**
- * The connected main menu (docs/specs/online-play.md, 4.3): while signed in to a server, a sidebar
- * beside the Play tab with you and the server, your party, the week's top players and who is online.
- * Offline it is not there, and the menu looks as it always did.
+ * The connected main menu (docs/specs/online-play.md, 4.3): on the Online tab while signed in, a
+ * column with you and the server, the week's top players and who is online.
  */
-import { Crown, Trophy, Users } from 'lucide-react';
+import { Crown, Trophy } from 'lucide-react';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { online } from '../net/client';
 import type { Online } from '../net/protocol';
 import { ICON_STROKE } from './icons';
 
-export function OnlineSidebar({ onTogether, onBoards }: { onTogether(): void; onBoards(): void }) {
+export function OnlineSidebar({ onBoards }: { onBoards(): void }) {
   const s = useSyncExternalStore(online.subscribe, online.snapshot);
   const [top, setTop] = useState<{ name: string; score: number }[]>([]);
   const [people, setPeople] = useState<Online[]>([]);
@@ -28,7 +27,6 @@ export function OnlineSidebar({ onTogether, onBoards }: { onTogether(): void; on
   }, [signedIn]);
 
   if (!signedIn) return null;
-  const party = s.party;
   const others = people.filter((p) => p.name !== s.account!.name);
   return (
     <aside className="online-side" aria-label="On the server" data-nav-group="online-side">
@@ -37,22 +35,6 @@ export function OnlineSidebar({ onTogether, onBoards }: { onTogether(): void; on
         <span className="party-name">{s.account!.name}</span>
         <span className="dim">{s.status === 'online' ? s.info?.name : 'Reconnecting…'}</span>
       </section>
-      <button type="button" className="online-card" onClick={onTogether}>
-        <span className="label">
-          <Users strokeWidth={ICON_STROKE} aria-hidden /> Party
-        </span>
-        {party ? (
-          <>
-            <span className="party-name">{party.code}</span>
-            <span className="dim">
-              {party.members.length} {party.members.length === 1 ? 'player' : 'players'} · {party.members.filter((m) => m.ready).length}{' '}
-              ready
-            </span>
-          </>
-        ) : (
-          <span className="dim">Play together: start a party or join one</span>
-        )}
-      </button>
       <button type="button" className="online-card" onClick={onBoards}>
         <span className="label">
           <Trophy strokeWidth={ICON_STROKE} aria-hidden /> This week

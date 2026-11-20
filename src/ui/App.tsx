@@ -64,7 +64,7 @@ import { Dialog } from './Dialog';
 import type { PickedSong } from './TrackPicker';
 import { EditorScreen } from './EditorScreen';
 import { FocusRing } from './FocusRing';
-import { HomeScreen } from './HomeScreen';
+import { HomeScreen, showOnlineTab } from './HomeScreen';
 import { DIFFICULTY_LABEL, PART_LABEL } from './icons';
 import { LibraryScreen, type SongStatus } from './LibraryScreen';
 import { LobbyScreen } from './LobbyScreen';
@@ -1166,6 +1166,11 @@ export function App() {
     setSeed(Date.now());
     setView({ name: 'home' });
   };
+  /** Back to the main menu's Online tab (from a screen it opened, or a party that ended). */
+  const goOnline = useCallback(() => {
+    showOnlineTab();
+    setView({ name: 'home' });
+  }, []);
   const advance = (run: Run) => {
     if (run.index + 1 < run.songs.length) void playAt(run, run.index + 1);
     else if (run.songs.length > 1) setView({ name: 'summary', run: filled(run) });
@@ -1522,15 +1527,13 @@ export function App() {
           onStartSong={(i) => void startPartySong(i)}
           settings={settings}
           onBack={goHome}
-          onBoards={() => setView({ name: 'boards' })}
-          onSongs={() => setView({ name: 'songs' })}
-          onAvatar={() => setView({ name: 'avatar' })}
+          onLeft={goOnline}
           onPickSongs={() => setView({ name: 'library', from: 'party' })}
           onSettings={(patch) => updateSettings({ ...settings, ...patch })}
         />
       );
     } else if (view.name === 'avatar') {
-      screen = <AvatarScreen part={pick.part} settings={settings} onBack={() => setView({ name: 'party' })} />;
+      screen = <AvatarScreen part={pick.part} settings={settings} onBack={goOnline} />;
     } else if (view.name === 'songs') {
       screen = (
         <SongsScreen
@@ -1539,7 +1542,7 @@ export function App() {
           onGet={getShared}
           onUseOwnCopy={useOwnCopy}
           onShare={shareSong}
-          onBack={() => setView({ name: 'party' })}
+          onBack={goOnline}
         />
       );
     } else if (view.name === 'boards') {
@@ -1552,7 +1555,7 @@ export function App() {
           thin={thin}
           settings={settings}
           onWatch={watchRun}
-          onBack={() => setView(view.from === 'home' ? { name: 'home' } : { name: 'party' })}
+          onBack={goOnline}
         />
       );
     } else if (view.name === 'results') {
@@ -1593,15 +1596,13 @@ export function App() {
           empty={songs.length === 0}
           onLibrary={() => setView({ name: 'library' })}
           onSet={(ids) => setView({ name: 'lobby', ids, from: 'home' })}
-          onTogether={() => setView({ name: 'party' })}
-          onBoards={() => setView({ name: 'boards', from: 'home' })}
-          together={
-            onlineState.party
-              ? `In party ${onlineState.party.code} · ${onlineState.party.members.length} ${onlineState.party.members.length === 1 ? 'player' : 'players'}`
-              : onlineState.account
-                ? `Signed in to ${onlineState.info?.name ?? 'a server'}`
-                : undefined
-          }
+          online={{
+            onParty: () => setView({ name: 'party' }),
+            onBoards: () => setView({ name: 'boards' }),
+            onSongs: () => setView({ name: 'songs' }),
+            onAvatar: () => setView({ name: 'avatar' }),
+          }}
+          inParty={!!onlineState.party}
           onAdd={addSongs}
           tracks={{
             device,
