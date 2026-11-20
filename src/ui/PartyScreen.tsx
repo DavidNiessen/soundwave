@@ -1,50 +1,61 @@
 /**
  * Playing together on a Soundwave server (docs/specs/online-play.md): connecting and signing in,
- * starting or joining a party, its lobby (the shared set, each player's part, difficulty and
- * ready tick), the board while a song plays without you, and the shared results after each song.
+ * starting or joining a party, and the party itself, which goes through three stages:
+ * - the room: a party is just its players at first, and the host picks what to play (a mode);
+ * - the mode's lobby: the set, the mode's options, each player's part, difficulty and ready tick,
+ *   and the board while a song plays without you;
+ * - the shared results after each song.
  *
- * The connection itself lives in src/net/client.ts; starting a song needs the host's charts,
- * which App makes (onStartSong).
+ * The connection itself lives in src/net/client.ts; starting a song needs the host's charts, which
+ * App makes (onStartSong). A song a player lacks comes to them by itself (src/net/partySongs.ts).
  */
 import {
   ArrowLeft,
   Check,
+  CloudDownload,
+  CloudUpload,
   Crosshair,
   Crown,
   Download,
   Gavel,
-  Trophy,
-  Music,
   Gauge,
   ListMusic,
   Lock,
+  LockOpen,
   LogIn,
   LogOut,
   Megaphone,
+  Music,
   PartyPopper,
+  RefreshCw,
   Shirt,
   SkipForward,
   Swords,
+  Trophy,
   Undo2,
   UserMinus,
   UserPlus,
   Users,
   WifiOff,
+  type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { DIFFICULTIES, PARTS, type Difficulty, type Part } from '../chart/types';
 import { isCalibrated, type Settings } from '../game/settings';
-import { Calibration } from './Calibration';
 import { formatTime, type Pick } from '../game/setlist';
 import { keysOf } from '../input/bindings';
 import { PadGlyph } from '../input/glyphs';
 import { confirmInput } from '../input/pads';
 import { online, parseInvite, type OnlineState } from '../net/client';
+import { partySongs, type Transfer } from '../net/partySongs';
 import {
   BAND_MAX,
   DROP_MISSES,
+  PARTY_MAX,
+  PARTY_MODES,
   type BoardLine,
   type Member,
+  type PartyMode,
   type PartyState,
   type ResultLine,
   type SetSong,
@@ -53,17 +64,19 @@ import {
 } from '../net/protocol';
 import type { SongMeta } from '../storage/db';
 import { Hint, keyName, useActions, useHints, type Action } from './actions';
+import { Calibration } from './Calibration';
 import { Cover } from './Cover';
-import { AdminPanel, download, InvitePanel } from './ServerAdmin';
 import { HoldButton } from './HoldButton';
 import { DIFFICULTY_LABEL, ICON_STROKE, PART_ICON, PART_LABEL, Pips, Stars } from './icons';
+import { AdminPanel, download, InvitePanel } from './ServerAdmin';
+import { useSlide } from './useSlide';
 
 interface Props {
   /** The player's library, by song id. */
   library: Map<string, SongMeta>;
   /** Songs the player can play (analysed, with notes): the host can only start these. */
   playable: (id: string) => boolean;
-  /** The player's own setlist, which the host can make the party's set. */
+  /** The player's own setlist: the host's is the party's set. */
   setlist: SongMeta[];
   pick: Pick;
   onPick(p: Pick): void;
@@ -77,13 +90,39 @@ interface Props {
   onSongs(): void;
   /** Opens the player's look on the stage. */
   onAvatar(): void;
-  /** Gets one of the party's songs this player lacks (from the server, or asked of the host). */
-  onGetSong(id: string): void;
+  /** The host picks the party's songs in their library (their setlist is the party's set). */
+  onPickSongs(): void;
   /** Changes settings (the audio offset, calibrated from the lobby). */
   onSettings(patch: Partial<Settings>): void;
 }
 
 const useOnline = () => useSyncExternalStore(online.subscribe, online.snapshot);
+type Hints = ReturnType<typeof useHints>;
+
+/** Each mode as the room offers it: what it is in a sentence, and who it is for. */
+const MODES: Record<PartyMode, { label: string; icon: LucideIcon; cap: string; who: string; binding: string }> = {
+  versus: {
+    label: 'Versus',
+    icon: Trophy,
+    cap: 'Everyone plays the set on the part they like. The best score takes each song, and the set.',
+    who: `2 to ${PARTY_MAX} players`,
+    binding: 'party.versus',
+  },
+  band: {
+    label: 'Band',
+    icon: Users,
+    cap: 'One on each part, for one band score. Overdrive together and everyone’s multiplier doubles.',
+    who: `2 to ${BAND_MAX} players, one per part`,
+    binding: 'party.bandMode',
+  },
+  showdown: {
+    label: 'Showdown',
+    icon: Swords,
+    cap: 'The lowest go out after each song, and your overdrive strikes the player just above you.',
+    who: 'Best with 3 or more',
+    binding: 'party.showdown',
+  },
+};
 
 /**
  * Back leaves the screen; the party (and the sign-in) stay until left on purpose. Each part of the
@@ -98,6 +137,9 @@ export function PartyScreen(props: Props) {
   // A stored sign-in connects by itself; until it has, the screen says so.
   useEffect(() => online.resume(), []);
 
+  const party = s.account ? s.party : null;
+  let title = 'Play together';
+  let sub: string = s.info?.name ?? 'On a Soundwave server';
   let body: React.ReactNode;
   if (s.status === 'off' || s.status === 'signed-out' || !s.account) {
     body =
@@ -106,28 +148,20 @@ export function PartyScreen(props: Props) {
       ) : (
         <Connect s={s} settings={settings} onBack={onBack} />
       );
-  } else if (!s.party)
-    body = (
-      <NoParty
-        s={s}
-        settings={settings}
-        setlist={props.setlist}
-        onBack={onBack}
-        onBoards={props.onBoards}
-        onSongs={props.onSongs}
-        onAvatar={props.onAvatar}
-      />
-    );
-  else if (s.party.phase === 'results')
-    body = <PartyResults party={s.party} s={s} settings={settings} onBack={onBack} onStartSong={props.onStartSong} />;
-  else body = <Lobby {...props} s={s} party={s.party} />;
+  } else if (!party) body = <NoParty {...props} s={s} />;
+  else {
+    title = party.mode ? MODES[party.mode].label : 'Your party';
+    const n = party.members.length;
+    sub = `Party ${party.code} · ${n} ${n === 1 ? 'player' : 'players'}${s.info ? ` · ${s.info.name}` : ''}`;
+    body = <InParty {...props} s={s} party={party} />;
+  }
 
   return (
     <div className="page party">
       <header className="page-head">
-        <h1 className="page-title">Play together</h1>
+        <h1 className="page-title">{title}</h1>
         <p className="head-count">
-          {s.info ? s.info.name : 'On a Soundwave server'}
+          {sub}
           {s.status === 'reconnecting' && s.account && (
             <span className="warn">
               {' · '}
@@ -228,7 +262,7 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
           void connect();
         }}
       >
-        <h2 className="label">Server</h2>
+        <h2 className="label">1 · The server</h2>
         <label className="meta-field">
           <span className="dim">Its address, or the invite link you were sent</span>
           <input
@@ -241,88 +275,99 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
             data-autofocus
           />
         </label>
-        <button type="submit" className="btn primary" disabled={busy || !address.trim()}>
-          Connect
+        <button type="submit" className={`btn wide ${info ? '' : 'primary'}`} disabled={busy || !address.trim()}>
+          {info ? 'Connect again' : 'Connect'}
         </button>
         {info && (
-          <p className="hint">
-            <strong>{info.name}</strong>
-            {info.description && ` · ${info.description}`} · {info.online} online ·{' '}
-            {
-              {
-                public: 'anyone can make an account',
-                password: 'making an account needs the server’s password or an invite',
-                invite: 'making an account needs an invite',
-              }[info.mode]
-            }
-          </p>
+          <div className="party-server">
+            <span className="online-dot on" aria-hidden />
+            <span className="song-text">
+              <span className="song-title">{info.name}</span>
+              <span className="song-artist">
+                {info.description && `${info.description} · `}
+                {info.online} online ·{' '}
+                {
+                  {
+                    public: 'anyone can make an account',
+                    password: 'making an account needs the server’s password or an invite',
+                    invite: 'making an account needs an invite',
+                  }[info.mode]
+                }
+              </span>
+            </span>
+          </div>
         )}
       </form>
 
-      {info && (
-        <form
-          className="ready-panel"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void submit();
-          }}
-        >
-          <div className="choice-pair" role="radiogroup" aria-label="Sign in or make an account">
-            <button
-              type="button"
-              role="radio"
-              aria-checked={how === 'in'}
-              className={`choice ${how === 'in' ? 'on' : ''}`}
-              onClick={() => setHow('in')}
-            >
-              Sign in
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={how === 'up'}
-              className={`choice ${how === 'up' ? 'on' : ''}`}
-              onClick={() => setHow('up')}
-            >
-              Make an account
-            </button>
-          </div>
-          <label className="meta-field">
-            <span className="dim">Name</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={24} autoComplete="username" spellCheck={false} />
-          </label>
-          <label className="meta-field">
-            <span className="dim">Password{how === 'up' && ', at least 8 characters'}</span>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              maxLength={200}
-              autoComplete={how === 'up' ? 'new-password' : 'current-password'}
-            />
-          </label>
-          {how === 'up' && s.invite && !code && <p className="hint">Your invite lets you in.</p>}
-          {how === 'up' && mode === 'password' && !invite && (
+      <form
+        className={`ready-panel ${info ? '' : 'waiting'}`}
+        aria-disabled={!info}
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+      >
+        <h2 className="label">2 · You</h2>
+        {!info && <p className="hint">Connect to a server first.</p>}
+        {info && (
+          <>
+            <div className="choice-pair" role="radiogroup" aria-label="Sign in or make an account">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={how === 'in'}
+                className={`choice ${how === 'in' ? 'on' : ''}`}
+                onClick={() => setHow('in')}
+              >
+                Sign in
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={how === 'up'}
+                className={`choice ${how === 'up' ? 'on' : ''}`}
+                onClick={() => setHow('up')}
+              >
+                Make an account
+              </button>
+            </div>
             <label className="meta-field">
-              <span className="dim">The server’s password</span>
-              <input type="password" value={serverPassword} onChange={(e) => setServerPassword(e.target.value)} />
+              <span className="dim">Name</span>
+              <input value={name} onChange={(e) => setName(e.target.value)} maxLength={24} autoComplete="username" spellCheck={false} />
             </label>
-          )}
-          {how === 'up' && !s.invite && (
             <label className="meta-field">
-              <span className="dim">
-                {mode === 'invite' ? 'Your invite link or code' : 'An invite link or code, if you have one'} (the server’s owner uses their
-                set-up code here)
-              </span>
-              <input value={code} onChange={(e) => setCode(e.target.value)} spellCheck={false} />
+              <span className="dim">Password{how === 'up' && ', at least 8 characters'}</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                maxLength={200}
+                autoComplete={how === 'up' ? 'new-password' : 'current-password'}
+              />
             </label>
-          )}
-          <button type="submit" className="btn primary wide" disabled={busy || !name.trim() || !password}>
-            <LogIn strokeWidth={ICON_STROKE} aria-hidden />
-            {how === 'in' ? 'Sign in' : 'Make the account'}
-          </button>
-        </form>
-      )}
+            {how === 'up' && s.invite && !code && <p className="hint">Your invite lets you in.</p>}
+            {how === 'up' && mode === 'password' && !invite && (
+              <label className="meta-field">
+                <span className="dim">The server’s password</span>
+                <input type="password" value={serverPassword} onChange={(e) => setServerPassword(e.target.value)} />
+              </label>
+            )}
+            {how === 'up' && !s.invite && (
+              <label className="meta-field">
+                <span className="dim">
+                  {mode === 'invite' ? 'Your invite link or code' : 'An invite link or code, if you have one'} (the server’s owner uses
+                  their set-up code here)
+                </span>
+                <input value={code} onChange={(e) => setCode(e.target.value)} spellCheck={false} />
+              </label>
+            )}
+            <button type="submit" className="btn primary wide" disabled={busy || !name.trim() || !password}>
+              <LogIn strokeWidth={ICON_STROKE} aria-hidden />
+              {how === 'in' ? 'Sign in' : 'Make the account'}
+            </button>
+          </>
+        )}
+      </form>
       {problem && (
         <p className="party-error" role="alert">
           {problem}
@@ -338,23 +383,7 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
 
 /* Signed in, in no party ------------------------------------------------------------------- */
 
-function NoParty({
-  s,
-  settings,
-  setlist,
-  onBack,
-  onBoards,
-  onSongs,
-  onAvatar,
-}: {
-  s: OnlineState;
-  settings: Settings;
-  setlist: SongMeta[];
-  onBack(): void;
-  onBoards(): void;
-  onSongs(): void;
-  onAvatar(): void;
-}) {
+function NoParty({ s, settings, setlist, onBack, onBoards, onSongs, onAvatar }: Props & { s: OnlineState }) {
   const hints = useHints(settings);
   const [admin, setAdmin] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -392,7 +421,7 @@ function NoParty({
     },
     { id: 'party-sign-out', label: 'Sign out', icon: LogOut, ...keysOf('party.signOut'), bar: false, run: () => online.signOut() },
     { id: 'party-export', label: 'Save my data', icon: Download, ...keysOf('party.export'), bar: false, run: () => void saveData() },
-    { id: 'party-boards', label: 'Leaderboards', icon: Trophy, ...keysOf('party.boards'), run: onBoards },
+    { id: 'party-boards', label: 'Leaderboards', icon: Trophy, ...keysOf('party.boards'), bar: false, run: onBoards },
     { id: 'party-songs', label: 'Shared songs', icon: Music, ...keysOf('party.songs'), bar: false, run: onSongs },
     { id: 'party-avatar', label: 'Your look', icon: Shirt, ...keysOf('party.avatar'), bar: false, run: onAvatar },
     ...(mod
@@ -400,102 +429,138 @@ function NoParty({
       : []),
   ]);
 
+  const more: [string, string, LucideIcon, string, string, () => void][] = [
+    [
+      'party-boards',
+      'party.boards',
+      Trophy,
+      'Leaderboards',
+      'The best runs of every song on this server, and the week’s challenge.',
+      onBoards,
+    ],
+    ['party-songs', 'party.songs', Music, 'Shared songs', 'Songs the players here share, to add to your library.', onSongs],
+    ['party-avatar', 'party.avatar', Shirt, 'Your look', 'Your colours on the band member at your part, for everyone to see.', onAvatar],
+  ];
+
   return (
-    <div className="party-connect">
-      <section className="ready-panel">
-        <h2 className="label">Start a party</h2>
-        <p className="hint">You pick the set and start each song. Up to 16 players.</p>
-        <button type="button" className="btn primary wide" data-action="party-create" data-autofocus onClick={() => online.createParty()}>
-          <Hint {...keysOf('party.create')} {...hints} />
-          <PartyPopper strokeWidth={ICON_STROKE} aria-hidden />
-          Start a party
+    <div className="party-home">
+      <div className="tiles party-tiles" data-nav-group="tiles">
+        <button type="button" className="tile hero" data-action="party-create" data-autofocus onClick={() => online.createParty()}>
+          <span className="mosaic blank" aria-hidden>
+            <PartyPopper strokeWidth={ICON_STROKE} />
+          </span>
+          <span className="tile-text">
+            <span className="tile-title">
+              Start a party
+              <Hint {...keysOf('party.create')} {...hints} />
+            </span>
+            <span className="tile-cap">Friends join with its code. Then you pick what to play together: Versus, Band or Showdown.</span>
+            <span className="tile-meta">Up to {PARTY_MAX} players</span>
+            <span className="hero-songs">
+              {PARTY_MODES.map((m, i) => (
+                <span key={m} className="hero-song">
+                  <span className="hero-num">{i + 1}</span>
+                  <span className="hero-name">{MODES[m].label}</span>
+                  <span className="hero-by">{MODES[m].who}</span>
+                </span>
+              ))}
+            </span>
+          </span>
         </button>
-      </section>
-      <form
-        className="ready-panel"
-        onSubmit={(e) => {
-          e.preventDefault();
-          join();
-        }}
-      >
-        <h2 className="label">Join a party</h2>
-        <label className="meta-field">
-          <span className="dim">The party’s code, from its host</span>
-          <input
-            ref={codeInput}
-            value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
-            placeholder="KITE-42"
-            maxLength={12}
-            spellCheck={false}
-            autoCapitalize="characters"
-          />
-        </label>
-        <button type="submit" className="btn wide" data-action="party-join" disabled={!code.trim()}>
-          <Hint {...keysOf('party.join')} {...hints} />
-          <UserPlus strokeWidth={ICON_STROKE} aria-hidden />
-          Join
-        </button>
-      </form>
-      <section className="ready-panel">
-        <h2 className="label">Signed in</h2>
-        <p className="hint">
-          <strong>{s.account!.name}</strong> on {s.info?.name ?? s.server}
-          {s.account!.role !== 'player' && ` · ${s.account!.role}`}
-        </p>
-        <div className="party-row">
-          <button type="button" className="btn" data-action="party-export" onClick={() => void saveData()}>
+        <div className="tile-stack">
+          <form
+            className="tile party-join"
+            style={{ ['--i' as string]: 1 }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              join();
+            }}
+          >
+            <span className="tile-text">
+              <span className="tile-title">
+                Join a party
+                <Hint {...keysOf('party.join')} {...hints} />
+              </span>
+              <span className="party-join-row">
+                <input
+                  ref={codeInput}
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.toUpperCase())}
+                  placeholder="KITE-42"
+                  aria-label="The party’s code, from its host"
+                  maxLength={12}
+                  spellCheck={false}
+                  autoCapitalize="characters"
+                />
+                <button type="submit" className="btn primary" data-action="party-join" disabled={!code.trim()}>
+                  <UserPlus strokeWidth={ICON_STROKE} aria-hidden />
+                  Join
+                </button>
+              </span>
+            </span>
+          </form>
+          {more.map(([id, binding, Icon, label, cap, run], i) => (
+            <button key={id} type="button" className="tile small" data-action={id} style={{ ['--i' as string]: i + 2 }} onClick={run}>
+              <span className="tile-icon" aria-hidden>
+                <Icon strokeWidth={ICON_STROKE} />
+              </span>
+              <span className="tile-text">
+                <span className="tile-title">
+                  {label}
+                  <Hint {...keysOf(binding)} {...hints} />
+                </span>
+                <span className="tile-cap">{cap}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <section className="party-account" aria-label="Your account">
+        <span className="online-dot on" aria-hidden />
+        <span className="song-text">
+          <span className="song-title">
+            {s.account!.name}
+            {mod && <span className="dim"> · {s.account!.role}</span>}
+          </span>
+          <span className="song-artist">Signed in to {s.info?.name ?? s.server}</span>
+        </span>
+        <span className="party-row">
+          <button type="button" className="btn small" data-action="party-export" onClick={() => void saveData()}>
             <Hint kbd={keysOf('party.export').kbd} {...hints} />
             <Download strokeWidth={ICON_STROKE} aria-hidden />
             Save my data
           </button>
-          <button type="button" className="btn" data-action="party-sign-out" data-sfx="back" onClick={() => online.signOut()}>
+          {mod && (
+            <button type="button" className="btn small" data-action="party-admin" onClick={() => setAdmin((a) => !a)}>
+              <Hint kbd={keysOf('party.admin').kbd} {...hints} />
+              <Gavel strokeWidth={ICON_STROKE} aria-hidden />
+              {admin ? 'Hide the server tools' : 'Run the server'}
+            </button>
+          )}
+          <button type="button" className="btn small" data-action="party-sign-out" data-sfx="back" onClick={() => online.signOut()}>
             <Hint kbd={keysOf('party.signOut').kbd} {...hints} />
             <LogOut strokeWidth={ICON_STROKE} aria-hidden />
             Sign out
           </button>
-          <button type="button" className="btn" data-sfx="back" onClick={() => online.forget()}>
+          <button type="button" className="btn small quiet" data-sfx="back" onClick={() => online.forget()}>
             Forget this server
           </button>
           {s.account!.role !== 'owner' &&
             (deleting ? (
               <button
                 type="button"
-                className="btn danger"
+                className="btn small danger"
                 onClick={() => void online.deleteAccount().catch((e) => online.report((e as Error).message))}
               >
                 Delete it, with all my scores
               </button>
             ) : (
-              <button type="button" className="btn" onClick={() => setDeleting(true)}>
+              <button type="button" className="btn small quiet" onClick={() => setDeleting(true)}>
                 Delete my account
               </button>
             ))}
-        </div>
-        <div className="party-row">
-          <button type="button" className="btn" data-action="party-boards" onClick={onBoards}>
-            <Hint {...keysOf('party.boards')} {...hints} />
-            <Trophy strokeWidth={ICON_STROKE} aria-hidden />
-            Leaderboards
-          </button>
-          <button type="button" className="btn" data-action="party-avatar" onClick={onAvatar}>
-            <Hint {...keysOf('party.avatar')} {...hints} />
-            <Shirt strokeWidth={ICON_STROKE} aria-hidden />
-            Your look
-          </button>
-          <button type="button" className="btn" data-action="party-songs" onClick={onSongs}>
-            <Hint {...keysOf('party.songs')} {...hints} />
-            <Music strokeWidth={ICON_STROKE} aria-hidden />
-            Shared songs
-          </button>
-          {mod && (
-            <button type="button" className="btn" data-action="party-admin" onClick={() => setAdmin((a) => !a)}>
-              <Hint kbd={keysOf('party.admin').kbd} {...hints} />
-              <Gavel strokeWidth={ICON_STROKE} aria-hidden />
-              {admin ? 'Hide the server tools' : 'Run the server'}
-            </button>
-          )}
-        </div>
+        </span>
       </section>
       {(s.info?.mode === 'invite' || mod) && <InvitePanel mod={mod} />}
       {mod && admin && <AdminPanel owner={s.account!.role === 'owner'} setlist={setlist} />}
@@ -503,43 +568,22 @@ function NoParty({
   );
 }
 
-/* The party's lobby ---------------------------------------------------------------------- */
+/* In a party ------------------------------------------------------------------------------ */
 
-type LobbyProps = Props & { s: OnlineState; party: PartyState };
+type PartyProps = Props & { s: OnlineState; party: PartyState };
 
-function Lobby(props: LobbyProps) {
-  const me = props.party.members.find((m) => m.id === props.s.account!.id);
-  return me ? <PartyLobby {...props} me={me} /> : null;
-}
-
-function PartyLobby({
-  library,
-  playable,
-  setlist,
-  pick,
-  onPick,
-  onStartSong,
-  onGetSong,
-  settings,
-  onBack,
-  onSettings,
-  s,
-  party,
-  me,
-}: LobbyProps & { me: Member }) {
-  const hints = useHints(settings);
+/** Whichever stage the party is at, and the player's choices and songs, reported as they change. */
+function InParty(props: PartyProps) {
+  const { party, s, library, pick, settings } = props;
+  const me = party.members.find((m) => m.id === s.account!.id);
   const calibrated = isCalibrated(settings);
-  const [calibrating, setCalibrating] = useState(false);
-  const pad = hints.mode === 'pad';
-  const host = party.host === s.account!.id;
-  const has = (id: string) => library.has(id);
   const have = useMemo(() => party.set.filter((song) => library.has(song.id)).map((song) => song.id), [party.set, library]);
   const haveKey = have.join(',');
-  const nextIndex = party.songIndex + 1 < party.set.length ? party.songIndex + 1 : 0;
 
   // On joining, the player's own part and difficulty go to the party; the songs they have follow the set.
   const sentFor = useRef<string | null>(null);
   useEffect(() => {
+    if (!me) return;
     const key = `${party.code}|${haveKey}|${calibrated}`;
     if (sentFor.current === key) return;
     const first = !sentFor.current?.startsWith(`${party.code}|`);
@@ -547,44 +591,344 @@ function PartyLobby({
     online.ready(first ? pick.part : me.part, first ? pick.difficulty : me.difficulty, first ? false : me.ready, have, calibrated);
   }, [party.code, haveKey, me, pick, have, calibrated]);
 
+  if (!me) return null;
+  if (party.phase === 'results') return <PartyResults {...props} me={me} />;
+  if (!party.mode) return <PartyRoom {...props} me={me} />;
+  return <ModeLobby {...props} me={me} have={have} />;
+}
+
+/** The party's code, to invite friends with, and the switch that keeps it off Discord. */
+function PartyCode({ party, host, settings, hints }: { party: PartyState; host: boolean; settings: Settings; hints: Hints }) {
+  const toggle = () => online.setPrivate(!party.private);
+  return (
+    <section className="party-code" aria-label="Party code">
+      <span className="label">Party code</span>
+      <span className="display party-code-text">{party.code}</span>
+      <span className="dim">
+        Friends on this server join with it.
+        {party.private ? ' Private: never offered on Discord.' : settings.discordJoin ? ' Discord friends can join from your status.' : ''}
+      </span>
+      {host && (
+        <button type="button" className="btn small party-private" data-action="party-private" onClick={toggle}>
+          <Hint {...keysOf('party.private')} {...hints} />
+          {party.private ? <Lock strokeWidth={ICON_STROKE} aria-hidden /> : <LockOpen strokeWidth={ICON_STROKE} aria-hidden />}
+          {party.private ? 'Private' : 'Open to friends'}
+        </button>
+      )}
+    </section>
+  );
+}
+
+/** The players, each with their part, difficulty and ready tick; the host can remove one. */
+function Players({ party, me, host, showReady }: { party: PartyState; me: Member; host: boolean; showReady: boolean }) {
+  const ready = party.members.filter((m) => m.ready).length;
+  return (
+    <section className="party-players" aria-label="Players">
+      <h2 className="label">
+        <Users strokeWidth={ICON_STROKE} aria-hidden /> Players · {party.members.length}
+        {showReady && <span className="label-note">{ready === party.members.length ? 'Everyone is ready' : `${ready} ready`}</span>}
+      </h2>
+      <ul className="party-members">
+        {party.members.map((m, i) => (
+          <MemberLine
+            key={m.id}
+            m={m}
+            i={i}
+            host={m.id === party.host}
+            me={m.id === me.id}
+            setSize={party.set.length}
+            showReady={showReady}
+            onRemove={host && m.id !== me.id ? () => online.kick(m.id) : undefined}
+          />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function MemberLine({
+  m,
+  i,
+  host,
+  me,
+  setSize,
+  showReady,
+  onRemove,
+}: {
+  m: Member;
+  i: number;
+  host: boolean;
+  me: boolean;
+  setSize: number;
+  showReady: boolean;
+  /** The host removes this player from the party (absent for the host's own line, and for everyone else). */
+  onRemove?: () => void;
+}) {
+  const Icon = PART_ICON[m.part];
+  const missing = setSize - m.have.length;
+  const notes = [
+    !m.connected ? 'Reconnecting…' : '',
+    missing > 0 && setSize > 0 ? `Missing ${missing} ${missing === 1 ? 'song' : 'songs'}` : '',
+    m.calibrated ? '' : 'Not calibrated',
+  ].filter(Boolean);
+  return (
+    <li className={`party-member ${me ? 'me' : ''} ${m.connected ? '' : 'gone'}`} style={{ ['--i' as string]: i }}>
+      {/* Their look's colour, where they made one: the band member at their part wears it on stage. */}
+      <span className="party-swatch" style={m.avatar ? { background: m.avatar.top } : undefined} aria-hidden>
+        {m.name.slice(0, 1).toUpperCase()}
+      </span>
+      <span className="song-text">
+        <span className="song-title party-name">
+          {m.name}
+          {host && <Crown strokeWidth={ICON_STROKE} aria-label="Host" />}
+          {me && <span className="dim"> · you</span>}
+        </span>
+        <span className="song-artist party-pick">
+          <Icon strokeWidth={ICON_STROKE} aria-hidden />
+          {PART_LABEL[m.part]} · {DIFFICULTY_LABEL[m.difficulty]}
+          {notes.length > 0 && <span className="dim"> · {notes.join(' · ')}</span>}
+        </span>
+      </span>
+      {showReady && (
+        <span className={`party-tick ${m.ready ? 'on' : ''}`} aria-label={m.ready ? 'Ready' : 'Not ready'}>
+          {m.ready && <Check strokeWidth={ICON_STROKE} aria-hidden />}
+        </span>
+      )}
+      {onRemove && (
+        <button type="button" className="icon-btn party-remove" aria-label={`Remove ${m.name} from the party`} onClick={onRemove}>
+          <UserMinus strokeWidth={ICON_STROKE} aria-hidden />
+        </button>
+      )}
+    </li>
+  );
+}
+
+/**
+ * Leaving the party. The host's leaving ends it for everyone, so they hold it (its key too); everyone
+ * else leaves with a press.
+ */
+function LeaveButton({ host, hints }: { host: boolean; hints: Hints }) {
+  const key = keysOf('party.leave').kbd;
+  // Quiet, at the bottom: it is the way out, not what the screen is for.
+  if (host)
+    return (
+      <div className="party-end">
+        <HoldButton
+          label="End the party"
+          hint={hints.mode === 'keyboard' && key ? `Hold ${keyName(key)} · for everyone` : 'Hold · for everyone'}
+          tone="danger"
+          holdKey={key}
+          autoFocus={false}
+          glyphStyle={hints.style}
+          onComplete={() => online.leaveParty()}
+        />
+      </div>
+    );
+  return (
+    <button type="button" className="btn wide" data-action="party-leave" data-sfx="back" onClick={() => online.leaveParty()}>
+      <Hint kbd={key} {...hints} />
+      <LogOut strokeWidth={ICON_STROKE} aria-hidden />
+      Leave the party
+    </button>
+  );
+}
+
+const leaveAction = (host: boolean): Action[] =>
+  // The host ends the party for everyone, so they hold it (LeaveButton); the others leave with a press.
+  host
+    ? []
+    : [
+        {
+          id: 'party-leave',
+          label: 'Leave the party',
+          icon: LogOut,
+          ...keysOf('party.leave'),
+          bar: false,
+          sfx: 'back',
+          run: () => online.leaveParty(),
+        },
+      ];
+
+/* The room: just the players, and the host picks a mode ------------------------------------ */
+
+function PartyRoom({ party, s, settings, onBack, me }: PartyProps & { me: Member }) {
+  const hints = useHints(settings);
+  const host = party.host === s.account!.id;
+  const hostName = party.members.find((m) => m.id === party.host)?.name ?? 'The host';
+  const n = party.members.length;
+
+  useActions([
+    backAction(onBack),
+    ...(host
+      ? PARTY_MODES.map((m) => ({
+          id: `party-mode-${m}`,
+          label: MODES[m].label,
+          icon: MODES[m].icon,
+          ...keysOf(MODES[m].binding),
+          bar: false,
+          run: () => online.setMode(m),
+        }))
+      : []),
+    ...(host
+      ? [
+          {
+            id: 'party-private',
+            label: 'Private',
+            icon: Lock,
+            ...keysOf('party.private'),
+            bar: false,
+            run: () => online.setPrivate(!party.private),
+          },
+        ]
+      : []),
+    ...leaveAction(host),
+  ]);
+
+  /** A word under a mode for this party as it is: who would sit out, or what it needs. */
+  const fit = (m: PartyMode) =>
+    m === 'band' && n > BAND_MAX
+      ? `${n - BAND_MAX} of you would watch`
+      : m === 'showdown' && n < 3
+        ? 'Works with 2, better with more'
+        : n < 2
+          ? 'Waiting for friends to join'
+          : '';
+
+  return (
+    <div className="lobby-body party-room">
+      <div className="party-main">
+        <h2 className="label">{host ? 'Pick what to play' : `${hostName} picks what to play`}</h2>
+        <div className="mode-tiles" role="list" data-nav-group="modes">
+          {PARTY_MODES.map((m, i) => {
+            const { label, icon: Icon, cap, who, binding } = MODES[m];
+            const note = fit(m);
+            return (
+              <button
+                key={m}
+                type="button"
+                role="listitem"
+                className="tile mode-tile"
+                data-mode={m}
+                data-action={`party-mode-${m}`}
+                data-autofocus={i === 0 && host ? true : undefined}
+                style={{ ['--i' as string]: i }}
+                disabled={!host}
+                onClick={() => online.setMode(m)}
+              >
+                <span className="mode-art" aria-hidden>
+                  <Icon strokeWidth={ICON_STROKE} />
+                </span>
+                <span className="tile-text">
+                  <span className="tile-title">
+                    {label}
+                    {host && <Hint {...keysOf(binding)} {...hints} />}
+                  </span>
+                  <span className="tile-cap">{cap}</span>
+                  <span className="tile-meta">{who}</span>
+                  {note && <span className="tile-meta warn">{note}</span>}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {!host && <p className="hint">You choose your own part and difficulty once the mode is picked.</p>}
+      </div>
+
+      <section className="ready-panel" data-nav-group="ready" aria-label="The party">
+        <PartyCode party={party} host={host} settings={settings} hints={hints} />
+        <Players party={party} me={me} host={host} showReady={false} />
+        <LeaveButton host={host} hints={hints} />
+      </section>
+    </div>
+  );
+}
+
+/* A mode's lobby: the set, its options, and ready up --------------------------------------- */
+
+function ModeLobby({
+  library,
+  playable,
+  setlist,
+  onPick,
+  onStartSong,
+  onPickSongs,
+  settings,
+  onBack,
+  onSettings,
+  s,
+  party,
+  me,
+  have,
+}: PartyProps & { me: Member; have: string[] }) {
+  const hints = useHints(settings);
+  const calibrated = isCalibrated(settings);
+  const [calibrating, setCalibrating] = useState(false);
+  const transfers = useSyncExternalStore(partySongs.subscribe, partySongs.transfers);
+  const pad = hints.mode === 'pad';
+  const host = party.host === s.account!.id;
+  const sd = party.showdown;
+  const mode = party.mode!;
+  const nextIndex = party.songIndex + 1 < party.set.length ? party.songIndex + 1 : 0;
+  const watching = party.phase === 'playing';
+  const serverOn = !!s.info?.partySongs;
+
+  // The host's setlist is the party's set: picked in the library, sent here as it changes. A
+  // Showdown on the server's rotation plays that instead.
+  const setKey = setlist.map((x) => x.id).join(',');
+  const partyKey = party.set.map((x) => x.id).join(',');
+  useEffect(() => {
+    if (!host || sd?.rotation || party.phase !== 'lobby' || setKey === partyKey) return;
+    online.setSet(setlist.map((x): SetSong => ({ id: x.id, title: x.title, artist: x.artist, duration: x.duration })));
+  }, [host, sd?.rotation, party.phase, setKey, partyKey, setlist]);
+
   const choose = (part: Part, difficulty: Difficulty) => {
     onPick({ part, difficulty });
     online.ready(part, difficulty, me.ready, have, calibrated);
   };
   const toggleReady = () => online.ready(me.part, me.difficulty, !me.ready, have, calibrated);
-  const useSetlist = () => {
-    if (!setlist.length) return;
-    online.setSet(setlist.map((x): SetSong => ({ id: x.id, title: x.title, artist: x.artist, duration: x.duration })));
-  };
-  const locked = party.showdown?.part ?? null;
+  const locked = sd?.part ?? null;
   const nextPart = () => !locked && choose(PARTS[(PARTS.indexOf(me.part) + 1) % PARTS.length], me.difficulty);
-  // The host's Showdown switches: each changes one option and keeps the rest.
-  const sd = party.showdown;
-  const setShowdown = (o: Partial<ShowdownOptions> | null) =>
-    online.setShowdown(o === null ? null : { hits: true, part: null, rotation: false, ...sd, ...o });
-  const toggleShowdown = () => setShowdown(sd ? null : {});
-  const toggleHits = () => sd && setShowdown({ hits: !sd.hits });
-  const toggleOnePart = () => sd && setShowdown({ part: sd.part ? null : me.part });
-  const toggleRotation = () => sd && setShowdown({ rotation: !sd.rotation });
-  const toggleBand = () => online.setBand(!party.band);
-  const togglePrivate = () => online.setPrivate(!party.private);
-  const watching = party.phase === 'playing';
   const nextDifficulty = () => choose(me.part, DIFFICULTIES[(DIFFICULTIES.indexOf(me.difficulty) + 1) % DIFFICULTIES.length]);
+  // The host's Showdown switches: each changes one option and keeps the rest.
+  const setShowdown = (o: Partial<ShowdownOptions>) => sd && online.setShowdown({ ...sd, ...o });
+  const toggleHits = () => setShowdown({ hits: !sd?.hits });
+  const toggleOnePart = () => setShowdown({ part: sd?.part ? null : me.part });
+  const toggleRotation = () => setShowdown({ rotation: !sd?.rotation });
+  const changeMode = () => online.setMode(null);
+
   const everyoneReady = party.members.every((m) => m.ready || !m.connected);
   const nextSong = party.set[nextIndex];
-  const canStart = host && party.phase !== 'playing' && !!nextSong && playable(nextSong.id);
+  const canStart = host && !watching && !!nextSong && playable(nextSong.id);
+  const total = formatTime(party.set.reduce((t, x) => t + x.duration, 0));
 
   useActions([
     backAction(onBack),
-    { id: 'party-ready', label: me.ready ? 'Not ready' : 'Ready', icon: Check, ...keysOf('party.ready'), primary: !host, run: toggleReady },
+    {
+      id: 'party-ready',
+      label: me.ready ? 'Not ready' : 'Ready',
+      icon: Check,
+      ...keysOf('party.ready'),
+      bar: false,
+      primary: !host,
+      run: toggleReady,
+    },
     { id: 'party-part', label: 'Next part', icon: PART_ICON[me.part], ...keysOf('party.part'), bar: false, run: nextPart },
     { id: 'party-difficulty', label: 'Next difficulty', icon: Gauge, ...keysOf('party.difficulty'), bar: false, run: nextDifficulty },
     ...(host
       ? [
-          { id: 'party-setlist', label: 'Play my setlist', icon: ListMusic, ...keysOf('party.setlist'), bar: false, run: useSetlist },
-          { id: 'party-showdown', label: 'Showdown', icon: Swords, ...keysOf('party.showdown'), bar: false, run: toggleShowdown },
-          { id: 'party-band', label: 'Band', icon: Users, ...keysOf('party.band'), bar: false, run: toggleBand },
-          { id: 'party-private', label: 'Private', icon: Lock, ...keysOf('party.private'), bar: false, run: togglePrivate },
+          ...(sd?.rotation
+            ? []
+            : [
+                {
+                  id: 'party-pick-songs',
+                  label: 'Pick songs',
+                  icon: ListMusic,
+                  ...keysOf('party.pickSongs'),
+                  bar: false,
+                  run: onPickSongs,
+                },
+              ]),
+          { id: 'party-change-mode', label: 'Other mode', icon: Undo2, ...keysOf('party.changeMode'), bar: false, run: changeMode },
           ...(sd
             ? [
                 { id: 'party-hits', label: 'Hits', icon: Crosshair, ...keysOf('party.hits'), bar: false, run: toggleHits },
@@ -604,129 +948,157 @@ function PartyLobby({
     ...(watching
       ? [{ id: 'party-cheer', label: 'Cheer', icon: Megaphone, ...keysOf('party.cheer'), bar: false, run: () => online.cheer() }]
       : []),
-    // The host ends the party for everyone, so they hold it (LeaveButton); the others leave with a press.
-    ...(host
-      ? []
-      : [
-          {
-            id: 'party-leave',
-            label: 'Leave the party',
-            icon: LogOut,
-            ...keysOf('party.leave'),
-            sfx: 'back',
-            run: () => online.leaveParty(),
-          },
-        ]),
+    ...leaveAction(host),
   ]);
+
+  const partRow = useSlide<HTMLDivElement>(me.part);
+  const diffRow = useSlide<HTMLDivElement>(me.difficulty);
 
   return (
     <div className="lobby-body party-lobby">
       <div className="party-main">
-        <section className="party-code" aria-label="Party code">
-          <span className="label">Party code</span>
-          <span className="display party-code-text">{party.code}</span>
-          <span className="dim">
-            Friends on this server join with it.
-            {party.private
-              ? ' Private: never offered on Discord.'
-              : settings.discordJoin
-                ? ' Your Discord friends can join from your status.'
-                : ''}
-          </span>
-          {host && (
-            <button type="button" className="btn small party-private" data-action="party-private" onClick={togglePrivate}>
-              <Hint {...keysOf('party.private')} {...hints} />
-              <Lock strokeWidth={ICON_STROKE} aria-hidden />
-              {party.private ? 'Private · make it open' : 'Make it private'}
-            </button>
-          )}
-        </section>
-
-        <h2 className="label party-set-head">
-          The set
+        <div className="party-set-head">
+          <h2 className="label">
+            {sd?.rotation ? 'The server’s rotation' : 'The set'}
+            {party.set.length > 0 && (
+              <span className="label-note">
+                {party.set.length} {party.set.length === 1 ? 'song' : 'songs'}
+                {total && ` · ${total}`}
+              </span>
+            )}
+          </h2>
           {host && !sd?.rotation && (
-            <button type="button" className="btn small" data-action="party-setlist" disabled={!setlist.length} onClick={useSetlist}>
-              <Hint {...keysOf('party.setlist')} {...hints} />
+            <button type="button" className="btn small" data-action="party-pick-songs" onClick={onPickSongs}>
+              <Hint {...keysOf('party.pickSongs')} {...hints} />
               <ListMusic strokeWidth={ICON_STROKE} aria-hidden />
-              {setlist.length ? 'Play my setlist' : 'Your setlist is empty'}
+              Pick songs
             </button>
           )}
-        </h2>
+        </div>
         {party.set.length === 0 ? (
-          <p className="hint">
-            {host ? 'Pick songs into your setlist in the library, then play it here.' : 'The host is picking the set.'}
-          </p>
+          <div className="set-card party-empty">
+            <span className="slot-num" aria-hidden>
+              <ListMusic strokeWidth={ICON_STROKE} />
+            </span>
+            <span className="song-text">
+              <span className="song-title">{host ? 'No songs yet' : 'The host is picking the songs'}</span>
+              <span className="song-artist">
+                {host
+                  ? 'Pick up to four from your library. Players who lack one get it from you through the server.'
+                  : 'Songs you lack come to you by themselves.'}
+              </span>
+            </span>
+          </div>
         ) : (
           <ol className="set-cards" aria-label="The party’s set">
-            {party.set.map((song, i) => {
-              const mine = library.get(song.id);
-              const done = party.results.some((r) => r.songIndex === i);
-              return (
-                <li key={song.id} className={`set-card ${has(song.id) ? '' : 'skipped'}`} style={{ ['--i' as string]: i }}>
-                  <span className="slot-num" aria-hidden>
-                    {i + 1}
-                  </span>
-                  <Cover blob={mine?.cover} title={song.title} />
-                  <span className="song-text">
-                    <span className="song-title">{song.title}</span>
-                    <span className="song-artist">
-                      {song.artist}
-                      {song.duration > 0 && ` · ${formatTime(song.duration)}`}
-                    </span>
-                    <span className="set-notes">
-                      {!has(song.id) ? (
-                        <span className="warn">
-                          Missing: you sit this song out unless you get it.{' '}
-                          <button type="button" className="btn small" onClick={() => onGetSong(song.id)}>
-                            Get it
-                          </button>
-                        </span>
-                      ) : (
-                        `${party.members.filter((m) => m.have.includes(song.id)).length} of ${party.members.length} have it`
-                      )}
-                    </span>
-                  </span>
-                  <span className="set-best">
-                    {done ? <span className="dim">Played</span> : i === nextIndex ? <span>Next</span> : null}
-                  </span>
-                </li>
-              );
-            })}
+            {party.set.map((song, i) => (
+              <SetCard
+                key={song.id}
+                song={song}
+                i={i}
+                party={party}
+                mine={library.get(song.id)}
+                next={!watching && i === nextIndex}
+                serverOn={serverOn}
+                transfer={transfers[song.id]}
+              />
+            ))}
           </ol>
         )}
 
-        <BandPanel party={party} host={host} settings={settings} onToggle={toggleBand} />
-        <ShowdownPanel
-          party={party}
-          host={host}
-          me={me}
-          settings={settings}
-          on={{ toggleShowdown, toggleHits, toggleOnePart, toggleRotation }}
-        />
+        {mode === 'showdown' && sd && (
+          <ShowdownOptionsPanel
+            party={party}
+            host={host}
+            me={me}
+            settings={settings}
+            hints={hints}
+            on={{ toggleHits, toggleOnePart, toggleRotation }}
+          />
+        )}
+        {mode === 'band' && <BandNotes party={party} />}
+        <Players party={party} me={me} host={host} showReady />
       </div>
 
-      <section className="ready-panel" data-nav-group="ready" aria-label="Players and your choices">
-        <h2 className="label">
-          <Users strokeWidth={ICON_STROKE} aria-hidden /> Players · {party.members.length}
+      <section className="ready-panel" data-nav-group="ready" aria-label="Your part and difficulty">
+        {watching && <PartyBoardPanel s={s} party={party} hints={hints} />}
+        <h2 className="label" id="party-part-label">
+          Your part
         </h2>
-        <ul className="party-members">
-          {party.members.map((m) => (
-            <MemberLine
-              key={m.id}
-              m={m}
-              host={m.id === party.host}
-              me={m.id === me.id}
-              setSize={party.set.length}
-              onRemove={host && m.id !== me.id ? () => online.kick(m.id) : undefined}
-            />
-          ))}
-        </ul>
+        <div className="pick-line">
+          {pad && (
+            <span className="pick-hint" aria-hidden>
+              <PadGlyph input={keysOf('party.part').pad ?? 'b3'} style={hints.style} />
+            </span>
+          )}
+          <div className="part-row slide" ref={partRow} role="radiogroup" aria-labelledby="party-part-label">
+            <span className="sel" aria-hidden />
+            {PARTS.map((p) => {
+              const Icon = PART_ICON[p];
+              const on = me.part === p;
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  data-on={on}
+                  className={`choice part ${on ? 'on' : ''}`}
+                  disabled={!!locked && p !== locked}
+                  onClick={() => choose(p, me.difficulty)}
+                >
+                  <Icon strokeWidth={ICON_STROKE} aria-hidden />
+                  <span>{PART_LABEL[p]}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <h2 className="label" id="party-diff-label">
+          Difficulty
+        </h2>
+        <div className="pick-line">
+          {pad && (
+            <span className="pick-hint" aria-hidden>
+              <PadGlyph input={keysOf('party.difficulty').pad ?? 'b2'} style={hints.style} />
+            </span>
+          )}
+          <div className="diff-row slide" ref={diffRow} role="radiogroup" aria-labelledby="party-diff-label">
+            <span className="sel" aria-hidden />
+            {DIFFICULTIES.map((d) => {
+              const on = me.difficulty === d;
+              return (
+                <button
+                  key={d}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  data-on={on}
+                  className={`choice diff ${on ? 'on' : ''}`}
+                  onClick={() => choose(me.part, d)}
+                >
+                  <Pips difficulty={d} />
+                  <span>{DIFFICULTY_LABEL[d]}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <p className="lane-info">
+          <span className="dim">
+            {locked
+              ? `Everyone plays ${PART_LABEL[locked].toLowerCase()} in this Showdown.`
+              : mode === 'band'
+                ? 'Each part is played once: if yours is taken, you get one nobody has.'
+                : 'A song without your part is played on one it has.'}
+          </span>
+        </p>
         {!calibrated && (
           <p className="hint party-calibrate">
-            Scores are compared here, so your audio offset matters: it was never calibrated on this output.
+            Scores are compared here, and your audio offset was never calibrated on this output.
             <button type="button" className="btn small" onClick={() => setCalibrating(true)}>
               <Gauge strokeWidth={ICON_STROKE} aria-hidden />
-              Calibrate now
+              Calibrate
             </button>
           </p>
         )}
@@ -739,81 +1111,33 @@ function PartyLobby({
           />
         )}
 
-        <h2 className="label">Your part</h2>
-        <div className="pick-line">
-          {pad && (
-            <span className="pick-hint" aria-hidden>
-              <PadGlyph input={keysOf('party.part').pad ?? 'b3'} style={hints.style} />
-            </span>
-          )}
-          <div className="part-row" role="radiogroup" aria-label="Part">
-            {PARTS.map((p) => {
-              const Icon = PART_ICON[p];
-              return (
-                <button
-                  key={p}
-                  type="button"
-                  role="radio"
-                  aria-checked={me.part === p}
-                  className={`choice part ${me.part === p ? 'on' : ''}`}
-                  disabled={!!locked && p !== locked}
-                  onClick={() => choose(p, me.difficulty)}
-                >
-                  <Icon strokeWidth={ICON_STROKE} aria-hidden />
-                  <span>{PART_LABEL[p]}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <h2 className="label">Difficulty</h2>
-        <div className="pick-line">
-          {pad && (
-            <span className="pick-hint" aria-hidden>
-              <PadGlyph input={keysOf('party.difficulty').pad ?? 'b2'} style={hints.style} />
-            </span>
-          )}
-          <div className="diff-row" role="radiogroup" aria-label="Difficulty">
-            {DIFFICULTIES.map((d) => (
-              <button
-                key={d}
-                type="button"
-                role="radio"
-                aria-checked={me.difficulty === d}
-                className={`choice diff ${me.difficulty === d ? 'on' : ''}`}
-                onClick={() => choose(me.part, d)}
-              >
-                <Pips difficulty={d} />
-                <span>{DIFFICULTY_LABEL[d]}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-        <p className="hint">
-          {locked
-            ? `This Showdown is played on ${PART_LABEL[locked].toLowerCase()} only.`
-            : 'A song without your part is played on one it has.'}
-        </p>
-
-        <button type="button" className={`btn wide ${me.ready ? '' : 'primary'}`} data-action="party-ready" onClick={toggleReady}>
+        <button
+          type="button"
+          className={`btn wide ${me.ready ? 'is-ready' : host ? '' : 'primary'}`}
+          data-action="party-ready"
+          onClick={toggleReady}
+        >
           <Hint {...keysOf('party.ready')} {...hints} />
           <Check strokeWidth={ICON_STROKE} aria-hidden />
-          {me.ready ? 'Ready · press again if you are not' : 'I’m ready'}
+          {me.ready ? 'Ready' : 'I’m ready'}
+          {me.ready && <span className="btn-note">Press again if you are not</span>}
         </button>
 
         {host ? (
           <HoldButton
-            label={nextSong ? `Start song ${nextIndex + 1}: ${nextSong.title}` : 'Start'}
+            label={nextSong ? `Start ${nextSong.title}` : 'Start'}
             hint={
-              !nextSong
-                ? 'Pick a set first.'
-                : !playable(nextSong.id)
-                  ? 'You need this song, with notes, to start it: everyone plays your charts.'
-                  : everyoneReady
-                    ? hints.mode === 'keyboard'
-                      ? 'Hold Enter to start'
-                      : 'Hold to start'
-                    : 'Not everyone is ready. Hold to start anyway.'
+              watching
+                ? 'A song is playing.'
+                : !nextSong
+                  ? 'Pick the songs first.'
+                  : !playable(nextSong.id)
+                    ? 'You need this song, with notes, to start it: everyone plays your charts.'
+                    : everyoneReady
+                      ? hints.mode === 'keyboard'
+                        ? 'Hold Enter to start'
+                        : 'Hold to start'
+                      : 'Not everyone is ready. Hold to start anyway.'
             }
             disabled={!canStart}
             glyph={pad ? <PadGlyph input={confirmInput(hints.style)} style={hints.style} /> : undefined}
@@ -821,195 +1145,219 @@ function PartyLobby({
             onComplete={() => onStartSong(nextIndex)}
           />
         ) : (
-          <p className="hint">
+          <p className="hint party-wait">
             <Crown strokeWidth={ICON_STROKE} aria-hidden /> {party.members.find((m) => m.id === party.host)?.name ?? 'The host'} starts each
-            song.
+            song{everyoneReady ? '.' : ' once everyone is ready.'}
           </p>
         )}
-        {watching && <PartyBoardPanel s={s} party={party} hints={hints} />}
+        <div className="party-row party-foot">
+          {host && (
+            <button type="button" className="btn small" data-action="party-change-mode" disabled={watching} onClick={changeMode}>
+              <Hint {...keysOf('party.changeMode')} {...hints} />
+              <Undo2 strokeWidth={ICON_STROKE} aria-hidden />
+              Other mode
+            </button>
+          )}
+          <span className="party-code-chip" title="The party’s code">
+            {party.code}
+          </span>
+        </div>
         <LeaveButton host={host} hints={hints} />
       </section>
     </div>
   );
 }
 
-/** The band switch for the host, what it means, and a word when two players are on one part. */
-function BandPanel({ party, host, settings, onToggle }: { party: PartyState; host: boolean; settings: Settings; onToggle(): void }) {
-  const hints = useHints(settings);
-  const parts = party.members.map((m) => m.part);
-  const twice = PARTS.filter((p) => parts.filter((x) => x === p).length > 1);
-  return (
-    <section className="ready-panel" aria-label="Band">
-      <h2 className="label">
-        <Users strokeWidth={ICON_STROKE} aria-hidden /> Band{party.band ? ' · on' : ''}
-      </h2>
-      <p className="hint">
-        Up to four, one on each part, for one band score. Two overdrives in one bar double everyone’s multiplier, and a player who misses{' '}
-        {DROP_MISSES} notes in a row drops out until a bandmate completes an overdrive phrase.
-      </p>
-      {party.band && party.members.length > BAND_MAX && (
-        <p className="warn">A band has {BAND_MAX} players at most: the others can watch.</p>
-      )}
-      {party.band && twice.length > 0 && (
-        <p className="warn">
-          Two of you are on {twice.map((p) => PART_LABEL[p].toLowerCase()).join(' and ')}: each needs a part of their own.
-        </p>
-      )}
-      {host && (
-        <div className="party-row">
-          <button type="button" className="btn small" data-action="party-band" onClick={onToggle}>
-            <Hint {...keysOf('party.band')} {...hints} />
-            {party.band ? 'Make it a plain party' : 'Make it a band'}
-          </button>
-        </div>
-      )}
-    </section>
-  );
-}
-
-/**
- * Leaving the party. The host's leaving ends it for everyone, so they hold it (its key too); everyone
- * else leaves with a press.
- */
-function LeaveButton({ host, hints }: { host: boolean; hints: ReturnType<typeof useHints> }) {
-  const key = keysOf('party.leave').kbd;
-  if (host)
-    return (
-      <HoldButton
-        label="End the party"
-        hint={hints.mode === 'keyboard' && key ? `Hold ${keyName(key)} to end it for everyone` : 'Hold to end it for everyone'}
-        tone="danger"
-        holdKey={key}
-        autoFocus={false}
-        glyphStyle={hints.style}
-        onComplete={() => online.leaveParty()}
-      />
+/** One song of the set: who has it, and the song on its way to this player (or from the host). */
+function SetCard({
+  song,
+  i,
+  party,
+  mine,
+  next,
+  serverOn,
+  transfer,
+}: {
+  song: SetSong;
+  i: number;
+  party: PartyState;
+  mine: SongMeta | undefined;
+  next: boolean;
+  serverOn: boolean;
+  transfer: Transfer | undefined;
+}) {
+  const done = party.results.some((r) => r.songIndex === i);
+  const count = party.members.filter((m) => m.have.includes(song.id)).length;
+  let note: React.ReactNode;
+  if (transfer?.state === 'getting')
+    note = (
+      <span className="transfer">
+        <CloudDownload strokeWidth={ICON_STROKE} aria-hidden />
+        Getting it · {Math.round(transfer.done * 100)}%
+        <span className="transfer-bar" style={{ ['--done' as string]: transfer.done }} aria-hidden />
+      </span>
     );
+  else if (transfer?.state === 'sending')
+    note = (
+      <span className="transfer">
+        <CloudUpload strokeWidth={ICON_STROKE} aria-hidden />
+        Sending it to the players who lack it…
+      </span>
+    );
+  else if (transfer?.state === 'failed')
+    note = (
+      <span className="warn">
+        {transfer.message}
+        <button type="button" className="btn small" onClick={() => partySongs.retry(song.id)}>
+          <RefreshCw strokeWidth={ICON_STROKE} aria-hidden />
+          Try again
+        </button>
+      </span>
+    );
+  else if (!mine)
+    note = (
+      <span className="warn">
+        {serverOn
+          ? 'Not in your library yet: it comes from the host’s game, unless they keep their songs to themselves.'
+          : 'Not in your library, and this server does not pass songs on: add it yourself, or you sit it out.'}
+      </span>
+    );
+  else note = count === party.members.length ? 'Everyone has it' : `${count} of ${party.members.length} have it`;
   return (
-    <button type="button" className="btn wide" data-action="party-leave" data-sfx="back" onClick={() => online.leaveParty()}>
-      <Hint kbd={key} {...hints} />
-      <LogOut strokeWidth={ICON_STROKE} aria-hidden />
-      Leave the party
-    </button>
+    <li className={`set-card ${mine ? '' : 'skipped'} ${next ? 'next' : ''}`} style={{ ['--i' as string]: i }}>
+      <span className="slot-num" aria-hidden>
+        {i + 1}
+      </span>
+      <Cover blob={mine?.cover} title={song.title} />
+      <span className="song-text">
+        <span className="song-title">{song.title}</span>
+        <span className="song-artist">
+          {song.artist}
+          {song.duration > 0 && ` · ${formatTime(song.duration)}`}
+        </span>
+        <span className="set-notes">{note}</span>
+      </span>
+      <span className="set-best">{done ? <span className="dim">Played</span> : next ? <span className="next-tag">Next</span> : null}</span>
+    </li>
   );
 }
 
-/** The Showdown's switches for the host, or what they chose for everyone else. */
-function ShowdownPanel({
+/** The Showdown's options: the host switches them, everyone else sees them. */
+function ShowdownOptionsPanel({
   party,
   host,
   me,
   settings,
+  hints,
   on,
 }: {
   party: PartyState;
   host: boolean;
   me: Member;
   settings: Settings;
-  on: { toggleShowdown(): void; toggleHits(): void; toggleOnePart(): void; toggleRotation(): void };
+  hints: Hints;
+  on: { toggleHits(): void; toggleOnePart(): void; toggleRotation(): void };
 }) {
-  const hints = useHints(settings);
-  const sd = party.showdown;
+  const sd = party.showdown!;
   const left = party.members.filter((m) => !m.eliminated).length;
-  const part = sd?.part ? `${PART_LABEL[sd.part]} only` : 'Any part';
-  const switchButton = (id: string, binding: string, label: string, run: () => void) => (
-    <button type="button" className="btn small" data-action={id} onClick={run}>
-      <Hint {...keysOf(binding)} {...hints} />
-      {label}
-    </button>
-  );
+  const onePart = sd.part ?? me.part;
+  const rows: [string, string, string, [string, boolean][], () => void][] = [
+    [
+      'party-hits',
+      'party.hits',
+      'Hits',
+      [
+        ['On', sd.hits],
+        ['Off', !sd.hits],
+      ],
+      on.toggleHits,
+    ],
+    [
+      'party-one-part',
+      'party.onePart',
+      'Parts',
+      [
+        ['Any part', !sd.part],
+        [`${PART_LABEL[onePart]} only`, !!sd.part],
+      ],
+      on.toggleOnePart,
+    ],
+    [
+      'party-rotation',
+      'party.rotation',
+      'Songs',
+      [
+        ['The host’s', !sd.rotation],
+        ['Server rotation', sd.rotation],
+      ],
+      on.toggleRotation,
+    ],
+  ];
   return (
-    <section className="ready-panel showdown-panel" aria-label="Showdown">
+    <section className="ready-panel showdown-panel" aria-label="Showdown options">
       <h2 className="label">
-        <Swords strokeWidth={ICON_STROKE} aria-hidden /> Showdown{sd ? ` · ${left} of ${party.members.length} in` : ''}
+        <Swords strokeWidth={ICON_STROKE} aria-hidden /> Showdown
+        {party.songIndex >= 0 && (
+          <span className="label-note">
+            {left} of {party.members.length} still in
+          </span>
+        )}
       </h2>
       <p className="hint">
-        {sd
-          ? 'Scores count as a share of each chart’s best, and the lowest players go out after each song.' +
-            (sd.hits ? ' Your overdrive button strikes the player just above you.' : '')
-          : 'A battle over the set: the lowest players go out after each song, and overdrive can strike the player above.'}
+        Scores count as a share of each chart’s best, and the lowest go out after each song.
+        {sd.hits &&
+          ` Your overdrive button strikes the player just above you; their hits reach you as ${settings.showdownHits === 'drain' ? 'Drain (calm)' : 'Fog'} (Settings → Online).`}
       </p>
-      {host ? (
-        <div className="party-row">
-          {switchButton('party-showdown', 'party.showdown', sd ? 'Make it a plain party' : 'Make it a Showdown', on.toggleShowdown)}
-          {sd && switchButton('party-hits', 'party.hits', sd.hits ? 'Hits: on' : 'Hits: off', on.toggleHits)}
-          {sd &&
-            switchButton(
-              'party-one-part',
-              'party.onePart',
-              sd.part ? `Parts: ${PART_LABEL[sd.part].toLowerCase()} only` : 'Parts: any',
-              on.toggleOnePart,
-            )}
-          {sd &&
-            switchButton(
-              'party-rotation',
-              'party.rotation',
-              sd.rotation ? 'Set: the server’s rotation' : 'Set: the host’s',
-              on.toggleRotation,
-            )}
-        </div>
-      ) : (
-        sd && (
-          <p className="dim">
-            Hits {sd.hits ? 'on' : 'off'} · {part} · {sd.rotation ? 'the server’s rotation' : 'the host’s set'}
-          </p>
-        )
-      )}
-      {host && sd && !sd.part && <p className="dim">One part only plays everyone on your part, {PART_LABEL[me.part].toLowerCase()}.</p>}
-      {sd?.hits && (
-        <p className="dim">
-          Hits reach you as {settings.showdownHits === 'drain' ? 'Drain (calm hits)' : 'Fog'}. Settings → Online changes it.
-        </p>
-      )}
+      <div className="option-rows">
+        {rows.map(([id, binding, label, choices, run]) => (
+          <div key={id} className="option-row">
+            <span className="option-label">
+              {label}
+              {host && <Hint {...keysOf(binding)} {...hints} />}
+            </span>
+            <div className="choice-pair" role="radiogroup" aria-label={label}>
+              {choices.map(([text, chosen]) => (
+                <button
+                  key={text}
+                  type="button"
+                  role="radio"
+                  aria-checked={chosen}
+                  className={`choice ${chosen ? 'on' : ''}`}
+                  data-action={chosen ? undefined : id}
+                  disabled={!host}
+                  onClick={() => !chosen && run()}
+                >
+                  {text}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
 
-function MemberLine({
-  m,
-  host,
-  me,
-  setSize,
-  onRemove,
-}: {
-  m: Member;
-  host: boolean;
-  me: boolean;
-  setSize: number;
-  /** The host removes this player from the party (absent for the host's own line, and for everyone else). */
-  onRemove?: () => void;
-}) {
-  const Icon = PART_ICON[m.part];
-  const missing = setSize - m.have.length;
+/** What a band is, and what keeps this one from playing as it is. */
+function BandNotes({ party }: { party: PartyState }) {
+  const parts = party.members.map((m) => m.part);
+  const twice = PARTS.filter((p) => parts.filter((x) => x === p).length > 1);
   return (
-    <li className={`party-member ${me ? 'me' : ''} ${m.connected ? '' : 'gone'}`}>
-      <span className={`party-tick ${m.ready ? 'on' : ''}`} aria-label={m.ready ? 'Ready' : 'Not ready'}>
-        {m.ready && <Check strokeWidth={ICON_STROKE} aria-hidden />}
-      </span>
-      <span className="party-name">
-        {m.name}
-        {host && <Crown strokeWidth={ICON_STROKE} aria-label="Host" />}
-        {me && <span className="dim"> · you</span>}
-      </span>
-      <span className="party-pick">
-        <Icon strokeWidth={ICON_STROKE} aria-hidden />
-        {PART_LABEL[m.part]} · {DIFFICULTY_LABEL[m.difficulty]}
-      </span>
-      <span className="dim party-state">
-        {[
-          !m.connected ? 'Reconnecting…' : '',
-          missing > 0 && setSize > 0 ? `Missing ${missing} ${missing === 1 ? 'song' : 'songs'}` : '',
-          m.calibrated ? 'Calibrated' : 'Not calibrated',
-        ]
-          .filter(Boolean)
-          .join(' · ')}
-      </span>
-      {onRemove && (
-        <button type="button" className="btn small party-remove" aria-label={`Remove ${m.name} from the party`} onClick={onRemove}>
-          <UserMinus strokeWidth={ICON_STROKE} aria-hidden />
-        </button>
+    <section className="ready-panel" aria-label="Band">
+      <h2 className="label">
+        <Users strokeWidth={ICON_STROKE} aria-hidden /> Band
+      </h2>
+      <p className="hint">
+        One band score for everyone. Two overdrives in one bar double everyone’s multiplier, and a player who misses {DROP_MISSES} notes in
+        a row drops out until a bandmate completes an overdrive phrase.
+      </p>
+      {party.members.length > BAND_MAX && <p className="warn">A band has {BAND_MAX} players at most: the others watch.</p>}
+      {twice.length > 0 && (
+        <p className="warn">
+          Two of you picked {twice.map((p) => PART_LABEL[p].toLowerCase()).join(' and ')}: one of you gets a part nobody has.
+        </p>
       )}
-    </li>
+    </section>
   );
 }
 
@@ -1111,19 +1459,7 @@ function PartyBoardPanel({ s, party, hints }: { s: OnlineState; party: PartyStat
 
 /* After a song ----------------------------------------------------------------------------- */
 
-function PartyResults({
-  party,
-  s,
-  settings,
-  onBack,
-  onStartSong,
-}: {
-  party: PartyState;
-  s: OnlineState;
-  settings: Settings;
-  onBack(): void;
-  onStartSong(i: number): void;
-}) {
+function PartyResults({ party, s, settings, onBack, onStartSong }: PartyProps & { me: Member }) {
   const hints = useHints(settings);
   const host = party.host === s.account!.id;
   const results = party.results.find((r) => r.songIndex === party.songIndex);
@@ -1140,19 +1476,7 @@ function PartyResults({
       ? [{ id: 'party-next', label: 'Next song', icon: SkipForward, ...keysOf('party.next'), primary: true, run: next }]
       : []),
     ...(host ? [{ id: 'party-lobby', label: 'Back to the lobby', icon: Undo2, ...keysOf('party.lobby'), run: lobby }] : []),
-    // The host ends the party for everyone, so they hold it (LeaveButton); the others leave with a press.
-    ...(host
-      ? []
-      : [
-          {
-            id: 'party-leave',
-            label: 'Leave the party',
-            icon: LogOut,
-            ...keysOf('party.leave'),
-            sfx: 'back',
-            run: () => online.leaveParty(),
-          },
-        ]),
+    ...leaveAction(host),
   ]);
 
   return (

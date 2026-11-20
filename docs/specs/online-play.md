@@ -33,6 +33,13 @@ Decisions made while building, which override what follows:
   party's code and server; Discord greys the button when the party is full. A set under way keeps the button: a
   friend who joins mid-set sits the current song out and plays from the next. Discord starts the game through the
   `discord-<application id>` scheme, registered at start on Windows and Linux (on macOS the game must be running).
+- **A party is its players first, then a mode:** a new party has no mode. Its room shows the players and three mode
+  tiles (Versus, Band, Showdown); the host picks one, and the mode's lobby has the set, its options and ready up.
+  The host can go back to the room for another mode. The host's setlist is the party's set (picked in the library).
+- **A party's songs travel by themselves:** replacing "Get it" and asking the host. When a player in the party
+  lacks a song of the set, the host's game sends it to the server (unless the host turned that off), which keeps
+  it as a cache for that party's players only; every game without it downloads it and adds it to the library. On
+  by default; the owner can turn it off (`partySongs`). Not the shared library: nothing lists these songs.
 - **Later, not now:** the in-game server list (3.2b), local sessions hosted by the desktop app (level 1), and its
   STUN fallback.
 

@@ -80,7 +80,7 @@ export interface Settings {
   showdownHits: 'fog' | 'drain';
   /** Discord friends can join this player's session or party from their status (never a private one). */
   discordJoin: boolean;
-  /** The songs of a session this player hosts can be sent to friends who lack them (each accepts each song). */
+  /** The songs of a party this player hosts go to the players who lack them, through the server (src/net/partySongs.ts). */
   shareSongs: boolean;
   /** The output device the offset was last calibrated on ('' for the system default), or null: never calibrated. */
   calibratedOn: string | null;

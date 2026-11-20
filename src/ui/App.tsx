@@ -92,7 +92,8 @@ import { hashBytes } from '../storage/hash';
 import { writeSoundwave } from '../storage/soundwaveFile';
 import { decodeRun, encodeRun } from '../net/runs';
 import { replayResults } from '../game/replay';
-import { joinSecret, online, parseInvite, parseJoinSecret, type PartyStart, type SongEvent } from '../net/client';
+import { joinSecret, online, parseInvite, parseJoinSecret, type PartyStart } from '../net/client';
+import { partySongs } from '../net/partySongs';
 import { PARTY_MAX, type SharedSong, type WireChart } from '../net/protocol';
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { installUiSounds } from './uiSounds';
@@ -119,7 +120,8 @@ interface Run {
 
 type View =
   | { name: 'home' }
-  | { name: 'library' }
+  /** `from`: the party, when its host picks the party's songs here (Back and Ready return there). */
+  | { name: 'library'; from?: 'party' }
   | LobbyView
   /** Playing together on a server: signing in, the party's lobby and its results. */
   | { name: 'party' }
@@ -1121,39 +1123,25 @@ export function App() {
     if (!got.length) throw new Error(`"${song.title}" could not be added.`);
   };
   const shareSong = async (song: SongMeta) => void (await online.shareSong(await songFile(song.id)));
-  /** A party's song this player lacks: from the server's library if it is there, else asked of the host. */
-  const getPartySong = (id: string) => {
-    const set = online.snapshot().party?.set.find((x) => x.id === id);
-    if (!set) return;
-    void getShared(set).then(
-      () => toast(`"${set.title}" is in your library.`),
-      () => {
-        online.requestSong(id);
-        toast(`Asked the host for "${set.title}".`);
-      },
-    );
+  // A party's songs reach every player by themselves: the host's game sends a song someone lacks,
+  // and the games without it download it from the server (src/net/partySongs.ts).
+  const partyAdd = useRef(async (_: File) => {});
+  partyAdd.current = async (file) => {
+    const got = await importFiles([file]);
+    if (!got.length) throw new Error(`"${file.name.replace(/\.soundwave$/, '')}" could not be added.`);
+    toast(`Got "${got[0].title}" for the party.`);
   };
-  // The host is asked for a song: shared to the server for that player, if this player shares
-  // songs and the server takes them. A song asked for that is ready is downloaded.
-  const songEventRef = useRef<(e: SongEvent) => void>(() => {});
-  songEventRef.current = (e) => {
-    const title = online.snapshot().party?.set.find((x) => x.id === e.songId)?.title ?? 'the song';
-    if (e.type === 'song-ready') {
-      if (!e.ok) return toast(`The host could not send "${title}". Add it to your library yourself to play it.`);
-      return void getShared({ id: e.songId, title }).then(
-        () => toast(`"${title}" is in your library.`),
-        (err: Error) => toast(err.message),
-      );
-    }
-    const song = byId.get(e.songId);
-    const can = settingsRef.current.shareSongs && online.snapshot().info?.sharing === 'songs' && !!song;
-    if (!can) return online.songSent(e.songId, e.from, false);
-    void shareSong(song).then(
-      () => (online.songSent(e.songId, e.from, true), toast(`Sent "${song.title}" to ${e.name}.`)),
-      () => online.songSent(e.songId, e.from, false),
-    );
-  };
-  useEffect(() => online.onSong((e) => songEventRef.current(e)), []);
+  useEffect(() => {
+    partySongs.update({
+      party: onlineState.party,
+      me: onlineState.account?.id,
+      serverOn: !!onlineState.info?.partySongs,
+      share: settings.shareSongs,
+      has: (id) => byId.has(id),
+      file: (id) => songFile(id),
+      add: (file) => partyAdd.current(file),
+    });
+  }, [onlineState.party, onlineState.account, onlineState.info, settings.shareSongs, byId]);
 
   /** A party's song is over: the score is kept here as any other, and the party gets it. */
   const finishPartySong = (run: Run, results: Results, inputs?: ReplayInputs) => {
@@ -1504,8 +1492,8 @@ export function App() {
           onCurrent={setHighlight}
           onToggle={toggle}
           onDetails={setSheet}
-          onReady={() => setView({ name: 'lobby', ids: setlist, from: 'library' })}
-          onBack={goHome}
+          onReady={() => setView(view.from === 'party' ? { name: 'party' } : { name: 'lobby', ids: setlist, from: 'library' })}
+          onBack={view.from === 'party' ? () => setView({ name: 'party' }) : goHome}
           onAdd={addSongs}
           actions={songActions}
         />
@@ -1539,7 +1527,7 @@ export function App() {
           onBoards={() => setView({ name: 'boards' })}
           onSongs={() => setView({ name: 'songs' })}
           onAvatar={() => setView({ name: 'avatar' })}
-          onGetSong={getPartySong}
+          onPickSongs={() => setView({ name: 'library', from: 'party' })}
           onSettings={(patch) => updateSettings({ ...settings, ...patch })}
         />
       );

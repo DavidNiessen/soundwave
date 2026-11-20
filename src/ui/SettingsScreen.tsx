@@ -1743,8 +1743,8 @@ function onlineSections(s: Settings, set: (patch: Partial<Settings>) => void): S
         },
         onOff(
           'shareSongs',
-          'Share my songs with the session',
-          'In a session you host, a friend without one of the set’s songs can get it from you, audio, charts and all. They accept each song first.',
+          'Send my party’s songs to players who lack them',
+          'In a party you host, a song a player does not have goes to them through the server, audio, charts and all, so they can play it. The server keeps it for a while, for your party’s players only. Off: players without a song sit it out.',
           s.shareSongs,
           (v) => set({ shareSongs: v }),
         ),
