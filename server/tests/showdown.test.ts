@@ -131,7 +131,7 @@ describe('Showdown', () => {
     say(2, { type: 'strike', songIndex: 0, charge: 1 });
     expect(last(2, 'struck')).toMatchObject({ target: 'p1' });
     const hit = last(1, 'hit')!;
-    expect(hit).toMatchObject({ from: 'Player 2', ms: 8000 });
+    expect(hit).toMatchObject({ from: 'Player 2', ms: 14000 });
     expect(hit.at).toBe(7000 + HIT_WARNING_MS);
     // Everyone sees the Strike fly, the players it is not about too.
     for (const i of [0, 1, 2]) expect(last(i, 'strikeFired')).toMatchObject({ from: 'p2', to: 'p1', at: hit.at });
@@ -152,19 +152,19 @@ describe('Showdown', () => {
     progress(1, 200);
     progress(2, 100);
     say(2, { type: 'strike', songIndex: 0, charge: 0.25 });
-    expect(last(1, 'hit')).toMatchObject({ ms: 3000 });
+    expect(last(1, 'hit')).toMatchObject({ ms: 6000 });
     // p1 is under the hit: p2's next Strike goes on up, to p0.
     say(2, { type: 'strike', songIndex: 0, charge: 0.25 });
     expect(last(2, 'struck')).toMatchObject({ target: 'p0' });
     // Both are under a hit or protected: nobody can be hit, the charge is not spent.
-    advance(HIT_WARNING_MS + 3000 + HIT_PROTECTION_MS - 100);
+    advance(HIT_WARNING_MS + 6000 + HIT_PROTECTION_MS - 100);
     say(2, { type: 'strike', songIndex: 0, charge: 0.25 });
     expect(last(2, 'struck')).toMatchObject({ target: null });
     // Protection over, still within 30 s of the first hit: half as long.
     advance(200);
     say(2, { type: 'strike', songIndex: 0, charge: 1 });
     expect(last(2, 'struck')).toMatchObject({ target: 'p1' });
-    expect(last(1, 'hit')).toMatchObject({ ms: 4000 });
+    expect(last(1, 'hit')).toMatchObject({ ms: 7000 });
   });
 
   it('lets at most two players aim at the same player', () => {
