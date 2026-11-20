@@ -6891,11 +6891,19 @@ a.btn {
 .connect-form .meta-field {
   gap: 0.3rem;
 }
+.connect-input {
+  align-items: stretch;
+}
+.connect-input svg {
+  align-self: center;
+}
+/* The input fills the field's height, so its letters are never cut at the top or bottom. */
 .meta-field .connect-input input {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  padding: 0;
+  padding: 0.55rem 0.2rem;
+  line-height: 1.4;
   background: transparent;
 }
 .meta-field .connect-input input:focus {
