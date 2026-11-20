@@ -1,4 +1,5 @@
 import {
+  Globe,
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
@@ -37,6 +38,7 @@ import { backInput, confirmInput, PAUSE_INPUT, pads, resolveStyle, styleFor, SYS
 import { dualSenseHaptics, menuPulse, Rumbler } from '../input/rumble';
 import { usePads } from '../input/usePads';
 import { Hint, keyName, useActions, useHints } from './actions';
+import { online } from '../net/client';
 import { Calibration } from './Calibration';
 import { Dialog } from './Dialog';
 import { ICON_STROKE } from './icons';
@@ -92,7 +94,7 @@ interface Props {
   onReplaysDeleted?(): void;
 }
 
-type Tab = 'video' | 'audio' | 'game' | 'controller' | 'touch' | 'shortcuts' | 'advanced';
+type Tab = 'video' | 'audio' | 'game' | 'controller' | 'touch' | 'shortcuts' | 'online' | 'advanced';
 const TABS: [Tab, string, LucideIcon][] = [
   ['video', 'Video', Monitor],
   ['audio', 'Audio', Volume2],
@@ -100,6 +102,7 @@ const TABS: [Tab, string, LucideIcon][] = [
   ['controller', 'Controller', Gamepad2],
   ['touch', 'Touch', Hand],
   ['shortcuts', 'Shortcuts', CommandIcon],
+  ['online', 'Online', Globe],
   ['advanced', 'Advanced', SlidersHorizontal],
 ];
 const TAB_KEY = 'soundwave.settings-tab';
@@ -122,6 +125,7 @@ const FIELDS: Record<Tab, readonly (keyof Settings)[]> = {
   controller: ['glyphs', 'rumble', 'rumbleHits', 'rumbleMisses', 'rumbleSustains', 'rumbleOverdrive', 'ps5Haptics'],
   touch: ['touchHaptics', 'touchOverdriveSide'],
   shortcuts: ['keys4', 'keys5', 'overdriveKey', 'pad4', 'pad5', 'padOverdrive', 'bindings'],
+  online: ['displayName', 'postScores', 'discordJoin', 'shareSongs', 'shareLibrary', 'serverSongs'],
   advanced: ['checkUpdates', 'discordStatus'],
 };
 
@@ -557,7 +561,7 @@ export function SettingsScreen({ settings, model, device, onChange, onBack, inSo
         <Calibration
           onDone={(ms) => {
             setCalibrating(false);
-            if (ms !== null) set({ offsetMs: ms });
+            if (ms !== null) set({ offsetMs: ms, calibratedOn: settings.outputDevice });
           }}
         />
       )}
@@ -594,6 +598,7 @@ interface Ctx {
 
 function buildSections(tab: Tab, c: Ctx): Section[] {
   const { settings: s, set } = c;
+  if (tab === 'online') return onlineSections(s, set);
   const toggle = (id: string, label: string, help: string, value: boolean, change: (v: boolean) => void, disabled = false): Row => ({
     kind: 'choice',
     id,
@@ -1692,4 +1697,94 @@ function Detail({ row }: { row: Row }) {
       )}
     </div>
   );
+}
+
+/* ------------------------------------------------------------------------------------------- */
+/* Online (docs/specs/online-play.md, 5.1)                                                      */
+
+function onlineSections(s: Settings, set: (patch: Partial<Settings>) => void): Section[] {
+  const o = online.snapshot();
+  const onOff = (id: keyof Settings & string, label: string, help: string, value: boolean, change: (v: boolean) => void): Row => ({
+    kind: 'choice',
+    id,
+    label,
+    help,
+    value: value ? 'on' : 'off',
+    options: [
+      { value: 'off', label: 'Off' },
+      { value: 'on', label: 'On' },
+    ],
+    set: (v) => change(v === 'on'),
+  });
+  return [
+    {
+      title: 'Playing together',
+      rows: [
+        {
+          kind: 'text',
+          id: 'displayName',
+          label: 'Display name',
+          help: 'The name others see in a session you host or join. A server uses your account’s name instead.',
+          value: s.displayName,
+          set: (v) => set({ displayName: v.slice(0, 24) }),
+        },
+        onOff(
+          'shareSongs',
+          'Send my party’s songs to players who lack them',
+          'In a party you host, a song a player does not have goes to them through the server, audio, charts and all, so they can play it. The server keeps it for a while, for your party’s players only. Off: players without a song sit it out.',
+          s.shareSongs,
+          (v) => set({ shareSongs: v }),
+        ),
+        onOff(
+          'shareLibrary',
+          'Share my songs with the server',
+          'Your songs go to the server you sign in to (where its admin takes songs), so everyone on it finds them in their library. Songs you add later go too. Off: nothing of yours is shared.',
+          s.shareLibrary,
+          (v) => set({ shareLibrary: v }),
+        ),
+        {
+          kind: 'choice',
+          id: 'serverSongs',
+          label: 'Songs from the server',
+          help: 'Stream plays another player’s song (or a party’s song you lack) straight from the server, without keeping it: your library stays yours. Download adds each one to your library, to play it offline later.',
+          value: s.serverSongs,
+          options: [
+            { value: 'stream', label: 'Stream' },
+            { value: 'download', label: 'Download' },
+          ],
+          set: (v) => set({ serverSongs: v as Settings['serverSongs'] }),
+        },
+      ],
+    },
+    {
+      title: 'Server',
+      rows: [
+        {
+          kind: 'info',
+          id: 'serverInfo',
+          label: 'Server',
+          help: 'The Soundwave server you play on, if any.',
+          body: o.account
+            ? `Signed in as ${o.account.name} on ${o.info?.name ?? o.server}. Sign out, save your data or forget the server under Play together.`
+            : o.server
+              ? `${o.info?.name ?? o.server}: not signed in.`
+              : 'No server yet. Connect to one under Play together.',
+        },
+        onOff(
+          'postScores',
+          'Send my scores to the leaderboards',
+          'While you are signed in, every song you finish goes to the server’s leaderboards with its run, which the server judges again to check the score. Off, nothing you play alone is sent.',
+          s.postScores,
+          (v) => set({ postScores: v }),
+        ),
+        onOff(
+          'discordJoin',
+          'Friends can join from Discord',
+          'Your Discord status gets a Join button, so Discord friends can join your session or party in one press. Never shown for a private one.',
+          s.discordJoin,
+          (v) => set({ discordJoin: v }),
+        ),
+      ],
+    },
+  ];
 }

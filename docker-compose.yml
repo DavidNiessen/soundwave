@@ -1,0 +1,39 @@
+# A Soundwave server, for Docker Compose or Coolify (a "Docker Compose" resource pointing at this
+# repository; Coolify reads this file). Everything the server keeps (accounts, scores, shared
+# songs, the party song cache, its signing secret) is in the named volume `soundwave-data`, so it
+# stays across redeploys and updates. Settings: server/README.md.
+services:
+  soundwave:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    environment:
+      # Coolify fills SERVICE_FQDN_SOUNDWAVE_7420 with the domain it gives the service (and routes
+      # it to port 7420); the address goes into invite links. Elsewhere, set SOUNDWAVE_PUBLIC_URL.
+      - SERVICE_FQDN_SOUNDWAVE_7420
+      - SOUNDWAVE_PUBLIC_URL=${SERVICE_FQDN_SOUNDWAVE:-${SOUNDWAVE_PUBLIC_URL:-}}
+      - SOUNDWAVE_NAME=${SOUNDWAVE_NAME:-Soundwave server}
+      - SOUNDWAVE_DESCRIPTION=${SOUNDWAVE_DESCRIPTION:-}
+      # public, password or invite (the default: an invite link lets each friend in).
+      - SOUNDWAVE_MODE=${SOUNDWAVE_MODE:-invite}
+      - SOUNDWAVE_PASSWORD=${SOUNDWAVE_PASSWORD:-}
+      # Behind Coolify's proxy, take players' addresses (for the rate limits) from it.
+      - SOUNDWAVE_TRUST_PROXY=${SOUNDWAVE_TRUST_PROXY:-true}
+      - SOUNDWAVE_SONG_SHARING=${SOUNDWAVE_SONG_SHARING:-off}
+      - SOUNDWAVE_PARTY_SONGS=${SOUNDWAVE_PARTY_SONGS:-true}
+      - SOUNDWAVE_PARTY_CACHE_MB=${SOUNDWAVE_PARTY_CACHE_MB:-4000}
+    volumes:
+      - soundwave-data:/data
+    # Reached through Coolify's proxy; without Coolify, publish it instead: ports: ["7420:7420"].
+    expose:
+      - '7420'
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:7420/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  soundwave-data:

@@ -37,6 +37,8 @@ export interface Action {
 interface Layer {
   id: number;
   actions: Action[];
+  /** Stands aside for a part of the screen that declares the actions itself (see useActions). */
+  passive?: boolean;
 }
 
 const layers: Layer[] = [];
@@ -51,7 +53,10 @@ const subscribe = (fn: () => void) => {
   listeners.add(fn);
   return () => listeners.delete(fn);
 };
-const top = (): Action[] => layers[layers.length - 1]?.actions ?? [];
+const top = (): Action[] => {
+  for (let i = layers.length - 1; i >= 0; i--) if (!layers[i].passive) return layers[i].actions;
+  return [];
+};
 
 /**
  * An action with this id is not an action: its label says what the controller's confirm button does
@@ -65,8 +70,10 @@ const signature = (a: Action[]) =>
 /**
  * Declares the actions of a screen or dialog while it is mounted. The most recently mounted
  * declaration is the live one, so a dialog's actions replace its screen's until it closes.
+ * `passive`: the screen hands its actions to a part of it that declares them itself (mounted, as
+ * a child, before it), so it must not cover that part's.
  */
-export function useActions(actions: Action[]) {
+export function useActions(actions: Action[], opts: { passive?: boolean } = {}) {
   const layer = useRef<Layer | null>(null);
   useLayoutEffect(() => {
     const mine: Layer = { id: nextId++, actions: [] };
@@ -79,8 +86,10 @@ export function useActions(actions: Action[]) {
   }, []);
   useLayoutEffect(() => {
     const mine = layer.current!;
-    const changed = signature(mine.actions) !== signature(actions);
+    const passive = !!opts.passive;
+    const changed = signature(mine.actions) !== signature(actions) || !!mine.passive !== passive;
     mine.actions = actions;
+    mine.passive = passive;
     if (changed) bump();
   });
 }

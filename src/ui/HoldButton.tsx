@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { startSfx } from '../audio/sfx';
 import { confirmInput, pads, type GlyphStyle } from '../input/pads';
+import { isTextField } from '../input/inputMode';
 import { holdRumble } from '../input/rumble';
 
 /** How long the button must be held, ms. */
@@ -14,6 +15,10 @@ interface Props {
   disabled?: boolean;
   /** `danger` for a hold that destroys something. */
   tone?: 'primary' | 'danger';
+  /** A key (a `KeyboardEvent.code`) that holds it from anywhere on the screen, besides Enter and Space on it. */
+  holdKey?: string;
+  /** Takes the focus when its screen opens (the screen's one forward step); false for a second hold on a screen. */
+  autoFocus?: boolean;
   glyphStyle: GlyphStyle;
   onComplete(): void;
 }
@@ -23,7 +28,7 @@ interface Props {
  * or Space key, or the controller's confirm button is down, and fires when full. Letting go early
  * drains it. A click that comes without a press (a screen reader, switch access) fires at once.
  */
-export function HoldButton({ label, hint, glyph, disabled, tone = 'primary', glyphStyle, onComplete }: Props) {
+export function HoldButton({ label, hint, glyph, disabled, tone = 'primary', glyphStyle, holdKey, autoFocus = true, onComplete }: Props) {
   const ref = useRef<HTMLButtonElement>(null);
   const done = useRef(onComplete);
   done.current = onComplete;
@@ -118,6 +123,13 @@ export function HoldButton({ label, hint, glyph, disabled, tone = 'primary', gly
         end();
       }
     };
+    // The screen's own key for it holds it wherever the focus is, but never while typing.
+    const keyHeld = (e: KeyboardEvent) => {
+      if (e.code !== holdKey || isTextField(e.target)) return;
+      e.preventDefault();
+      if (e.type === 'keyup') end();
+      else if (!e.repeat) begin();
+    };
     const click = () => {
       // No press came first: activated by assistive technology, which cannot hold.
       if (performance.now() - pressed > 1500 && !btn.disabled && !fired) {
@@ -141,7 +153,13 @@ export function HoldButton({ label, hint, glyph, disabled, tone = 'primary', gly
     btn.addEventListener('keyup', keyup);
     btn.addEventListener('blur', end);
     btn.addEventListener('click', click);
+    if (holdKey) {
+      window.addEventListener('keydown', keyHeld);
+      window.addEventListener('keyup', keyHeld);
+    }
     return () => {
+      window.removeEventListener('keydown', keyHeld);
+      window.removeEventListener('keyup', keyHeld);
       cancelAnimationFrame(raf);
       clearTimeout(reset);
       quiet();
@@ -155,10 +173,17 @@ export function HoldButton({ label, hint, glyph, disabled, tone = 'primary', gly
       btn.removeEventListener('blur', end);
       btn.removeEventListener('click', click);
     };
-  }, []);
+  }, [holdKey]);
 
   return (
-    <button ref={ref} type="button" className={`hold-btn ${tone}`} data-sfx="none" data-autofocus disabled={disabled}>
+    <button
+      ref={ref}
+      type="button"
+      className={`hold-btn ${tone}`}
+      data-sfx="none"
+      data-autofocus={autoFocus ? '' : undefined}
+      disabled={disabled}
+    >
       <span className="hold-fill" aria-hidden />
       {glyph && (
         <span className="hold-glyph" aria-hidden>

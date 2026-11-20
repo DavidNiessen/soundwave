@@ -13,7 +13,7 @@
 import type { PadInput } from './pads';
 
 /** Where a shortcut works. */
-export type Area = 'menus' | 'home' | 'library' | 'lobby' | 'results' | 'settings' | 'song' | 'replay' | 'editor';
+export type Area = 'menus' | 'home' | 'library' | 'lobby' | 'results' | 'party' | 'boards' | 'settings' | 'song' | 'replay' | 'editor';
 
 export const AREAS: { id: Area; label: string }[] = [
   { id: 'menus', label: 'Every menu' },
@@ -21,6 +21,8 @@ export const AREAS: { id: Area; label: string }[] = [
   { id: 'library', label: 'Music library' },
   { id: 'lobby', label: 'Before a song' },
   { id: 'results', label: 'After a song' },
+  { id: 'party', label: 'Playing together' },
+  { id: 'boards', label: 'Leaderboards' },
   { id: 'settings', label: 'Settings' },
   { id: 'song', label: 'Playing a song' },
   { id: 'replay', label: 'Watching a replay' },
@@ -64,6 +66,7 @@ export const COMMANDS: Command[] = [
     { id: 'home.search', label: 'Search tracks', key: 'Slash' },
     { id: 'home.update', label: 'Update the game', key: 'KeyU' },
     { id: 'home.install', label: 'Get the app', key: 'KeyI' },
+    { id: 'home.together', label: 'Online tab', key: 'KeyT', pad: 'b8' },
     { id: 'home.replayOptions', label: 'Replay options', key: 'KeyO', pad: 'b2', mouse: 'm1' },
     { id: 'home.replayKeep', label: 'Keep a replay', key: 'KeyK' },
     { id: 'home.replayDelete', label: 'Delete a replay', key: 'Delete', key2: 'Backspace' },
@@ -77,6 +80,7 @@ export const COMMANDS: Command[] = [
     { id: 'library.sort', label: 'Sort', key: 'KeyS', pad: 'b7' },
     { id: 'library.add', label: 'Add songs', key: 'KeyA', pad: 'b8' },
     { id: 'library.ready', label: 'Ready up', key: 'KeyR', pad: 'b9' },
+    { id: 'library.share', label: 'Share my songs with the server, or stop', key: 'KeyH' },
   ]),
   ...cmd('lobby', [
     { id: 'lobby.part', label: 'Next part', pad: 'b3' },
@@ -93,6 +97,42 @@ export const COMMANDS: Command[] = [
     { id: 'results.part2', label: 'Next song: lead', key: 'Digit2' },
     { id: 'results.part3', label: 'Next song: bass', key: 'Digit3' },
     { id: 'results.part4', label: 'Next song: drums', key: 'Digit4' },
+  ]),
+  ...cmd('party', [
+    { id: 'party.create', label: 'Start a party', key: 'KeyC', pad: 'b3' },
+    { id: 'party.join', label: 'Join a party', key: 'KeyJ', pad: 'b2' },
+    { id: 'party.signOut', label: 'Your account (sign out, save your data)', key: 'KeyO' },
+    { id: 'party.export', label: 'Save my data from the server', key: 'KeyD' },
+    { id: 'party.ready', label: 'Ready, or not', key: 'KeyR', pad: 'b9' },
+    { id: 'party.pickSongs', label: 'Pick the party’s songs', key: 'KeyU', pad: 'b8' },
+    { id: 'party.part', label: 'Next part', key: 'KeyP', pad: 'b3' },
+    { id: 'party.difficulty', label: 'Next difficulty', key: 'KeyF', pad: 'b2' },
+    { id: 'party.next', label: 'Next song', key: 'KeyN', pad: 'b9' },
+    { id: 'party.hold', label: 'Hold the countdown to the next song', key: 'Space' },
+    { id: 'party.lobby', label: 'Back to the party lobby', key: 'KeyB', pad: 'b8' },
+    { id: 'party.leave', label: 'Leave the party', key: 'KeyL' },
+    { id: 'party.boards', label: 'Leaderboards', key: 'KeyG', pad: 'b10' },
+    { id: 'party.invite', label: 'Invite a friend', key: 'KeyI' },
+    { id: 'party.admin', label: 'Run the server', key: 'KeyM' },
+    { id: 'party.versus', label: 'Play Versus', key: 'Digit1' },
+    { id: 'party.showdown', label: 'Play a Showdown', key: 'Digit2' },
+    { id: 'party.changeMode', label: 'Pick another mode', key: 'KeyX' },
+    { id: 'party.hits', label: 'Showdown hits on or off', key: 'KeyA' },
+    { id: 'party.onePart', label: 'Showdown on one part, or any', key: 'KeyE' },
+    { id: 'party.rotation', label: 'Showdown on the server’s rotation, or my set', key: 'KeyW' },
+    { id: 'party.cheer', label: 'Cheer the players on', key: 'KeyY' },
+    { id: 'party.private', label: 'Private party, or open to friends on Discord', key: 'KeyT' },
+    { id: 'party.avatar', label: 'Your look on the stage', key: 'KeyV' },
+    { id: 'party.avatarSave', label: 'Keep this look', key: 'KeyK' },
+    { id: 'party.avatarReset', label: 'Use the band member’s own look', key: 'KeyZ' },
+  ]),
+  // The parts are the tab buttons (Q and E, the shoulder buttons), as the tabs of any menu.
+  ...cmd('boards', [
+    { id: 'boards.prevSong', label: 'Previous song', key: 'Comma', pad: 'b6' },
+    { id: 'boards.nextSong', label: 'Next song', key: 'Period', pad: 'b7' },
+    { id: 'boards.difficulty', label: 'Next difficulty', key: 'KeyF', pad: 'b2' },
+    { id: 'boards.week', label: 'This week, or all time', key: 'KeyW', pad: 'b3' },
+    { id: 'boards.replays', label: 'Song boards, or shared replays', key: 'KeyR', pad: 'b8' },
   ]),
   ...cmd('settings', [{ id: 'settings.reset', label: 'Restore defaults', key: 'KeyR', pad: 'b3' }]),
   ...cmd('song', [{ id: 'song.pause', label: 'Pause', key: 'KeyP', pad: 'b9' }]),

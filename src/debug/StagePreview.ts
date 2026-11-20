@@ -4,7 +4,8 @@ import { AuroraStage } from '../render/aurora/AuroraStage';
 /**
  * Dev-only: the 3D stage full screen with a simulated song, for checking looks and performance
  * without playing. Open /#stage?preset=high&bpm=126&shot=hero&level=0.9&mode=play (shot pins one
- * camera, level pins how busy the music is, od = seconds until overdrive).
+ * camera, level pins how busy the music is, od = seconds until overdrive, ring = a Showdown ring of that many
+ * players, with a Strike every few seconds).
  */
 export async function runStagePreview(root: HTMLElement) {
   const q = new URLSearchParams(location.hash.split('?')[1] ?? '');
@@ -15,7 +16,23 @@ export async function runStagePreview(root: HTMLElement) {
   // No fade-in here: a capture right after loading should show the stage, not the fade.
   canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;display:block;background:#000';
   root.replaceChildren(canvas);
-  const stage = await AuroraStage.create(canvas, g, { mode: q.get('mode') === 'menu' ? 'menu' : 'play', part: 'lead' });
+  const seats = Number(q.get('ring') ?? 0);
+  const parts = ['lead', 'bass', 'drums', 'vocals'] as const;
+  const looks = [
+    undefined,
+    { top: '#ff4fa3', bottom: '#1b1a2e', finish: '#45d6ff' },
+    { top: '#ffc94a', bottom: '#3a2a6e', finish: '#ffffff' },
+  ];
+  const ring = Array.from({ length: seats }, (_, i) => ({ id: `p${i}`, part: parts[i % 4], avatar: looks[i % 3], me: i === 0 }));
+  const stage = await AuroraStage.create(canvas, g, { mode: q.get('mode') === 'menu' ? 'menu' : 'play', part: 'lead', ring });
+  if (seats) {
+    stage.setPlaces(ring.map((p, i) => ({ id: p.id, place: i + 1, hit: i === 2 })));
+    let n = 0;
+    setInterval(() => {
+      n++;
+      stage.strike(`p${n % seats}`, `p${(n * 3 + 1) % seats}`, 500);
+    }, 2500);
+  }
   const fit = () => stage.setSize(innerWidth, innerHeight, devicePixelRatio);
   fit();
   (window as unknown as { __stage: AuroraStage }).__stage = stage;

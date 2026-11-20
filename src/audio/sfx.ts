@@ -85,6 +85,9 @@ export function loadSfx(): Promise<void> {
   return loading;
 }
 
+/** The effects' output, for sounds made live rather than played from a file (audio/showdownSfx.ts). */
+export const sfxOutput = () => graph();
+
 function graph(): { ctx: AudioContext; out: GainNode } | null {
   if (volume <= 0) return null;
   const ctx = getEngine().ctx;

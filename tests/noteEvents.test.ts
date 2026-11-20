@@ -66,6 +66,7 @@ describe('note decoding', () => {
       const got = notesToTime(addPitchBends(contours, decodeNotes(frames, onsets, nFrames, options)));
       expect(expected.length).toBeGreaterThan(20);
       expect(got).toEqual(expected);
-    });
+      // Basic Pitch's own decoding is slow: seconds for the long run, more while the other test files share the processor.
+    }, 20_000);
   }
 });

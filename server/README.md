@@ -1,0 +1,213 @@
+# Soundwave server
+
+A server for playing Soundwave together: accounts, and parties that play a set at the same moment
+with a live board and shared results. Anyone can run one, on a home PC, a small VPS or a NAS; there
+is no central server, and none run by the project: every server is someone's own. The design is in
+[docs/specs/online-play.md](../docs/specs/online-play.md) (levels 2 and 3).
+
+It is TypeScript run directly by Node (24.7 or newer), with one dependency (`ws`). Everything it
+keeps is in one SQLite file in its data folder.
+
+## Running it
+
+From the repository:
+
+```bash
+pnpm install
+node server/src/main.ts          # data in ./data, port 7420
+```
+
+With Docker, from the repository's root:
+
+```bash
+docker build -f server/Dockerfile -t soundwave-server .
+docker run -d --name soundwave -p 7420:7420 -v soundwave-data:/data \
+  -e SOUNDWAVE_NAME="Our server" -e SOUNDWAVE_PUBLIC_URL=https://play.example.com soundwave-server
+```
+
+With Docker Compose, or on **Coolify**: the repository's `docker-compose.yml` builds the same image,
+keeps everything in the named volume `soundwave-data` (so accounts, scores and songs survive
+redeploys) and checks the server's health at `GET /health`. On Coolify, add a resource of the type
+_Docker Compose_ from this repository; it gives the service a domain (`SERVICE_FQDN_SOUNDWAVE_7420`),
+which also becomes the address in invite links. Set `SOUNDWAVE_NAME`, `SOUNDWAVE_MODE` and the rest
+as environment variables there. Elsewhere: `docker compose up -d`, after adding
+`ports: ["7420:7420"]` and `SOUNDWAVE_PUBLIC_URL`.
+
+The first start prints a **set-up code**. In the game, open **Play together**, connect to the
+server, choose **Make an account** and enter the code: that account becomes the owner. It works
+once. (`docker logs soundwave` shows it.)
+
+## Settings
+
+`soundwave-server.json` in the data folder, or environment variables (which win):
+
+| Setting       | Variable                | Default             | What it is                                                                |
+| ------------- | ----------------------- | ------------------- | ------------------------------------------------------------------------- |
+| `name`        | `SOUNDWAVE_NAME`        | `Soundwave server`  | Shown in the game.                                                        |
+| `description` | `SOUNDWAVE_DESCRIPTION` |                     | One line about the server.                                                |
+| `port`        | `PORT`                  | `7420`              |                                                                           |
+| `host`        | `HOST`                  | `0.0.0.0`           |                                                                           |
+| `mode`        | `SOUNDWAVE_MODE`        | `invite`            | Who can make an account: `public`, `password` or `invite`.                |
+| `password`    | `SOUNDWAVE_PASSWORD`    |                     | The password making an account needs, in `password` mode.                 |
+| `publicUrl`   | `SOUNDWAVE_PUBLIC_URL`  | `http://localhost…` | The address players use, written into invite links. Set it.               |
+| `webGameUrl`  | `SOUNDWAVE_WEB_GAME`    | the game's website  | The web game an invite link offers, for your own copy of it.              |
+| `trustProxy`  | `SOUNDWAVE_TRUST_PROXY` | `false`             | Behind a proxy: take players' addresses (for rate limits) from the proxy. |
+| (data folder) | `SOUNDWAVE_DATA`        | `./data`            | Where the database and the server's signing secret live. Back this up.    |
+
+The modes:
+
+- **public**: anyone with the address can make an account.
+- **password**: making an account needs the server's password, or an invite.
+- **invite**: making an account needs an invite.
+
+## Invite links
+
+An invite is a link to the server's own join page, `https://play.example.com/join?invite=…`, so it
+works with nothing hosted anywhere else. The page offers to open the desktop app (it follows
+`soundwave://join?…` links), to play in the browser (the web game, with the invite filled in), or to
+paste the link into **Play together** by hand. The game takes the whole link wherever it asks for a
+server's address.
+
+In the game, under **Play together → Invite friends**: on an invite-only server every player can
+make invites, each for one account and a week. The owner and moderators can make them in any mode,
+for as many accounts and as long as they choose, or with no limit, to post for a whole community.
+An invite lets its holder past a server password too.
+
+## Leaderboards
+
+A finished song comes with its run, the inputs as they were played. The server plays them into the
+game's own judging (it runs `src/game/` as it is, so a score is checked by exactly the rules it was
+played by) and takes the score only if it comes out exactly the same: there is no tolerance for a
+cheat to use. Boards are per song, chart (a hash of its notes), part and difficulty, all time and
+this week. Any run on a board can be watched, and players can share runs to the server's replay
+list. The owner and moderators remove cheated runs.
+
+## Profiles
+
+A player's look on the stage is three colours (`GET` and `PUT /me/profile`, body `{ avatar: { top, bottom, finish } }`,
+`null` for none). Their party sees it at once.
+
+## Showdown
+
+A party's host can make it a Showdown: scores count as a share of each chart's par, the lowest
+players go out after each song, and (with hits on) the overdrive button strikes the player above.
+The server decides whom a Strike hits and for how long. The host can play the server's Showdown
+rotation instead of their own set: the owner and moderators set it under **Play together → Run
+the server** (`GET` and `POST /showdown/rotation`, body `{ songs }`).
+
+## Shared songs
+
+Off by default. Sharing music with others can infringe copyright, and you answer for what your
+server hands out, so turning it on is your decision: set `songSharing` (`SOUNDWAVE_SONG_SHARING`) to
+`songs` for whole songs, audio included, or `charts` to keep everything but the audio (a player then
+adds their own copy of the very same recording, which the game checks). `songMaxMb` limits one song,
+`quotaMb` what each player shares in all. Every song records who shared it and when; players can
+report a song, and the uploader, you or a moderator can remove it everywhere at once.
+
+With `publicCovers` (`SOUNDWAVE_PUBLIC_COVERS`) on, song covers are served without signing in, so a
+player's Discord status can show the cover of the song they play. Only covers, never audio.
+
+The owner and moderators keep the server's own library (Admin → Server library), whatever players
+may share: songs they add keep their audio and count against no quota. Every song has its own id
+on the server (`uid`) and the SHA-256 of the file the server keeps (`hash`). Renaming a song
+writes its file anew, so its hash changes, and every game that downloaded it takes the new details
+over the next time it signs in: the server is the single point of truth for its songs.
+
+## A party's songs
+
+A player can only play a song they have. So, on by default, a party's songs are passed on through the
+server: when a player in a party lacks one of the set's songs, the host's game sends it here (unless
+the host turned that off in Settings → Online), and the game of every player without it downloads it
+by itself. This is separate from shared songs: nothing lists these songs, and only the players of a
+party with the song in its set can send or get it. The server checks that the file holds the song
+its id names.
+
+They are a cache, kept in `party-songs/` in the data folder: a song goes `partyCacheDays` after it
+was last used, and the least recently used go first once the cache passes `partyCacheMb`. Turn it
+off with `partySongs: false` (`SOUNDWAVE_PARTY_SONGS=false`); players without a song then sit it out.
+
+| Setting          | Variable                     | Default | What it is                                      |
+| ---------------- | ---------------------------- | ------- | ----------------------------------------------- |
+| `partySongs`     | `SOUNDWAVE_PARTY_SONGS`      | `true`  | Pass a party's songs on to its players.         |
+| `partyCacheMb`   | `SOUNDWAVE_PARTY_CACHE_MB`   | `4000`  | The most the cache holds, MB.                   |
+| `partyCacheDays` | `SOUNDWAVE_PARTY_CACHE_DAYS` | `7`     | How long a song is kept after it was last used. |
+
+`songMaxMb` limits one song here too.
+
+## HTTPS
+
+The server speaks plain HTTP. The game connects over plain HTTP only to a server on the player's
+own machine or network; anywhere else it needs HTTPS, so passwords never travel in the clear. Put
+the server behind a proxy that adds HTTPS. With [Caddy](https://caddyserver.com), which gets
+certificates by itself, the whole `Caddyfile` is:
+
+```
+play.example.com {
+	reverse_proxy localhost:7420
+}
+```
+
+and set `SOUNDWAVE_PUBLIC_URL=https://play.example.com` and `SOUNDWAVE_TRUST_PROXY=1`.
+
+## Moderation
+
+The owner names moderators; both can remove players from the server, ban them (for a time or for
+good) and read the log of every moderation action, which records who did what to whom, when and
+why. The game has no screens for this yet; the API takes a signed-in owner's or moderator's access
+token:
+
+| Request                            | Body                                             |
+| ---------------------------------- | ------------------------------------------------ |
+| `POST /mod/kick`                   | `{ name, reason? }`                              |
+| `POST /mod/ban`                    | `{ name, hours?, reason? }` (no hours: for good) |
+| `POST /mod/unban`                  | `{ name, reason? }`                              |
+| `POST /mod/role` (owner)           | `{ name, role: "moderator" \| "player" }`        |
+| `POST /mod/reset-password` (owner) | `{ name }`: answers a new password to pass on    |
+| `GET /mod/audit`                   |                                                  |
+
+## What it keeps
+
+Only what the features need: each account's name, role, when it was made, and its password as an
+Argon2id hash; sign-ins as hashes of their tokens; invites; bans; the moderation log.
+Parties live in memory and are gone when the server stops. There is no telemetry. A player can save
+everything the server holds about them from the game (**Save my data**, `GET /me/export`) and delete
+their account (`DELETE /me`).
+
+## API
+
+Every request but `/info`, the join page, the sign-up and sign-in, and public covers needs a signed-in
+player's access token (`Authorization: Bearer …`). Bodies and answers are JSON unless said otherwise.
+
+| Request                                              | What it does                                                                |
+| ---------------------------------------------------- | --------------------------------------------------------------------------- |
+| `GET /info`                                          | The server's name, description, join mode, protocol version, players online |
+| `GET /join?invite=…`                                 | The join page an invite link opens (HTML)                                   |
+| `POST /auth/signup`, `/auth/signin`, `/auth/refresh` | Make an account, sign in, trade a refresh token for new tokens              |
+| `GET /me`, `DELETE /me`                              | The signed-in account; delete it and everything with it                     |
+| `GET /me/export`                                     | Everything held about the player: a zip with a README (`application/zip`)   |
+| `GET /me/profile`, `PUT /me/profile`                 | The player's avatar: `{ avatar: { top, bottom, finish } \| null }`          |
+| `GET /presence`                                      | Who is online and what they are doing                                       |
+| `POST /invites`                                      | Make an invite link: `{ uses?, hours? }`                                    |
+| `POST /scores`                                       | A finished run, judged again before it is taken                             |
+| `GET /boards/top`                                    | The week's top players                                                      |
+| `GET /boards/:songId`                                | The charts of a song that have boards                                       |
+| `GET /boards/:songId/:chartId/:part/:difficulty`     | A board (`?week=1` for this week's)                                         |
+| `GET /scores/:id/run`                                | A run on a board, to watch it                                               |
+| `POST /scores/:id/share`                             | Share your run to the replay list, or not: `{ shared }`                     |
+| `DELETE /scores/:id?reason=…`                        | Remove a cheated run (owner and moderators)                                 |
+| `GET /replays?song=…`                                | The replays players shared                                                  |
+| `GET /showdown/rotation`, `POST /showdown/rotation`  | The Showdown rotation; set it (owner and moderators): `{ songs }`           |
+| `GET /songs?query=…`, `POST /songs`                  | Shared songs; share one (the `.soundwave` file as the body)                 |
+| `POST /songs/:id/edit`                               | Rename a song (owner, moderators): its file and hash change, copies follow  |
+| `GET /songs/:id/file`, `GET /songs/:id/charts`       | A shared song's file, or its charts without the audio                       |
+| `POST /songs/:id/report`, `DELETE /songs/:id`        | Report a song; remove it (its uploader, the owner, moderators)              |
+| `GET /covers/:songId.jpg`                            | A shared song's cover (public with `publicCovers`)                          |
+| `PUT /party/songs/:id`, `GET /party/songs/:id`       | Send one of your party's songs to the server; get it (party players only)   |
+| `GET /mod/reports`                                   | Reported songs (owner and moderators)                                       |
+| `POST /mod/…`, `GET /mod/audit`                      | Moderation, see above                                                       |
+| `/ws`                                                | The WebSocket: parties and Showdown (see Protocol)                          |
+
+## Protocol
+
+The messages are in [src/net/protocol.ts](../src/net/protocol.ts), shared with the game. A game and a
+server with different `PROTOCOL_VERSION`s refuse each other with a sentence saying which one to update.

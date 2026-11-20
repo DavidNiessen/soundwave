@@ -4,6 +4,11 @@ import { DEFAULT_REPLAY_LIMIT, REPLAY_LIMIT } from '../storage/replays';
 import { DEFAULT_GRAPHICS, normalizeGraphics, type GraphicsSettings } from './graphics';
 import { DEFAULT_VIDEO_EXPORT, normalizeVideoExport, type VideoExportSettings } from './videoExport';
 
+/** Just me; with friends nearby (a session the desktop app hosts); on a server. */
+
+/** Whether the audio offset was calibrated on the output device in use. */
+export const isCalibrated = (s: Settings) => s.calibratedOn !== null && s.calibratedOn === s.outputDevice;
+
 export interface Settings {
   /** How fast the track scrolls, as a multiple of the usual speed (see TRACK_SPEED). */
   trackSpeed: number;
@@ -62,6 +67,26 @@ export interface Settings {
   checkUpdates: boolean;
   /** The desktop app shows what is being played on the player's Discord profile. */
   discordStatus: boolean;
+  /** The name shown in a local session (no accounts there). */
+  displayName: string;
+  /** Finished songs go to the server's leaderboards, with their runs, while signed in. */
+  postScores: boolean;
+  /** Discord friends can join this player's session or party from their status (never a private one). */
+  discordJoin: boolean;
+  /** The songs of a party this player hosts go to the players who lack them, through the server (src/net/partySongs.ts). */
+  shareSongs: boolean;
+  /**
+   * Songs that come from a server (another player's shared song, or a party's song this player
+   * lacks): streamed (held for as long as they are played, never stored) or downloaded into the
+   * library.
+   */
+  serverSongs: 'stream' | 'download';
+  /** This player's songs are shared to the servers they sign in to (where the server takes songs). */
+  shareLibrary: boolean;
+  /** The servers already asked whether to share this player's songs, by address. */
+  shareAsked: string[];
+  /** The output device the offset was last calibrated on ('' for the system default), or null: never calibrated. */
+  calibratedOn: string | null;
   /** Which volume defaults the stored volumes have been brought up to (not shown; see normalizeSettings). */
   volumeDefaults: number;
 }
@@ -140,6 +165,14 @@ export const DEFAULT_SETTINGS: Settings = {
   videoExport: DEFAULT_VIDEO_EXPORT,
   checkUpdates: true,
   discordStatus: true,
+  displayName: '',
+  postScores: true,
+  discordJoin: false,
+  shareSongs: true,
+  serverSongs: 'stream',
+  shareLibrary: false,
+  shareAsked: [],
+  calibratedOn: null,
   volumeDefaults: VOLUME_DEFAULTS,
 };
 
@@ -183,6 +216,17 @@ export function normalizeSettings(raw: Partial<Settings>): Settings {
   s.replayLimit = clampReplayLimit(Number(s.replayLimit));
   s.videoExport = normalizeVideoExport(s.videoExport);
   s.discordStatus = Boolean(s.discordStatus);
+  s.displayName = typeof s.displayName === 'string' ? s.displayName.slice(0, 24) : '';
+  s.postScores = s.postScores !== false;
+  s.discordJoin = Boolean(s.discordJoin);
+  s.shareSongs = s.shareSongs !== false;
+  // Keeping a party's songs was the setting before songs could be streamed or downloaded.
+  const legacy = (s as unknown as { keepPartySongs?: boolean }).keepPartySongs;
+  if (s.serverSongs !== 'stream' && s.serverSongs !== 'download') s.serverSongs = legacy ? 'download' : 'stream';
+  delete (s as unknown as { keepPartySongs?: boolean }).keepPartySongs;
+  s.shareLibrary = s.shareLibrary === true;
+  s.shareAsked = Array.isArray(s.shareAsked) ? s.shareAsked.filter((x): x is string => typeof x === 'string').slice(-50) : [];
+  if (typeof s.calibratedOn !== 'string') s.calibratedOn = null;
   if (typeof s.outputDevice !== 'string') s.outputDevice = '';
   if (typeof s.outputDeviceName !== 'string' || !s.outputDevice) s.outputDeviceName = '';
   if (s.touchOverdriveSide !== 'left') s.touchOverdriveSide = 'right';

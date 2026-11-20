@@ -59,6 +59,11 @@
     }
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["soundwave"]
+      }
+    },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJBRTAwNjg3RUFDRDMzMUIKUldRYk04M3Fod2JnS29ENURZNTNqMC80NXRmNncxbHN6bEU2d0V3b0xjWm4vOGVoV0lCeFo3eGEK",
       "endpoints": ["https://github.com/DavidNiessen/soundwave/releases/latest/download/latest.json"],

@@ -31,3 +31,7 @@ scripts/dev/laneStats.dev.ts
 scripts/dev/reference.ts
 scripts/dev/align.py
 scripts/dev/video_notes.py
+
+# A Soundwave server run from the repository (server/README.md): its database and secret.
+server/data/
+data/
