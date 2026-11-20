@@ -10085,12 +10085,6 @@ a.btn {
 .online-me {
   padding-top: clamp(1rem, 9vh, 6rem);
 }
-/* The veil that darkens the stage behind the menus lifts over the right, so the player's band
-   member shows in full light. */
-.menu.on-home:has(.online-panel.with-avatar) .veil {
-  -webkit-mask-image: linear-gradient(90deg, #000 40%, rgb(0 0 0 / 0.25) 68%, rgb(0 0 0 / 0.15));
-  mask-image: linear-gradient(90deg, #000 40%, rgb(0 0 0 / 0.25) 68%, rgb(0 0 0 / 0.15));
-}
 @media (max-width: 1000px) {
   .online-bento .online-side {
     flex-direction: column;
@@ -10105,4 +10099,218 @@ a.btn {
 }
 .online-bento .tile.hero .mosaic {
   max-width: 34%;
+}
+
+/* The player's portrait on the Online tab: a card of the game's light, a podium, the figure in it,
+   drawn above the menus (not the stage behind them). */
+.online-me {
+  padding-top: clamp(0.5rem, 4vh, 2.5rem);
+}
+.online-me .nametag {
+  position: relative;
+  z-index: 2;
+}
+.online-me .nametag-pin {
+  position: relative;
+  z-index: 2;
+}
+.portrait-card {
+  position: relative;
+  flex: 1;
+  width: min(100%, 26rem);
+  min-height: min(26rem, 52vh);
+  margin-top: -1.2rem;
+  border-radius: var(--r-l);
+  overflow: hidden;
+  background:
+    radial-gradient(60% 45% at 50% 38%, rgb(255 77 157 / 0.32), transparent 70%),
+    radial-gradient(80% 60% at 50% 100%, rgb(91 62 224 / 0.55), transparent 70%),
+    linear-gradient(180deg, rgb(26 15 76 / 0.85), rgb(8 6 18 / 0.92));
+  box-shadow:
+    inset 0 0 0 1.5px var(--glass-edge),
+    0 1.6rem 3rem -1.6rem rgb(0 0 0 / 0.7);
+  animation: rise-in 0.5s var(--ease) backwards;
+}
+.portrait-glow {
+  position: absolute;
+  inset: 8% 18% 30%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(93 242 214 / 0.18), transparent);
+  filter: blur(8px);
+  animation: portrait-breathe 4s ease-in-out infinite alternate;
+}
+@keyframes portrait-breathe {
+  to {
+    transform: scale(1.12);
+    opacity: 0.7;
+  }
+}
+.portrait-podium {
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  bottom: 6%;
+  height: 12%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(255 122 184 / 0.55), rgb(91 62 224 / 0.35) 60%, transparent);
+  box-shadow: 0 0 2.5rem rgb(255 77 157 / 0.35);
+}
+.avatar-portrait {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.nametag-sub {
+  text-transform: lowercase;
+}
+
+/* The Online tab's character, lobby style: standing over the menu at full height, no card. A
+   light falls on them from above, their shadow lies on the floor, and the nametag floats over
+   their head. */
+.online-me {
+  position: relative;
+  align-self: stretch;
+  min-height: min(34rem, 64vh);
+  padding-top: 0;
+  pointer-events: none;
+}
+.online-me .avatar-portrait {
+  position: absolute;
+  inset: 4.5rem auto 0 50%;
+  width: min(100%, 30rem);
+  height: calc(100% - 4.5rem);
+  translate: -50% 0;
+  z-index: 1;
+}
+.lobby-light {
+  position: absolute;
+  left: 50%;
+  top: -10%;
+  width: 70%;
+  height: 105%;
+  translate: -50% 0;
+  background: radial-gradient(50% 60% at 50% 40%, rgb(196 166 255 / 0.22), transparent 72%);
+  clip-path: polygon(38% 0, 62% 0, 100% 100%, 0 100%);
+  filter: blur(18px);
+  pointer-events: none;
+}
+.lobby-shadow {
+  position: absolute;
+  left: 50%;
+  bottom: 0.5%;
+  width: 68%;
+  height: 11%;
+  translate: -50% 0;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(0 0 0 / 0.55), rgb(91 62 224 / 0.25) 60%, transparent);
+  filter: blur(3px);
+}
+/* The nametag: no box, the name large over the head, the line under it small and quiet. */
+.online-me .nametag {
+  position: absolute;
+  left: 50%;
+  top: -1.2rem;
+  translate: -50% 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.3rem 0.8rem;
+  border-radius: var(--r-m);
+  background: none;
+  box-shadow: none;
+  pointer-events: auto;
+  animation: nametag-float 4s ease-in-out infinite;
+}
+@keyframes nametag-float {
+  50% {
+    transform: translateY(-0.35rem);
+  }
+}
+:root[data-input='mouse'] .online-me .nametag:hover {
+  background: rgb(255 255 255 / 0.06);
+}
+.online-me .nametag-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: clamp(1.6rem, 2.4vw, 2.3rem);
+  font-weight: 900;
+  font-style: italic;
+  font-stretch: 112%;
+  line-height: 1;
+  color: #fff;
+  text-shadow:
+    0 0.06em 0 rgb(0 0 0 / 0.35),
+    0 0.1em 0.8em rgb(255 77 157 / 0.55);
+}
+.online-me .nametag-name .online-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  box-shadow: 0 0 0.6rem var(--ok);
+}
+.online-me .nametag-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.12rem 0.6rem;
+  border-radius: 999px;
+  background: rgb(8 6 18 / 0.55);
+  color: var(--ink-2);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+.online-me .nametag-sub .keycap-hint,
+.online-me .nametag-sub .hint-glyph {
+  transform: scale(0.85);
+}
+.online-me .nametag-pin,
+.online-me .portrait-card {
+  display: none;
+}
+
+/* The nametag, kept inside its column: centred by its margins (not shifted half its width, which
+   a long line pushed past the column's edge), each line cut short rather than overflowing. */
+.online-me .nametag {
+  left: 0;
+  right: 0;
+  translate: none;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
+  gap: 0.3rem;
+  padding: 0.3rem 0.6rem;
+}
+.online-me .nametag-name {
+  max-width: 100%;
+  min-width: 0;
+}
+.online-me .nametag-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.online-me .nametag-name .keycap-hint,
+.online-me .nametag-name .hint-glyph {
+  flex: none;
+  font-style: normal;
+  text-shadow: none;
+}
+.online-me .nametag-sub {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  background: none;
+  color: var(--ink-2);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 4px rgb(0 0 0 / 0.8);
 }

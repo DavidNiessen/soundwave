@@ -26,15 +26,12 @@ import { PARTY_MAX, type Role } from '../net/protocol';
 import type { SongMeta } from '../storage/db';
 import { Hint, useActions, useHints, type Action } from './actions';
 import type { Part } from '../chart/types';
-import { setMenuLook } from '../render/aurora/menuStage';
+import { AvatarPortrait } from './AvatarPortrait';
 import { Dialog } from './Dialog';
 import { ICON_STROKE } from './icons';
 import { OnlineSidebar } from './OnlineSidebar';
 import { MODES } from './PartyScreen';
 import { AdminPanel, download, InvitePanel } from './ServerAdmin';
-
-/** How far right of the middle the player's band member stands in the picture (a share of its width). */
-const AVATAR_SHIFT = 0.27;
 
 /** A role as players read it: the server's owner is its admin. */
 const ROLE_LABEL: Record<Role, string> = { owner: 'Admin', moderator: 'Moderator', player: 'Player' };
@@ -177,15 +174,9 @@ function SignedIn({ settings, setlist, library, onParty, onBoards, onAvatar, bas
     ['party-avatar', 'party.avatar', Shirt, 'Your look', 'Your colours, on stage for everyone.', onAvatar],
   ];
   const players = party ? party.members.length : 0;
-  // The stage's camera holds on the player's band member, under their nametag.
-  useEffect(() => {
-    // Framed on the right of the picture, where the nametag is; the bento takes the left.
-    setMenuLook(part, AVATAR_SHIFT);
-    return () => setMenuLook(null);
-  }, [part]);
 
   return (
-    <div className="online-panel with-avatar">
+    <div className="online-panel">
       {s.error && (
         <p className="party-error" role="alert">
           {s.error}
@@ -295,16 +286,22 @@ function SignedIn({ settings, setlist, library, onParty, onBoards, onAvatar, bas
 
         {/* Right: the player themselves, their band member on stage in their look, the nametag over them. */}
         <div className="online-me">
+          {/* The player's character, standing over the menu as in a lobby: a light on them, their
+              shadow on the floor, and their nametag floating over their head. */}
+          <span className="lobby-light" aria-hidden />
+          <span className="lobby-shadow" aria-hidden />
+          <AvatarPortrait part={part} avatar={s.avatar} />
           <button type="button" className="nametag" data-action="party-account" onClick={() => setModal('account')}>
-            <span className={`online-dot ${s.status === 'online' ? 'on' : ''}`} aria-hidden />
-            <span className="nametag-name">{s.account!.name}</span>
-            <span className="nametag-sub">
-              {mod ? `${ROLE_LABEL[s.account!.role]} · ` : ''}
-              {s.status === 'online' ? (s.info?.name ?? 'Soundwave server') : 'Reconnecting…'}
+            <span className="nametag-name">
+              <span className={`online-dot ${s.status === 'online' ? 'on' : ''}`} aria-hidden />
+              <span className="nametag-text">{s.account!.name}</span>
+              <Hint {...keysOf('party.signOut')} {...hints} />
             </span>
-            <Hint {...keysOf('party.signOut')} {...hints} />
+            <span className="nametag-sub">
+              {mod ? `${ROLE_LABEL[s.account!.role].toLowerCase()} · ` : ''}
+              {(s.status === 'online' ? (s.info?.name ?? 'soundwave server') : 'reconnecting…').toLowerCase()}
+            </span>
           </button>
-          <span className="nametag-pin" aria-hidden />
         </div>
       </div>
 
