@@ -7394,6 +7394,13 @@ a.btn {
 :root[data-input='mouse'] .tile.together:hover .together-art svg {
   transform: scale(1.08) rotate(-4deg);
 }
+/* The title takes its size from the card's width, so "together" and its key always fit on one line. */
+.tile.together .tile-text {
+  container-type: inline-size;
+}
+.together-title {
+  font-size: clamp(1rem, 11cqi, 1.6rem);
+}
 .together-title .nowrap {
   white-space: nowrap;
 }
