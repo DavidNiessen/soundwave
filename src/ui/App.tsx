@@ -52,7 +52,7 @@ import {
   type BestScore,
   type SongMeta,
 } from '../storage/db';
-import { cleanChart, newReplayId, type ReplayData, type ReplayMeta } from '../storage/replays';
+import { cleanChart, newReplayId, type ReplayData, type ReplayMeta, type ReplayMode } from '../storage/replays';
 import { soundwaveFileName, isSoundwaveFile } from '../storage/soundwaveFile';
 import { chooseSaveTarget, saveSongFile, watchOpenedFiles, type SaveTarget } from '../storage/share';
 import { videoFileName, type VideoExportSettings } from '../game/videoExport';
@@ -867,7 +867,14 @@ export function App() {
   };
 
   /** Saves a finished song's run as a replay, with every note of the chart it was played on. */
-  const saveReplay = async (song: SongMeta, chart: Chart, results: Results, inputs: ReplayInputs, best: number | undefined) => {
+  const saveReplay = async (
+    song: SongMeta,
+    chart: Chart,
+    results: Results,
+    inputs: ReplayInputs,
+    best: number | undefined,
+    mode: ReplayMode,
+  ) => {
     const date = Date.now();
     const id = newReplayId(date);
     try {
@@ -885,6 +892,7 @@ export function App() {
             best: results.score > 0 && (best === undefined || results.score > best),
             kept: false,
             duration: song.duration || chart.duration,
+            ...(mode === 'solo' ? {} : { mode }),
           },
           data: { id, chart, inputs },
         },
@@ -916,7 +924,14 @@ export function App() {
     }
     // A song held only for a party leaves with it, so its replay could never be watched.
     if (inputs && settingsRef.current.replays && byIdRef.current.has(song.id))
-      void saveReplay(song, run.charts[run.index], results, inputs, best);
+      void saveReplay(
+        song,
+        run.charts[run.index],
+        results,
+        inputs,
+        best,
+        run.party ? (online.snapshot().party?.showdown ? 'showdown' : 'versus') : 'solo',
+      );
     if (inputs) void postRun(run, results, inputs);
     return best;
   };

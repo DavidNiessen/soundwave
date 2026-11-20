@@ -8,7 +8,7 @@ import type { RingPlace, RingSeat } from '../render/aurora/ring';
 import { barAt, barIntensity } from '../render/stage/LightShow';
 import { resolveGraphics } from './graphics';
 import { GameSession, PHRASE_REWARD, type Results } from './GameSession';
-import { ReplayPlayback, ReplayRecorder, replayResults, type ReplayInputs } from './replay';
+import { ReplayPlayback, ReplayRecorder, replayResults, showdownMarks, type ReplayInputs, type ShowdownMarks } from './replay';
 import { BufferAnalyser } from '../audio/bufferAnalyser';
 import type { StageInput } from '../render/stage/protocol';
 import { Rumbler } from '../input/rumble';
@@ -238,6 +238,7 @@ export class PlayController {
     if (replay) {
       this.playback = new ReplayPlayback(chart, replay);
       this.session = this.playback.session;
+      this.marks = showdownMarks(replay);
     } else {
       this.session = new GameSession(chart);
       this.recorder = new ReplayRecorder(this.session);
@@ -438,6 +439,24 @@ export class PlayController {
     this.recorder?.rule(rule, at);
   }
 
+  /** A replayed Showdown: the player's Strikes and the hits on them, found in the run (see showdownMarks). */
+  private marks: ShowdownMarks = { strikes: [], hits: [] };
+  /** Song time the replay's Showdown marks were last looked at, to tell which were passed since. */
+  private markAt = -Infinity;
+  /** A replay passed a Strike the player made, or the start of a hit on them. */
+  onReplayMark: ((kind: 'strike' | 'hit') => void) | null = null;
+
+  /** A replay shows a Showdown as it was: the haze through each hit, and a word for each Strike and hit. */
+  private replayShowdown(t: number) {
+    const { strikes, hits } = this.marks;
+    if (!strikes.length && !hits.length) return;
+    const from = this.markAt;
+    this.markAt = t;
+    for (const s of strikes) if (s > from && s <= t) this.onReplayMark?.('strike');
+    for (const [h] of hits) if (h > from && h <= t) this.onReplayMark?.('hit');
+    this.highway.fog = hits.some(([a, b]) => t >= a && t < b) ? 1 : 0;
+  }
+
   /** Lays the highway out again after the layout changed without the canvas changing size (another input in use). */
   relayout() {
     this.resize();
@@ -609,6 +628,9 @@ export class PlayController {
   /** Puts the replay's session, the highway and the HUD where they stand at song time `t`. */
   private seekTo(t: number): number {
     const at = Math.max(REPLAY_START, Math.min(this.playback!.end, t));
+    // A jump says nothing of the Strikes and hits it skips; the haze is as it stands at `at`.
+    this.markAt = at;
+    this.highway.fog = this.marks.hits.some(([from, to]) => at >= from && at < to) ? 1 : 0;
     this.session = this.playback!.seek(at);
     this.wire();
     this.highway.reset();
@@ -697,8 +719,10 @@ export class PlayController {
       }
     }
     if (this.phase === 'playing') {
-      if (this.playback) this.playback.advance(t);
-      else this.recorder!.update(t);
+      if (this.playback) {
+        this.playback.advance(t);
+        this.replayShowdown(t);
+      } else this.recorder!.update(t);
       if (this.effects.length) this.applyEffects(t);
       if (t > this.chart.duration + 0.5 && t > this.engine.duration) this.finish();
     }

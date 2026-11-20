@@ -9096,3 +9096,33 @@ a.btn {
   color: inherit;
   text-align: left;
 }
+
+/* How a replay was played: Versus or Showdown (solo shows nothing). */
+.mode-tag {
+  display: inline-block;
+  margin-right: 0.45rem;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  background: var(--well);
+  color: var(--ink);
+  font-size: 0.78em;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  vertical-align: 0.05em;
+}
+.mode-tag.showdown {
+  background: rgb(255 210 61 / 0.18);
+  color: var(--gold);
+}
+.mode-tag.versus {
+  background: rgb(255 77 157 / 0.2);
+  color: var(--pink-2);
+}
+.replay-badge .mode-tag {
+  margin: 0 0 0 0.5rem;
+}
+.replay-mark.hit {
+  color: var(--danger-2);
+}

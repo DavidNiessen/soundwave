@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Chart, Note } from '../src/chart/types';
 import { GameSession } from '../src/game/GameSession';
-import { OP, ReplayPlayback, ReplayRecorder, replayMisses, replayResults } from '../src/game/replay';
+import { OP, ReplayPlayback, ReplayRecorder, replayMisses, replayResults, showdownMarks } from '../src/game/replay';
 import { readReplay, replaysToPrune, writeReplay, ReplayFileError, type ReplayMeta } from '../src/storage/replays';
 
 /** A busy chart: taps, sustains, release notes and overdrive phrases across four lanes. */
@@ -217,6 +217,24 @@ describe('Showdown in a run', () => {
     for (const fps of [30, 144]) expect(play(c, 7, { fps, late: true, showdown: true }).session.results()).toEqual(result);
     // The capped multiplier costs points against the same run without hits.
     expect(result.score).toBeLessThan(play(c).session.results().score);
+  });
+
+  it('finds the Strikes and the hits of a Showdown in a run, for its replay', () => {
+    const rec = new ReplayRecorder(new GameSession(chart()));
+    rec.update(1);
+    rec.strike(2);
+    rec.rule(2, 3);
+    rec.rule(0, 7);
+    rec.strike(9);
+    rec.rule(2, 12);
+    rec.end();
+    expect(showdownMarks(rec.take())).toEqual({
+      strikes: [2, 9],
+      hits: [
+        [3, 7],
+        [12, Infinity],
+      ],
+    });
   });
 
   it('spends the whole charge on a Strike, and none without a quarter meter', () => {

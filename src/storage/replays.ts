@@ -46,7 +46,13 @@ export interface ReplayMeta {
   kept: boolean;
   /** Length of the song, seconds. */
   duration: number;
+  /** How it was played: alone, or in a party's Versus or Showdown (missing in older replays: alone). */
+  mode?: ReplayMode;
 }
+
+export type ReplayMode = 'solo' | 'versus' | 'showdown';
+/** A replay's mode, said in a word. */
+export const MODE_LABEL: Record<ReplayMode, string> = { solo: 'Solo', versus: 'Versus', showdown: 'Showdown' };
 
 /** What is needed to play a replay: the chart it was played on and the run itself. */
 export interface ReplayData {
@@ -174,6 +180,7 @@ function cleanMeta(raw: unknown): ReplayMeta | null {
     best: m.best === true,
     kept: m.kept === true,
     duration: finite(m.duration) ? Math.max(0, m.duration) : 0,
+    ...(m.mode === 'versus' || m.mode === 'showdown' ? { mode: m.mode } : {}),
   };
 }
 

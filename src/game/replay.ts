@@ -243,3 +243,36 @@ export function replayMisses(chart: Chart, inputs: ReplayInputs): number[] {
   p.finish();
   return out;
 }
+
+/** Where a recorded Showdown run struck and was hit, in song time. */
+export interface ShowdownMarks {
+  strikes: number[];
+  /** Each hit, from when its Drain cap starts to when it ends. */
+  hits: [number, number][];
+}
+
+/**
+ * Finds a Showdown in a run: each Strike is an operation of its own, and each hit starts and ends
+ * the multiplier's Drain cap (a rule operation), so both are in any run played in one.
+ */
+export function showdownMarks(inputs: ReplayInputs): ShowdownMarks {
+  const strikes: number[] = [];
+  const hits: [number, number][] = [];
+  let open: number | null = null;
+  const n = Math.min(inputs.ops.length, inputs.times.length);
+  for (let i = 0; i < n; i++) {
+    const op = inputs.ops[i] & 7;
+    const t = inputs.times[i];
+    if (op === OP.strike) strikes.push(t);
+    else if (op === OP.rule) {
+      const capped = inputs.ops[i] >> 3 > 0;
+      if (capped && open === null) open = t;
+      else if (!capped && open !== null) {
+        hits.push([open, t]);
+        open = null;
+      }
+    }
+  }
+  if (open !== null) hits.push([open, Infinity]);
+  return { strikes, hits };
+}
