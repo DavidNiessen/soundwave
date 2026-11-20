@@ -37,6 +37,10 @@ Decisions made while building, which override what follows:
   lacks a song of the set, the host's game sends it to the server (unless the host turned that off), which keeps
   it as a cache for that party's players only; every game without it downloads it. A downloaded song is held for the party only (in memory) and goes when the player leaves; **Keep it** on the set, or the setting _Keep the songs I get in a party_, adds it to the library. Not streamed: a song is decoded whole before it starts, so a slow connection never stalls it mid-song. On
   by default; the owner can turn it off (`partySongs`). Not the shared library: nothing lists these songs.
+- **A Showdown plays on a ring:** every player of the song stands on a round podium of their own in a ring on the deck
+  (up to 16), as their part's band member in their look; the band's island makes way. Podiums rise by place on the
+  board, sink for a player who is out, and glow red under a hit. Every Strike is seen by everyone: it flies as a
+  bolt from the striker's podium to the target, who shakes and flashes as it lands.
 - **Showdown hits are Fog and Drain together**, with no choice: every hit hazes the far highway and holds the
   multiplier at ×2 for as long as it lasts. The setting _Showdown hits reach me as_ (4.1, 5.x) is not built.
 - **Later, not now:** the in-game server list (3.2b), local sessions hosted by the desktop app (level 1), and its

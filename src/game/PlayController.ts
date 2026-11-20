@@ -4,6 +4,7 @@ import { BandMeter } from '../audio/bands';
 import { Highway } from '../render/Highway';
 import { StageView } from '../render/stage/StageView';
 import type { Avatars } from '../render/aurora/AuroraStage';
+import type { RingPlace, RingSeat } from '../render/aurora/ring';
 import { barAt, barIntensity } from '../render/stage/LightShow';
 import { resolveGraphics } from './graphics';
 import { GameSession, PHRASE_REWARD, type Results } from './GameSession';
@@ -196,6 +197,9 @@ export class PlayController {
    */
   strike: ((charge: number) => boolean) | null = null;
   private readonly avatars: Avatars | undefined;
+  /** A Showdown's players on the stage's ring, and the board's places as last heard. */
+  private readonly ring: RingSeat[] | undefined;
+  private places: RingPlace[] | null = null;
   /**
    * What playing together does to this run for a while, in song time: Showdown's Drain caps the
    * multiplier and its Fog hazes the far highway.
@@ -217,12 +221,14 @@ export class PlayController {
     replay?: ReplayInputs,
     /**
      * `graphClock`: follow the audio graph's clock instead of what the speakers play (recording a
-     * video). `avatars`: the players' looks for the band on stage.
+     * video). `avatars`: the players' looks for the band on stage. `ring`: a Showdown's players,
+     * on a ring of podiums in place of the band.
      */
-    options: { graphClock?: boolean; avatars?: Avatars } = {},
+    options: { graphClock?: boolean; avatars?: Avatars; ring?: RingSeat[] } = {},
   ) {
     this.graphClock = !!options.graphClock;
     this.avatars = options.avatars;
+    this.ring = options.ring;
     engine.load(buffer);
     engine.offset = settings.offsetMs / 1000;
     engine.volume = settings.volume;
@@ -383,6 +389,21 @@ export class PlayController {
     this.addEffect(at, ms, 'drain');
   }
 
+  /** Showdown: the board as it stands, for the stage's ring (sent on only when it changed). */
+  setPlaces(places: RingPlace[]) {
+    if (!this.ring || JSON.stringify(places) === JSON.stringify(this.places)) return;
+    this.places = places;
+    this.stage?.setPlaces(places);
+    if (this.shownStage !== this.stage) this.shownStage?.setPlaces(places);
+  }
+
+  /** Showdown: a Strike between two players, drawn on the stage's ring; it lands at `at` (performance.now ms). */
+  showStrike(from: string, to: string, at: number) {
+    const ms = Math.max(0, at - performance.now());
+    this.stage?.strike(from, to, ms);
+    if (this.shownStage !== this.stage) this.shownStage?.strike(from, to, ms);
+  }
+
   private addEffect(at: number, ms: number, kind: 'drain' | 'fog') {
     if (this.playback) return;
     const from = this.engine.time(at);
@@ -477,7 +498,9 @@ export class PlayController {
       mode: 'play',
       part: this.chart.part,
       avatars: this.avatars,
+      ring: this.ring,
     });
+    if (this.places) stage.setPlaces(this.places);
     if (this.isFrozen) stage.setRate('frozen');
     this.stage = stage;
     if (this.stageTaker) stage.capture(this.stageTaker);

@@ -19,6 +19,7 @@ import { ICON_STROKE } from './icons';
 import { BOARD_INTERVAL_MS, STRIKE_MIN_CHARGE } from '../net/protocol';
 import { online } from '../net/client';
 import type { Avatars } from '../render/aurora/AuroraStage';
+import type { RingSeat } from '../render/aurora/ring';
 
 interface Props {
   title: string;
@@ -58,6 +59,8 @@ interface Props {
       /** How many go through after this song (1 in the final). */
       cut: number;
       final: boolean;
+      /** The players on the stage's ring of podiums. */
+      ring: RingSeat[];
     };
   };
 }
@@ -128,7 +131,7 @@ export function PlayScreen({
       hudRefs(hudRef.current!),
       stageRef.current!,
       undefined,
-      { avatars: avatarsRef.current },
+      { avatars: avatarsRef.current, ring: togetherRef.current?.showdown?.ring },
     );
     let prev: PlayPhase = 'countdown';
     // Discord shows the time left, or that the song is paused or over (src/app/discord.ts). The
@@ -198,9 +201,19 @@ export function PlayScreen({
         online.strike(sd.songIndex, charge);
         return true;
       };
-    return online.onPlayEvent((e) => {
+    // The ring's podiums follow the board: up by place, down once out, red under a hit.
+    const places = () => {
+      const board = online.board();
+      if (board?.songIndex !== sd.songIndex) return;
+      const ranked = board.lines.filter((l) => !l.out).sort((a, b) => b.score - a.score);
+      ctrl.setPlaces(board.lines.map((l) => ({ id: l.id, place: ranked.indexOf(l) + 1, out: !!l.out, hit: !!l.hit })));
+    };
+    places();
+    const unBoard = online.subscribeBoard(places);
+    const unPlay = online.onPlayEvent((e) => {
       if (e.type === 'cheer') return setNote({ text: `${e.from} cheers you on`, key: performance.now() });
       if (e.songIndex !== sd.songIndex) return;
+      if (e.type === 'strikeFired') return ctrl.showStrike(e.from, e.to, e.at);
       if (e.type === 'struck') {
         asking = false;
         if (!e.target) return ctrl.overdriveNow();
@@ -215,6 +228,10 @@ export function PlayScreen({
       playShowdownSfx('incoming');
       window.setTimeout(() => playShowdownSfx('impact'), Math.max(0, e.at - performance.now()));
     });
+    return () => {
+      unBoard();
+      unPlay();
+    };
   }
 
   /** Any other party: players watching can cheer the ones playing on. */

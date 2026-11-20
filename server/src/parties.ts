@@ -441,6 +441,8 @@ export class Parties {
     song.hits.set(target, { at, until: at + ms });
     song.lastHit.set(target, now);
     this.send(target, { type: 'hit', songIndex, from: player.name, at, ms });
+    for (const m of party.state.members)
+      if (m.connected) this.send(m.id, { type: 'strikeFired', songIndex, from: player.id, to: target, at });
     this.sendBoard(party);
   }
 

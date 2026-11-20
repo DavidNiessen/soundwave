@@ -15,6 +15,7 @@ import { Beams } from './beams';
 import { CROWD_RECT, buildCrowdMap } from './crowdMap';
 import { Figures, makeBand, makeCrowd, type Person } from './figures';
 import { Flames } from './flames';
+import { Ring, type RingPlace, type RingSeat } from './ring';
 import { applyVenueMaterials } from './materials';
 import { shared } from './shared';
 import { buildSky } from './sky';
@@ -26,6 +27,8 @@ export interface StageOptions {
   part?: Part;
   /** Players' looks: each part's band member in the colours of the player on it. */
   avatars?: Avatars;
+  /** A Showdown: the players on a ring of podiums, in place of the band. */
+  ring?: RingSeat[];
 }
 
 /** The look of the player on each part (a part without one keeps the band member's own). */
@@ -102,6 +105,8 @@ export class AuroraStage {
   private readonly band: Figures;
   /** The band members, by part, for dressing them as the players. */
   private players: Person[] = [];
+  /** A Showdown's ring of players (see StageOptions.ring), or null for the band. */
+  private ring: Ring | null = null;
   /**
    * The lake, and the picture it mirrors: the scene above it, drawn once more each frame from the
    * camera's reflection below the surface.
@@ -178,7 +183,7 @@ export class AuroraStage {
     canvas.addEventListener('webglcontextrestored', this.onContextRestored as EventListener);
     const menu = opts.mode === 'menu';
     this.show = new LightShow(menu);
-    this.director = new Director(buildShots(this.data.cameras, this.data.band, opts.part), menu ? 'calm' : 'auto', 7, menu);
+    const ringed = !menu && !!opts.ring?.length;
 
     const moon = this.data.moon;
     shared.uGlowPos.value.set(...moon.center);
@@ -190,10 +195,15 @@ export class AuroraStage {
     this.owned.push(sky.geometry, sky.material);
 
     const venue = assets.scene.clone(true);
+    // A Showdown's ring stands on the open deck: the band's island, steps and podiums go.
+    if (ringed) {
+      venue.remove(...venue.children.filter((o) => /^(Island|Step_|Podium_)/.test(o.name)));
+      this.owned.push(...cutOut(venue, ISLAND_STACKS));
+    }
     this.owned.push(...applyVenueMaterials(venue, this.data.deck, g.lights === 'medium' || g.lights === 'high'));
     this.scene.add(venue);
     // Each podium and what stands on it moves as one.
-    for (const [part, p] of Object.entries(this.data.podiums ?? {})) {
+    for (const [part, p] of Object.entries(ringed ? {} : (this.data.podiums ?? {}))) {
       const group = new THREE.Group();
       venue.add(group);
       for (const piece of venue.children.filter((o) => o.name.startsWith(`Podium_${part}_`))) group.add(piece);
@@ -242,18 +252,34 @@ export class AuroraStage {
     this.band = new Figures(assets.band);
     // The part being played is picked out: more light on that player and under their feet.
     const focus = opts.part === 'vocals' ? 'vox' : opts.part;
-    const players = makeBand(this.data, assets.band.data.band ?? {}, focus);
-    this.band.add(players, true);
-    this.players = players;
-    if (opts.avatars) this.setAvatars(opts.avatars);
-    for (const lift of this.lifts) lift.person = players.find((p) => p.part === lift.part);
-    PLAYERS.forEach((key, i) => {
-      const p = this.data.band[key];
-      if (p) shared.uBand.value[i].set(...p);
-      shared.uFeature.value[i] = !focus ? 0.6 : key === focus ? 1 : 0.4;
-    });
-    const island = this.data.island;
-    if (island) shared.uIsland.value.set(island.center[0], island.center[2], island.a, island.b);
+    if (ringed) {
+      const ring = new Ring(opts.ring!, this.data.deck, assets.band.data.band ?? {}, this.band);
+      this.ring = ring;
+      this.scene.add(ring.group);
+      this.owned.push(ring);
+      // No band member's light pools on the deck; its rings of light spread from the ring's middle.
+      for (const v of shared.uBand.value) v.set(0, -100, 0);
+      const { center, rx, rz } = ring.layout;
+      shared.uIsland.value.set(center[0], center[2], rx, rz);
+    } else {
+      const players = makeBand(this.data, assets.band.data.band ?? {}, focus);
+      this.band.add(players, true);
+      this.players = players;
+      if (opts.avatars) this.setAvatars(opts.avatars);
+      for (const lift of this.lifts) lift.person = players.find((p) => p.part === lift.part);
+      PLAYERS.forEach((key, i) => {
+        const p = this.data.band[key];
+        if (p) shared.uBand.value[i].set(...p);
+        shared.uFeature.value[i] = !focus ? 0.6 : key === focus ? 1 : 0.4;
+      });
+      const island = this.data.island;
+      if (island) shared.uIsland.value.set(island.center[0], island.center[2], island.a, island.b);
+    }
+    // Around a ring the band's own shots have nobody to film: the ring's take their place.
+    const shots = buildShots(this.data.cameras, this.ring ? {} : this.data.band, opts.part);
+    this.director = this.ring
+      ? new Director([...shots.filter((s) => !/^(band|close)/.test(s.name)), ...this.ring.shots()], 'auto', 7, false, 'ring')
+      : new Director(shots, menu ? 'calm' : 'auto', 7, menu);
     this.scene.add(this.crowd.group, this.band.group);
     this.owned.push(this.crowd, this.band);
 
@@ -346,6 +372,16 @@ export class AuroraStage {
 
   overdriveStart() {
     this.show.overdriveStart();
+  }
+
+  /** A Showdown's board as it stands (see Ring.setPlaces). */
+  setPlaces(places: RingPlace[]) {
+    this.ring?.setPlaces(places);
+  }
+
+  /** A Showdown Strike from one player to another, landing in `ms` milliseconds. */
+  strike(from: string, to: string, ms: number) {
+    this.ring?.strike(from, to, ms);
   }
 
   /** Keeps the camera on one part's band member (while a player dresses them), or lets it roam again (null). */
@@ -476,12 +512,13 @@ export class AuroraStage {
     }
     this.applyShow(this.show.state, bands, dt);
     this.moveLifts(this.show.state, dt);
+    this.ring?.update(dt, this.pulse, this.sparks);
 
     const pose = this.director.pose();
     // A close-up of a player follows their podium up and down.
     const shot = this.director.shot.name;
     const riding = shot === 'band' ? this.lifts : this.lifts.filter((l) => shot === `band-${l.part === 'vox' ? 'vocals' : l.part}`);
-    const raised = riding.reduce((sum, l) => sum + l.height, 0) / Math.max(1, riding.length);
+    const raised = (this.ring?.raised(shot) ?? 0) + riding.reduce((sum, l) => sum + l.height, 0) / Math.max(1, riding.length);
     pose.pos[1] += raised;
     pose.target[1] += raised;
     this.camera.position.set(...pose.pos);
@@ -758,6 +795,40 @@ export class AuroraStage {
     composer.addPass(new OutputPass());
     this.composer = composer;
   }
+}
+
+/** The speaker stacks on the band's island, merged into the venue's meshes: without the island they would float. */
+const ISLAND_STACKS = [-1, 1].map(
+  (side) => new THREE.Box3(new THREE.Vector3(side < 0 ? -7.1 : 4.2, 2.4, -6.4), new THREE.Vector3(side < 0 ? -4.2 : 7.1, 4.9, -5.4)),
+);
+
+/**
+ * Takes every triangle that lies wholly inside one of `boxes` out of the meshes directly under
+ * `root` (their geometry is copied first: the loaded venue is shared). Returns the copies.
+ */
+function cutOut(root: THREE.Object3D, boxes: THREE.Box3[]): THREE.BufferGeometry[] {
+  const made: THREE.BufferGeometry[] = [];
+  const v = new THREE.Vector3();
+  for (const o of root.children) {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.geometry.index) continue;
+    const pos = mesh.geometry.getAttribute('position');
+    const inside = (i: number) => boxes.some((b) => b.containsPoint(v.fromBufferAttribute(pos, i)));
+    const index = mesh.geometry.index;
+    const keep: number[] = [];
+    for (let t = 0; t < index.count; t += 3) {
+      const a = index.getX(t);
+      const b = index.getX(t + 1);
+      const c = index.getX(t + 2);
+      if (!(inside(a) && inside(b) && inside(c))) keep.push(a, b, c);
+    }
+    if (keep.length === index.count) continue;
+    const geometry = mesh.geometry.clone();
+    geometry.setIndex(keep);
+    mesh.geometry = geometry;
+    made.push(geometry);
+  }
+  return made;
 }
 
 /** The materials a post-processing pass draws with (its own fields, and arrays of them). */

@@ -371,8 +371,16 @@ export class Figures {
 
   /** Stands a movable person at another height. */
   setHeight(person: Person, y: number) {
+    const [x, , z] = person.pos;
+    this.moveTo(person, x, y, z);
+  }
+
+  /** Stands a movable person somewhere else, turned the way they were (shaken by a hit, say). */
+  moveTo(person: Person, x: number, y: number, z: number) {
     for (const at of this.placed.get(person) ?? []) {
+      at.matrix.elements[12] = x;
       at.matrix.elements[13] = y;
+      at.matrix.elements[14] = z;
       at.mesh.setMatrixAt(at.index, at.matrix);
       at.mesh.instanceMatrix.needsUpdate = true;
     }

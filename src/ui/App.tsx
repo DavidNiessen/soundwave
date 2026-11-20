@@ -86,6 +86,7 @@ import { PartyBoard, PartyScreen, type LastRun } from './PartyScreen';
 import { AvatarScreen } from './AvatarScreen';
 import { setMenuAvatars } from '../render/aurora/menuStage';
 import type { Avatars } from '../render/aurora/AuroraStage';
+import type { RingSeat } from '../render/aurora/ring';
 import { BoardsScreen } from './Boards';
 import { SongsScreen } from './SongsScreen';
 import { hashBytes } from '../storage/hash';
@@ -1103,6 +1104,17 @@ export function App() {
     else if (onlineState.account && onlineState.avatar) out[part] = onlineState.avatar;
     return out;
   };
+  /** A Showdown song's players for the stage's ring: everyone still in who has the song, this player on `part`. */
+  const ringFor = (songIndex: number, part: Part): RingSeat[] => {
+    const party = onlineState.party;
+    const me = onlineState.account?.id;
+    const song = party?.set[songIndex]?.id ?? '';
+    return (party?.members ?? [])
+      .filter((m) => !m.eliminated && (m.id === me || m.have.includes(song)))
+      .map((m) =>
+        m.id === me ? { id: m.id, part, avatar: onlineState.avatar ?? m.avatar, me: true } : { id: m.id, part: m.part, avatar: m.avatar },
+      );
+  };
   const menuLook = JSON.stringify(avatarsFor(pick.part));
   // The menu's band is dressed the same way; the look editor dresses it itself while it is open.
   useEffect(() => {
@@ -1461,6 +1473,7 @@ export function App() {
                       me: onlineState.account?.id ?? '',
                       cut: onlineState.party.cut ?? onlineState.party.members.length,
                       final: partyRun.songIndex + 1 >= onlineState.party.set.length,
+                      ring: ringFor(partyRun.songIndex, run.charts[run.index].part),
                     }
                   : undefined,
               }

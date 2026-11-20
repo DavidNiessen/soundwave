@@ -139,9 +139,11 @@ export class Director {
     private mode: CameraMode,
     seed = 7,
     private readonly menu = false,
+    /** The shot to open on (and to stay on with the camera fixed). */
+    private readonly opening = menu ? 'hero' : 'front',
   ) {
     this.seed = seed;
-    this.current = shots.find((s) => s.name === (menu ? 'hero' : 'front')) ?? shots[0];
+    this.current = shots.find((s) => s.name === opening) ?? shots[0];
     // The opening shot counts as on: the first cut must go somewhere else.
     this.recent = [this.current.name];
     this.visits.set(this.current.name, 1);
@@ -153,7 +155,7 @@ export class Director {
 
   setMode(mode: CameraMode) {
     this.mode = mode;
-    if (mode === 'fixed') this.cut(this.shots.find((s) => s.name === 'front') ?? this.shots[0]);
+    if (mode === 'fixed') this.cut(this.shots.find((s) => s.name === this.opening) ?? this.shots[0]);
   }
 
   /** A shot the camera stays on (a band member being dressed), or null to cut freely again. */

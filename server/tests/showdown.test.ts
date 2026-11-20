@@ -133,6 +133,8 @@ describe('Showdown', () => {
     const hit = last(1, 'hit')!;
     expect(hit).toMatchObject({ from: 'Player 2', ms: 8000 });
     expect(hit.at).toBe(7000 + HIT_WARNING_MS);
+    // Everyone sees the Strike fly, the players it is not about too.
+    for (const i of [0, 1, 2]) expect(last(i, 'strikeFired')).toMatchObject({ from: 'p2', to: 'p1', at: hit.at });
     // First place has nobody above: their press stays an overdrive.
     say(0, { type: 'strike', songIndex: 0, charge: 1 });
     expect(last(0, 'struck')).toMatchObject({ target: null });

@@ -327,6 +327,8 @@ export type ServerMessage =
   | { type: 'struck'; songIndex: number; target: string | null }
   /** Showdown, to the target: a hit from `from` (a name) lands at `at` (the server's clock) and lasts `ms`. */
   | { type: 'hit'; songIndex: number; from: string; at: number; ms: number }
+  /** Showdown, to everyone in the party: `from` struck `to` (player ids); it lands at `at` (the server's clock). */
+  | { type: 'strikeFired'; songIndex: number; from: string; to: string; at: number }
   /** A player watching cheers the players on. */
   | { type: 'cheer'; from: string };
 

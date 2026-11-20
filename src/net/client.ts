@@ -71,7 +71,7 @@ export interface OnlineState {
  * What happens to a player during a party's song: a Showdown Strike's answer or a hit coming, or a
  * cheer. Times (`at`) are this machine's performance.now.
  */
-export type PlayEvent = Extract<ServerMessage, { type: 'struck' | 'hit' | 'cheer' }>;
+export type PlayEvent = Extract<ServerMessage, { type: 'struck' | 'hit' | 'strikeFired' | 'cheer' }>;
 
 /** A song the party starts: when (performance.now ms on this machine) and on which chart (null: sit it out). */
 export interface PartyStart {
@@ -597,9 +597,10 @@ class OnlineClient {
         this.set({ error: msg.message });
         return;
       case 'hit':
+      case 'strikeFired':
       case 'struck':
       case 'cheer': {
-        const e: PlayEvent = msg.type === 'hit' ? { ...msg, at: msg.at - this.offset } : msg;
+        const e: PlayEvent = msg.type === 'hit' || msg.type === 'strikeFired' ? { ...msg, at: msg.at - this.offset } : msg;
         for (const l of this.playListeners) l(e);
         return;
       }
