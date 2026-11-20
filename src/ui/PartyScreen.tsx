@@ -15,6 +15,8 @@ import {
   CloudDownload,
   CloudUpload,
   Crosshair,
+  Pause,
+  Scissors,
   Crown,
   Download,
   KeyRound,
@@ -465,7 +467,8 @@ function InParty(props: PartyProps) {
   }, [party.code, haveKey, me, pick, have, calibrated]);
 
   if (!me) return null;
-  if (party.phase === 'results') return <PartyResults {...props} me={me} />;
+  if (party.phase === 'results')
+    return party.showdown ? <ShowdownResults key={party.songIndex} {...props} me={me} /> : <PartyResults {...props} me={me} />;
   if (!party.mode) return <PartyRoom {...props} me={me} />;
   return <ModeLobby {...props} me={me} have={have} />;
 }
@@ -1220,6 +1223,7 @@ export function PartyBoard({ me }: { me: string }) {
   const s = useOnline();
   const board = useSyncExternalStore(online.subscribeBoard, online.board);
   const showdown = !!s.party?.showdown;
+  if (showdown) return <ShowdownBoard me={me} />;
   const all = [...(board?.lines ?? [])]
     .filter((l) => !l.out || l.score > 0)
     .sort((a, b) => (showdown ? (b.share ?? 0) - (a.share ?? 0) : b.score - a.score));
@@ -1244,6 +1248,92 @@ export function PartyBoard({ me }: { me: string }) {
       ))}
       {showdown && <li className="party-board-left dim">{all.filter((l) => !l.out).length} playing</li>}
     </ol>
+  );
+}
+
+/** "1st", "2nd", "13th". */
+export const ordinal = (n: number) => {
+  const tens = n % 100;
+  const suffix = tens >= 11 && tens <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th');
+  return `${n}${suffix}`;
+};
+
+/**
+ * A Showdown's board beside the highway: the leader always, then the players around you; the cut
+ * line where the field is cut after this song, with how far above or below it you are; and your
+ * place, large, in the corner.
+ */
+function ShowdownBoard({ me }: { me: string }) {
+  const s = useOnline();
+  const board = useSyncExternalStore(online.subscribeBoard, online.board);
+  const ranked = [...(board?.lines ?? [])].filter((l) => !l.out).sort((a, b) => (b.share ?? 0) - (a.share ?? 0));
+  if (!ranked.length) return null;
+  const at = ranked.findIndex((l) => l.id === me);
+  const mine = ranked[at];
+  const cut = Math.min(s.party?.cut ?? ranked.length, ranked.length);
+  // The leader, then the two above you and the one below (more when you lead).
+  const shown = new Set<number>([0]);
+  if (at >= 0) for (let i = Math.max(0, at - 2); i <= Math.min(ranked.length - 1, at + 1); i++) shown.add(i);
+  else for (let i = 1; i < Math.min(4, ranked.length); i++) shown.add(i);
+  const rows = [...shown].sort((a, b) => a - b);
+  // How far you are from the cut, in share of par: above it, ahead of the first who would go out;
+  // below it, behind the last who would stay.
+  const safe = at >= 0 && at < cut;
+  const margin =
+    at < 0 || cut >= ranked.length
+      ? null
+      : safe
+        ? (mine.share ?? 0) - (ranked[cut]?.share ?? 0)
+        : (ranked[cut - 1]?.share ?? 0) - (mine.share ?? 0);
+  const name = (id: string) => nameOf(s.party, id);
+  const cutRow = (
+    <li key="cut" className={`sd-cut ${safe ? 'safe' : 'danger'}`} aria-label={`The cut: ${cut} go through`}>
+      <Scissors strokeWidth={ICON_STROKE} aria-hidden />
+      <span className="sd-cut-line" aria-hidden />
+      {margin !== null && (
+        <span className="sd-cut-margin num">
+          {safe ? '▲' : '▼'} {percent(Math.max(0, margin))}
+        </span>
+      )}
+      <span className="sd-cut-line" aria-hidden />
+    </li>
+  );
+  const items: React.ReactNode[] = [];
+  rows.forEach((i, k) => {
+    if (k > 0 && i - rows[k - 1] > 1) items.push(<li key={`gap-${i}`} className="sd-gap" aria-hidden />);
+    if (i === cut && cut < ranked.length && (k === 0 || rows[k - 1] < cut)) items.push(cutRow);
+    const l = ranked[i];
+    const hit = l.hit;
+    items.push(
+      <li key={l.id} className={`sd-row ${l.id === me ? 'me' : ''} ${i === 0 ? 'lead' : ''} ${hit ? 'hit' : ''}`}>
+        <span className="sd-rank num">{i === 0 ? <Crown strokeWidth={ICON_STROKE} aria-label="First" /> : i + 1}</span>
+        <span className="sd-name">
+          {!!mine?.aim && mine.aim === l.id && (
+            <Crosshair className="aim" strokeWidth={ICON_STROKE} aria-label="Your Strike would hit them" />
+          )}
+          {l.aim === me && <Swords className="aim" strokeWidth={ICON_STROKE} aria-label="Their Strike would hit you" />}
+          {name(l.id)}
+        </span>
+        <span className="sd-share num">{percent(l.share ?? 0)}</span>
+      </li>,
+    );
+  });
+  // The cut below everyone shown: drawn at the bottom.
+  if (cut < ranked.length && rows[rows.length - 1] < cut) items.push(cutRow);
+  return (
+    <>
+      <ol className="sd-board" aria-label="Showdown standings">
+        {items}
+        <li className="sd-left">
+          {ranked.length} playing · {cut === 1 ? 'the best one wins' : `top ${cut} go through`}
+        </li>
+      </ol>
+      {at >= 0 && (
+        <p className={`sd-place ${safe ? '' : 'danger'}`} aria-label={`You are ${ordinal(at + 1)}`}>
+          {ordinal(at + 1)}
+        </p>
+      )}
+    </>
   );
 }
 
@@ -1296,6 +1386,189 @@ function PartyBoardPanel({ s, party, hints }: { s: OnlineState; party: PartyStat
 }
 
 /* After a song ----------------------------------------------------------------------------- */
+
+/** How long a Showdown waits between songs before the host's game starts the next one, s. */
+const AUTO_NEXT_S = 20;
+
+/**
+ * A Showdown's results after a song: the round, every player in order with the cut line between
+ * those who go through and those out, the player's own card, and the next song coming up on a
+ * countdown (the host can start it at once, or hold it).
+ */
+function ShowdownResults({ party, s, settings, onBack, onStartSong, me }: PartyProps & { me: Member }) {
+  const hints = useHints(settings);
+  const host = party.host === s.account!.id;
+  const results = party.results.find((r) => r.songIndex === party.songIndex);
+  const member = (id: string) => party.members.find((m) => m.id === id);
+  const lines = results?.lines ?? [];
+  const stays = lines.filter((l) => !member(l.id)?.eliminated);
+  const outNow = lines.filter((l) => l.eliminated);
+  const outBefore = lines.filter((l) => member(l.id)?.eliminated && !l.eliminated);
+  const decided = stays.length <= 1;
+  const last = party.songIndex + 1 >= party.set.length || decided;
+  const nextSong = party.set[party.songIndex + 1];
+  const [left, setLeft] = useState(AUTO_NEXT_S);
+  const [held, setHeld] = useState(false);
+  const next = () => onStartSong(party.songIndex + 1);
+  const lobby = () => online.backToLobby();
+  // The countdown to the next song; at zero the host's game starts it.
+  useEffect(() => {
+    if (last || held) return;
+    const t = window.setInterval(() => setLeft((n) => Math.max(0, n - 1)), 1000);
+    return () => clearInterval(t);
+  }, [last, held]);
+  const startRef = useRef(next);
+  startRef.current = next;
+  useEffect(() => {
+    if (host && !last && !held && left === 0) startRef.current();
+  }, [host, last, held, left]);
+  const toggleHold = () => setHeld((h) => !h);
+
+  useActions([
+    backAction(onBack),
+    ...(host && !last
+      ? [
+          { id: 'party-next', label: 'Start it now', icon: SkipForward, ...keysOf('party.next'), primary: true, bar: false, run: next },
+          {
+            id: 'party-hold',
+            label: held ? 'Count down again' : 'Hold',
+            icon: Pause,
+            ...keysOf('party.hold'),
+            bar: false,
+            run: toggleHold,
+          },
+        ]
+      : []),
+    ...(host ? [{ id: 'party-lobby', label: 'Back to the lobby', icon: Undo2, ...keysOf('party.lobby'), bar: false, run: lobby }] : []),
+    ...leaveAction(host),
+  ]);
+
+  const mineAt = stays.findIndex((l) => l.id === me.id);
+  const mineLine = lines.find((l) => l.id === me.id);
+  const place = mineAt >= 0 ? mineAt + 1 : lines.findIndex((l) => l.id === me.id) + 1;
+  const played = !!mineLine?.result || mineLine?.share !== undefined;
+  const status = !played
+    ? { text: 'Watching', tone: '' }
+    : decided && mineAt === 0
+      ? { text: 'Winner', tone: 'win' }
+      : mineAt >= 0
+        ? { text: `Through · ${ordinal(place)}`, tone: 'through' }
+        : { text: `Out · ${ordinal(place)}`, tone: 'out' };
+
+  const row = (l: ResultLine, rank: number, i: number) => {
+    const m = member(l.id);
+    const Icon = m ? PART_ICON[m.part] : null;
+    return (
+      <li key={l.id} className={`sdr-row ${l.id === me.id ? 'me' : ''} ${l.eliminated ? 'out' : ''}`} style={{ ['--i' as string]: i }}>
+        <span className="sdr-rank num">{rank === 1 && !l.eliminated ? <Crown strokeWidth={ICON_STROKE} aria-label="First" /> : rank}</span>
+        <span className="sdr-name">{l.name}</span>
+        <span className={`sdr-acc ${l.result && l.result.accuracy >= 1 ? 'perfect' : ''}`}>
+          {l.result ? `${Math.round(l.result.accuracy * 100)}%` : '–'}
+        </span>
+        <span className="sdr-share num">{l.share !== undefined ? percent(l.share) : '–'}</span>
+        <span className="sdr-part">{Icon && <Icon strokeWidth={ICON_STROKE} aria-label={PART_LABEL[m!.part]} />}</span>
+      </li>
+    );
+  };
+
+  return (
+    <div className="lobby-body party-lobby sdr">
+      <div className="party-main">
+        <header className="sdr-head">
+          <span className="sdr-kicker">{decided ? 'The Showdown is decided' : last ? 'The final' : `Top ${stays.length} continue`}</span>
+          <h2 className="sdr-title">{last && party.songIndex > 0 ? 'Final' : `Round ${party.songIndex + 1}`}</h2>
+          <span className="dim">{party.set[party.songIndex]?.title}</span>
+        </header>
+        <ol className="sdr-grid" aria-label="Standings after this song">
+          {stays.map((l, i) => row(l, i + 1, i))}
+        </ol>
+        {outNow.length > 0 && (
+          <>
+            <div className="sdr-cut" aria-label="The cut">
+              <Scissors strokeWidth={ICON_STROKE} aria-hidden />
+              <span />
+            </div>
+            <ol className="sdr-grid" aria-label="Out after this song">
+              {outNow.map((l, i) => row(l, stays.length + i + 1, stays.length + i))}
+            </ol>
+          </>
+        )}
+        {outBefore.length > 0 && <p className="dim sdr-earlier">Out earlier: {outBefore.map((l) => l.name).join(', ')}</p>}
+      </div>
+
+      <section className="ready-panel sdr-side" data-nav-group="ready">
+        <div className={`sdr-me ${status.tone}`}>
+          <span className="sdr-me-status">{status.text}</span>
+          {mineLine?.result && (
+            <>
+              <Stars n={mineLine.result.stars} />
+              <dl className="sdr-stats">
+                <dt>Share of par</dt>
+                <dd className="num">{mineLine.share !== undefined ? percent(mineLine.share) : '–'}</dd>
+                <dt>Score</dt>
+                <dd className="num">{mineLine.result.score.toLocaleString()}</dd>
+                <dt>Accuracy</dt>
+                <dd className="num">{Math.round(mineLine.result.accuracy * 100)}%</dd>
+                <dt>Best streak</dt>
+                <dd className="num">{mineLine.result.bestStreak}</dd>
+                {mineLine.result.fullCombo && (
+                  <>
+                    <dt>Full combo</dt>
+                    <dd>Yes</dd>
+                  </>
+                )}
+              </dl>
+            </>
+          )}
+        </div>
+
+        {!last && nextSong && (
+          <div className="sdr-next">
+            <span className="label">Next song</span>
+            <span className="song-title">{nextSong.title}</span>
+            <span className="song-artist">{nextSong.artist}</span>
+            <span className={`sdr-count ${held ? 'held' : ''}`}>
+              {held ? (
+                'On hold'
+              ) : (
+                <>
+                  Starts in <span className="num">{left}</span>
+                </>
+              )}
+            </span>
+            {host && (
+              <div className="party-row">
+                <button type="button" className="btn primary" data-action="party-next" data-autofocus onClick={next}>
+                  <Hint {...keysOf('party.next')} {...hints} />
+                  <SkipForward strokeWidth={ICON_STROKE} aria-hidden />
+                  Start it now
+                </button>
+                <button type="button" className="btn" data-action="party-hold" onClick={toggleHold}>
+                  <Hint {...keysOf('party.hold')} {...hints} />
+                  <Pause strokeWidth={ICON_STROKE} aria-hidden />
+                  {held ? 'Count down again' : 'Hold'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        {last && (
+          <p className="hint">
+            {host ? 'That was the Showdown. Play another from the lobby.' : 'That was the Showdown. The host picks what comes next.'}
+          </p>
+        )}
+        {host && (
+          <button type="button" className={`btn wide ${last ? 'primary' : ''}`} data-action="party-lobby" onClick={lobby}>
+            <Hint {...keysOf('party.lobby')} {...hints} />
+            <Undo2 strokeWidth={ICON_STROKE} aria-hidden />
+            Back to the lobby
+          </button>
+        )}
+        <LeaveButton host={host} hints={hints} />
+      </section>
+    </div>
+  );
+}
 
 function PartyResults({ party, s, settings, onBack, onStartSong }: PartyProps & { me: Member }) {
   const hints = useHints(settings);

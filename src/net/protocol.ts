@@ -233,6 +233,8 @@ export interface PartyState {
   results: SongResults[];
   /** What the party plays, or null while the host has not picked yet (the party is just its players). */
   mode: PartyMode | null;
+  /** Showdown: how many players go through after the song being played (or whose results show); 1 in the final. */
+  cut?: number;
   /** The party plays a Showdown, with these options; null for any other mode. */
   showdown: ShowdownOptions | null;
   /** Private: never offered to friends on Discord (spec 5.4). */

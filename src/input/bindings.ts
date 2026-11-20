@@ -107,6 +107,7 @@ export const COMMANDS: Command[] = [
     { id: 'party.part', label: 'Next part', key: 'KeyP', pad: 'b3' },
     { id: 'party.difficulty', label: 'Next difficulty', key: 'KeyF', pad: 'b2' },
     { id: 'party.next', label: 'Next song', key: 'KeyN', pad: 'b9' },
+    { id: 'party.hold', label: 'Hold the countdown to the next song', key: 'Space' },
     { id: 'party.lobby', label: 'Back to the party lobby', key: 'KeyB', pad: 'b8' },
     { id: 'party.leave', label: 'Leave the party', key: 'KeyL' },
     { id: 'party.boards', label: 'Leaderboards', key: 'KeyG', pad: 'b10' },

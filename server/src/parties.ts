@@ -353,6 +353,8 @@ export class Parties {
     };
     s.phase = 'playing';
     s.songIndex = msg.songIndex;
+    if (s.showdown) s.cut = Math.min(playing.size, survivors(party.started || playing.size, msg.songIndex, s.set.length));
+    else delete s.cut;
     for (const m of s.members) {
       m.ready = false;
       const i = playing.has(m.id) ? msg.assign[m.id] : undefined;

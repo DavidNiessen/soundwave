@@ -73,6 +73,12 @@ describe('Showdown', () => {
     expect(survivors(5, 0, 1)).toBe(1);
   });
 
+  it('tells the party how many go through after each song, for the cut line', () => {
+    const { start, state } = showdown(6);
+    start(0);
+    expect(state().cut).toBe(survivors(6, 0, 2));
+  });
+
   it('makes a hit 3 s for a quarter meter and 8 s for a full one, half as long when repeated', () => {
     expect(hitLength(0.25, false)).toBe(3000);
     expect(hitLength(1, false)).toBe(8000);

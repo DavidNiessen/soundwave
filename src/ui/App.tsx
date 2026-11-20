@@ -1451,7 +1451,13 @@ export function App() {
                 board: <PartyBoard me={onlineState.account?.id ?? ''} />,
                 onProgress: (score, streak, stars) => online.progress(partyRun.songIndex, score, streak, stars),
                 showdown: onlineState.party?.showdown
-                  ? { songIndex: partyRun.songIndex, hits: onlineState.party.showdown.hits, me: onlineState.account?.id ?? '' }
+                  ? {
+                      songIndex: partyRun.songIndex,
+                      hits: onlineState.party.showdown.hits,
+                      me: onlineState.account?.id ?? '',
+                      cut: onlineState.party.cut ?? onlineState.party.members.length,
+                      final: partyRun.songIndex + 1 >= onlineState.party.set.length,
+                    }
                   : undefined,
               }
             : undefined

@@ -1,5 +1,5 @@
-import { LogOut, Play, RotateCcw, Settings as SettingsIcon, SkipForward } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { Crosshair, LogOut, Play, RotateCcw, Settings as SettingsIcon, SkipForward, Swords } from 'lucide-react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { showSong } from '../app/discord';
 import { getEngine } from '../audio/engine';
 import { playSfx } from '../audio/sfx';
@@ -7,7 +7,7 @@ import type { Chart } from '../chart/types';
 import type { Results } from '../game/GameSession';
 import type { ReplayInputs } from '../game/replay';
 import { FINALE_SECONDS, PlayController, type PlayPhase } from '../game/PlayController';
-import type { Settings } from '../game/settings';
+import { keyLabel, type Settings } from '../game/settings';
 import { useInputMode } from '../input/inputMode';
 import { focusStart } from '../input/menuNav';
 import { menuPulse } from '../input/rumble';
@@ -15,7 +15,7 @@ import { useActions } from './actions';
 import { Dialog } from './Dialog';
 import { hudRefs, PlayHud } from './PlayHud';
 import { ICON_STROKE } from './icons';
-import { BOARD_INTERVAL_MS } from '../net/protocol';
+import { BOARD_INTERVAL_MS, STRIKE_MIN_CHARGE } from '../net/protocol';
 import { online } from '../net/client';
 import type { Avatars } from '../render/aurora/AuroraStage';
 
@@ -50,7 +50,14 @@ interface Props {
     board: React.ReactNode;
     onProgress(score: number, streak: number, stars: number): void;
     /** A Showdown: the overdrive button strikes the player above (with hits on), and hits land here. */
-    showdown?: { songIndex: number; hits: boolean; me: string };
+    showdown?: {
+      songIndex: number;
+      hits: boolean;
+      me: string;
+      /** How many go through after this song (1 in the final). */
+      cut: number;
+      final: boolean;
+    };
   };
 }
 
@@ -329,6 +336,15 @@ export function PlayScreen({
       </div>
       {together?.board}
       {hit && <HitBanner hit={hit} onOver={() => setHit(null)} />}
+      {together?.showdown?.hits && phase !== 'countdown' && (
+        <StrikeReady me={together.showdown.me} ctrl={ctrlRef} settings={settings} usingPad={mode === 'pad'} />
+      )}
+      {together?.showdown && phase === 'countdown' && (
+        <div className="sd-round" aria-live="polite">
+          <span className="sd-round-title">{together.showdown.final ? 'Final' : `Round ${together.showdown.songIndex + 1}`}</span>
+          <span className="sd-round-sub">{together.showdown.final ? 'The best one wins' : `Top ${together.showdown.cut} go through`}</span>
+        </div>
+      )}
       {note && (
         <p className="showdown-note" key={note.key} role="status">
           {note.text}
@@ -425,9 +441,67 @@ function HitBanner({ hit, onOver }: { hit: HitNote; onOver(): void }) {
   return (
     <>
       {!coming && <div className="showdown-edge" aria-hidden />}
-      <p className={`showdown-hit ${coming ? 'coming' : ''}`} role="alert">
-        {coming ? `${hit.from} strikes you!` : `${what} · ${hit.from} · ${left} s`}
-      </p>
+      <div className={`sd-struck ${coming ? 'coming' : ''}`} role="alert">
+        <span className="sd-struck-label">{coming ? 'Incoming strike' : 'Struck you!'}</span>
+        <span className="sd-struck-name">
+          <Swords strokeWidth={ICON_STROKE} aria-hidden />
+          {hit.from}
+        </span>
+        {!coming && (
+          <span className="sd-struck-what">
+            {what} · {left} s
+          </span>
+        )}
+      </div>
     </>
+  );
+}
+
+/**
+ * Showdown: once the player has charge enough for a Strike and someone above to aim at, a banner
+ * over the highway names the target and their place, with the charge it would spend (a quarter of
+ * the meter at least; the fuller, the longer the hit).
+ */
+function StrikeReady({
+  me,
+  ctrl,
+  settings,
+  usingPad,
+}: {
+  me: string;
+  ctrl: React.RefObject<PlayController | null>;
+  settings: Settings;
+  usingPad: boolean;
+}) {
+  const board = useSyncExternalStore(online.subscribeBoard, online.board);
+  const [charge, setCharge] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      const s = ctrl.current?.session;
+      setCharge(s && !s.overdriveActive ? Math.round(s.overdrive * 20) / 20 : 0);
+    }, 150);
+    return () => clearInterval(t);
+  }, [ctrl]);
+  const lines = board?.lines ?? [];
+  const aim = lines.find((l) => l.id === me)?.aim;
+  if (!aim || charge < STRIKE_MIN_CHARGE) return null;
+  const ranked = lines.filter((l) => !l.out).sort((a, b) => (b.share ?? 0) - (a.share ?? 0));
+  const rank = ranked.findIndex((l) => l.id === aim) + 1;
+  const name = online.snapshot().party?.members.find((m) => m.id === aim)?.name ?? 'the player above';
+  return (
+    <div className="sd-ready" role="status">
+      <span className="sd-ready-label">Ready to strike</span>
+      <span className="sd-ready-target">
+        <span className="sd-ready-rank num">{rank}</span>
+        <Crosshair strokeWidth={ICON_STROKE} aria-hidden />
+        <span className="sd-ready-name">{name}</span>
+        <span className="sd-ready-key">{usingPad ? 'Overdrive' : keyLabel(settings.overdriveKey)}</span>
+      </span>
+      <span className="sd-ready-charge" aria-label={`Charge ${Math.round(charge * 100)}%`}>
+        {[0.25, 0.5, 0.75, 1].map((q) => (
+          <span key={q} className={charge >= q ? 'on' : ''} />
+        ))}
+      </span>
+    </div>
   );
 }
