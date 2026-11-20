@@ -20,7 +20,10 @@ Decisions made while building, which override what follows:
 - **Avatars, as built:** every band member comes with their own instrument and its animation (`band.glb`), so a
   player does not pick a character: at the part they play stands that part's band member, in the player's colours
   (top, trousers and skirt, instrument finish). The look editor (Play together → Your look) shows it on the menu stage,
-  at any part. Stored as `{ top, bottom, finish }` (`GET`/`PUT /me/profile`). The profile's line of text is not built.
+  at any part. Stored as `{ top, bottom, finish }` (`GET`/`PUT /me/profile`). The profile has no line of text: dropped,
+  the avatar is enough and free text from players would need moderating.
+- **Ending a party:** the host holds it (the button, or `L`), since it ends the party for everyone; players leave with a
+  press.
 - **Band mode, as built:** band overdrive doubles every member's multiplier for as long as the shortest of the
   overdrives that made it; a player drops out after 15 misses in a row (their notes score nothing) until a bandmate
   completes an overdrive phrase; when every player is out the song still plays to its end. Band boards are per song,

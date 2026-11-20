@@ -52,7 +52,7 @@ import {
   type SongResults,
 } from '../net/protocol';
 import type { SongMeta } from '../storage/db';
-import { Hint, useActions, useHints, type Action } from './actions';
+import { Hint, keyName, useActions, useHints, type Action } from './actions';
 import { Cover } from './Cover';
 import { AdminPanel, download, InvitePanel } from './ServerAdmin';
 import { HoldButton } from './HoldButton';
@@ -604,7 +604,19 @@ function PartyLobby({
     ...(watching
       ? [{ id: 'party-cheer', label: 'Cheer', icon: Megaphone, ...keysOf('party.cheer'), bar: false, run: () => online.cheer() }]
       : []),
-    { id: 'party-leave', label: 'Leave the party', icon: LogOut, ...keysOf('party.leave'), sfx: 'back', run: () => online.leaveParty() },
+    // The host ends the party for everyone, so they hold it (LeaveButton); the others leave with a press.
+    ...(host
+      ? []
+      : [
+          {
+            id: 'party-leave',
+            label: 'Leave the party',
+            icon: LogOut,
+            ...keysOf('party.leave'),
+            sfx: 'back',
+            run: () => online.leaveParty(),
+          },
+        ]),
   ]);
 
   return (
@@ -815,11 +827,7 @@ function PartyLobby({
           </p>
         )}
         {watching && <PartyBoardPanel s={s} party={party} hints={hints} />}
-        <button type="button" className="btn wide" data-action="party-leave" data-sfx="back" onClick={() => online.leaveParty()}>
-          <Hint kbd={keysOf('party.leave').kbd} {...hints} />
-          <LogOut strokeWidth={ICON_STROKE} aria-hidden />
-          {host ? 'End the party' : 'Leave the party'}
-        </button>
+        <LeaveButton host={host} hints={hints} />
       </section>
     </div>
   );
@@ -856,6 +864,33 @@ function BandPanel({ party, host, settings, onToggle }: { party: PartyState; hos
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * Leaving the party. The host's leaving ends it for everyone, so they hold it (its key too); everyone
+ * else leaves with a press.
+ */
+function LeaveButton({ host, hints }: { host: boolean; hints: ReturnType<typeof useHints> }) {
+  const key = keysOf('party.leave').kbd;
+  if (host)
+    return (
+      <HoldButton
+        label="End the party"
+        hint={hints.mode === 'keyboard' && key ? `Hold ${keyName(key)} to end it for everyone` : 'Hold to end it for everyone'}
+        tone="danger"
+        holdKey={key}
+        autoFocus={false}
+        glyphStyle={hints.style}
+        onComplete={() => online.leaveParty()}
+      />
+    );
+  return (
+    <button type="button" className="btn wide" data-action="party-leave" data-sfx="back" onClick={() => online.leaveParty()}>
+      <Hint kbd={key} {...hints} />
+      <LogOut strokeWidth={ICON_STROKE} aria-hidden />
+      Leave the party
+    </button>
   );
 }
 
@@ -1105,7 +1140,19 @@ function PartyResults({
       ? [{ id: 'party-next', label: 'Next song', icon: SkipForward, ...keysOf('party.next'), primary: true, run: next }]
       : []),
     ...(host ? [{ id: 'party-lobby', label: 'Back to the lobby', icon: Undo2, ...keysOf('party.lobby'), run: lobby }] : []),
-    { id: 'party-leave', label: 'Leave the party', icon: LogOut, ...keysOf('party.leave'), sfx: 'back', run: () => online.leaveParty() },
+    // The host ends the party for everyone, so they hold it (LeaveButton); the others leave with a press.
+    ...(host
+      ? []
+      : [
+          {
+            id: 'party-leave',
+            label: 'Leave the party',
+            icon: LogOut,
+            ...keysOf('party.leave'),
+            sfx: 'back',
+            run: () => online.leaveParty(),
+          },
+        ]),
   ]);
 
   return (
@@ -1162,11 +1209,7 @@ function PartyResults({
         ) : (
           <p className="hint">{last ? 'That was the set. The host picks what comes next.' : 'The host starts the next song.'}</p>
         )}
-        <button type="button" className="btn wide" data-action="party-leave" data-sfx="back" onClick={() => online.leaveParty()}>
-          <Hint kbd={keysOf('party.leave').kbd} {...hints} />
-          <LogOut strokeWidth={ICON_STROKE} aria-hidden />
-          Leave the party
-        </button>
+        <LeaveButton host={host} hints={hints} />
       </section>
     </div>
   );
