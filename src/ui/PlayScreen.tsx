@@ -459,7 +459,7 @@ function HitBanner({ hit, onOver }: { hit: HitNote; onOver(): void }) {
   }, [hit]);
   const coming = now < hit.at;
   const left = Math.max(0, Math.ceil((hit.at + hit.ms - now) / 1000));
-  const what = 'Fog, and your multiplier held at ×2';
+  const what = 'Your highway shimmers, and your multiplier holds at ×2';
   return (
     <>
       {!coming && <div className="showdown-edge" aria-hidden />}

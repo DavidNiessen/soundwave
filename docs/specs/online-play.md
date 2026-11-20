@@ -37,6 +37,9 @@ Decisions made while building, which override what follows:
   lacks a song of the set, the host's game sends it to the server (unless the host turned that off), which keeps
   it as a cache for that party's players only; every game without it downloads it. A downloaded song is held for the party only (in memory) and goes when the player leaves; **Keep it** on the set, or the setting _Keep the songs I get in a party_, adds it to the library. Not streamed: a song is decoded whole before it starts, so a slow connection never stalls it mid-song. On
   by default; the owner can turn it off (`partySongs`). Not the shared library: nothing lists these songs.
+- **The lobby counts itself in:** once everyone in a mode's lobby is ready (two players or more), the next song counts
+  down five seconds and starts by itself; anyone turning not ready stops it, and the host can still start at once.
+  Players show as cards in their look's colours. A Showdown's lobby shows its players on the ring behind it.
 - **A Showdown plays on a ring:** every player of the song stands on a round podium of their own in a ring on the deck
   (up to 16), as their part's band member in their look; the band's island makes way. Podiums rise by place on the
   board, sink for a player who is out, and glow red under a hit. Every Strike is seen by everyone: it flies as a

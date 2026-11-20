@@ -1,7 +1,7 @@
 import { detectGpu } from '../../game/graphics';
 import { AuroraStage, type Avatars } from '../aurora/AuroraStage';
 import { loadVenue, watchVenue } from '../aurora/assets';
-import type { RingPlace } from '../aurora/ring';
+import type { RingPlace, RingSeat } from '../aurora/ring';
 import type { Beat, FromStage, StageInput, StageRate, ToStage } from './protocol';
 
 /** How often a frozen stage still draws, ms (so a resized window is not left blank). */
@@ -29,7 +29,8 @@ interface Slot {
   stepped: boolean;
   /** The players' looks, kept for a stage still being built. */
   avatars?: Avatars;
-  /** The latest Showdown places, for a stage still being built. */
+  /** The latest ring and Showdown places, for a stage still being built. */
+  ring?: RingSeat[] | null;
   places?: RingPlace[];
 }
 
@@ -121,6 +122,7 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
     if (slot.disposed) return stage.dispose();
     slot.stage = stage;
     if (slot.avatars) stage.setAvatars(slot.avatars);
+    if (slot.ring !== undefined) stage.setRing(slot.ring);
     if (slot.places) stage.setPlaces(slot.places);
     // The first frame right away, even in a hidden window: it compiles the shaders, and the loading
     // screen waits for it.
@@ -174,6 +176,10 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
         break;
       case 'hold':
         slot.stage?.lookAt(m.part);
+        break;
+      case 'ring':
+        slot.ring = m.seats;
+        slot.stage?.setRing(m.seats);
         break;
       case 'places':
         slot.places = m.places;

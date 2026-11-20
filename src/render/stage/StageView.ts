@@ -1,7 +1,7 @@
 import { gpuFound, type GraphicsSettings } from '../../game/graphics';
 import type { Part } from '../../chart/types';
 import type { Avatars, StageOptions } from '../aurora/AuroraStage';
-import type { RingPlace } from '../aurora/ring';
+import type { RingPlace, RingSeat } from '../aurora/ring';
 import { serveWorkerFetch } from '../../app/workerFetch';
 import type { Beat, FromStage, StageInput, StageRate, ToStage } from './protocol';
 
@@ -292,6 +292,11 @@ export class StageView {
   /** Dresses the band as the players on its parts. */
   setAvatars(avatars: Avatars) {
     this.send({ type: 'avatars', id: this.id, avatars });
+  }
+
+  /** A Showdown's players on a ring of podiums in place of the band, or the band again (null). */
+  setRing(seats: RingSeat[] | null) {
+    this.send({ type: 'ring', id: this.id, seats });
   }
 
   /** A Showdown's board as it stands: the ring's podiums follow it. */

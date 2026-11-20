@@ -84,7 +84,7 @@ import { MetadataSheet } from './MetadataSheet';
 import { Toasts, useToasts } from './Toasts';
 import { PartyBoard, PartyScreen, type LastRun } from './PartyScreen';
 import { AvatarScreen } from './AvatarScreen';
-import { setMenuAvatars } from '../render/aurora/menuStage';
+import { setMenuAvatars, setMenuRing } from '../render/aurora/menuStage';
 import type { Avatars } from '../render/aurora/AuroraStage';
 import type { RingSeat } from '../render/aurora/ring';
 import { BoardsScreen } from './Boards';
@@ -1120,6 +1120,20 @@ export function App() {
   useEffect(() => {
     if (view.name !== 'avatar') setMenuAvatars(JSON.parse(menuLook) as Avatars);
   }, [menuLook, view.name]);
+  // A Showdown's lobby, and the time between its songs, stand the players still in on the ring behind the screen.
+  const lobbyParty = view.name === 'party' && onlineState.party?.mode === 'showdown' ? onlineState.party : null;
+  const lobbyRing = JSON.stringify(
+    lobbyParty && lobbyParty.phase !== 'playing'
+      ? lobbyParty.members
+          .filter((m) => !m.eliminated)
+          .map((m): RingSeat => {
+            const me = m.id === onlineState.account?.id;
+            const avatar = me ? (onlineState.avatar ?? m.avatar) : m.avatar;
+            return { id: m.id, part: m.part, ...(avatar ? { avatar } : {}), ...(me ? { me } : {}) };
+          })
+      : null,
+  );
+  useEffect(() => setMenuRing(JSON.parse(lobbyRing) as RingSeat[] | null), [lobbyRing]);
 
   /* Shared songs ---------------------------------------------------------------------------- */
 

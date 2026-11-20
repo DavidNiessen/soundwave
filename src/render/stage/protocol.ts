@@ -2,7 +2,7 @@ import type { BandLevels } from '../../audio/bands';
 import type { GraphicsSettings } from '../../game/graphics';
 import type { Part } from '../../chart/types';
 import type { Avatars, StageOptions } from '../aurora/AuroraStage';
-import type { RingPlace } from '../aurora/ring';
+import type { RingPlace, RingSeat } from '../aurora/ring';
 
 /** What the music is doing, as the page last heard it. The stage reads the latest on each of its frames. */
 export interface StageInput {
@@ -46,6 +46,8 @@ export type ToStage =
   | { type: 'avatars'; id: number; avatars: Avatars }
   /** Keeps the camera on one part's band member, or lets it roam again (null). */
   | { type: 'hold'; id: number; part: Part | null }
+  /** A Showdown's players on a ring of podiums in place of the band, or the band again (null). */
+  | { type: 'ring'; id: number; seats: RingSeat[] | null }
   /** A Showdown's board as it stands: the ring's podiums follow it. */
   | { type: 'places'; id: number; places: RingPlace[] }
   /** A Showdown Strike flies from one player to another and lands in `ms` milliseconds. */

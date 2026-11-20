@@ -40,6 +40,7 @@ import {
   Trophy,
   Undo2,
   UserMinus,
+  UserPlus,
   Users,
   WifiOff,
   type LucideIcon,
@@ -103,6 +104,23 @@ interface Props {
 }
 
 const useOnline = () => useSyncExternalStore(online.subscribe, online.snapshot);
+
+/** Seconds a lobby counts down once everyone is ready before the next song starts by itself. */
+const AUTO_START_S = 5;
+
+/** Whole seconds left of a countdown of `seconds` that runs while `on` (from when it turned on), or null when off. */
+function useCountdown(on: boolean, seconds: number): number | null {
+  const [left, setLeft] = useState<number | null>(null);
+  useEffect(() => {
+    if (!on) return setLeft(null);
+    const end = performance.now() + seconds * 1000;
+    const tick = () => setLeft(Math.max(0, Math.ceil((end - performance.now()) / 1000)));
+    tick();
+    const timer = window.setInterval(tick, 200);
+    return () => clearInterval(timer);
+  }, [on, seconds]);
+  return left;
+}
 type Hints = ReturnType<typeof useHints>;
 
 /** Each mode as the room offers it: what it is in a sentence, and who it is for. */
@@ -519,18 +537,26 @@ function PartyCode({ party, host, settings, hints }: { party: PartyState; host: 
   );
 }
 
-/** The players, each with their part, difficulty and ready tick; the host can remove one. */
+/**
+ * The players as cards, each in their look's colours with their part, difficulty and ready state;
+ * the host can remove one. While there is room, a last card says how friends join.
+ */
 function Players({ party, me, host, showReady }: { party: PartyState; me: Member; host: boolean; showReady: boolean }) {
   const ready = party.members.filter((m) => m.ready).length;
+  const n = party.members.length;
   return (
     <section className="party-players" aria-label="Players">
       <h2 className="label">
-        <Users strokeWidth={ICON_STROKE} aria-hidden /> Players · {party.members.length}
-        {showReady && <span className="label-note">{ready === party.members.length ? 'Everyone is ready' : `${ready} ready`}</span>}
+        <Users strokeWidth={ICON_STROKE} aria-hidden /> Players · {n}
+        {showReady && (
+          <span className={`label-note ${ready === n ? 'all-ready' : ''}`} aria-live="polite">
+            {ready === n ? 'Everyone is ready' : `${ready} of ${n} ready`}
+          </span>
+        )}
       </h2>
-      <ul className="party-members">
+      <ul className="player-cards">
         {party.members.map((m, i) => (
-          <MemberLine
+          <PlayerCard
             key={m.id}
             m={m}
             i={i}
@@ -541,12 +567,25 @@ function Players({ party, me, host, showReady }: { party: PartyState; me: Member
             onRemove={host && m.id !== me.id ? () => online.kick(m.id) : undefined}
           />
         ))}
+        {n < PARTY_MAX && (
+          <li className="player-card invite" style={{ ['--i' as string]: n }}>
+            <span className="player-art" aria-hidden>
+              <UserPlus strokeWidth={ICON_STROKE} />
+            </span>
+            <span className="player-text">
+              <span className="player-name">Room for {PARTY_MAX - n} more</span>
+              <span className="player-pick">
+                Friends join with <span className="party-code-chip">{party.code}</span>
+              </span>
+            </span>
+          </li>
+        )}
       </ul>
     </section>
   );
 }
 
-function MemberLine({
+function PlayerCard({
   m,
   i,
   host,
@@ -561,7 +600,7 @@ function MemberLine({
   me: boolean;
   setSize: number;
   showReady: boolean;
-  /** The host removes this player from the party (absent for the host's own line, and for everyone else). */
+  /** The host removes this player from the party (absent for the host's own card, and for everyone else). */
   onRemove?: () => void;
 }) {
   const Icon = PART_ICON[m.part];
@@ -571,29 +610,36 @@ function MemberLine({
     missing > 0 && setSize > 0 ? `Missing ${missing} ${missing === 1 ? 'song' : 'songs'}` : '',
     m.calibrated ? '' : 'Not calibrated',
   ].filter(Boolean);
+  // Their look's colours, where they made one: the band member they play wears them on stage.
+  const look = m.avatar ? { ['--top' as string]: m.avatar.top, ['--bottom' as string]: m.avatar.bottom } : {};
   return (
-    <li className={`party-member ${me ? 'me' : ''} ${m.connected ? '' : 'gone'}`} style={{ ['--i' as string]: i }}>
-      {/* Their look's colour, where they made one: the band member at their part wears it on stage. */}
-      <span className="party-swatch" style={m.avatar ? { background: m.avatar.top } : undefined} aria-hidden>
-        {m.name.slice(0, 1).toUpperCase()}
+    <li
+      className={`player-card ${me ? 'me' : ''} ${m.connected ? '' : 'gone'} ${showReady && m.ready ? 'ready' : ''}`}
+      style={{ ['--i' as string]: i, ...look }}
+    >
+      <span className={`player-art ${m.avatar ? 'dressed' : ''}`} aria-hidden>
+        <span className="player-initial">{m.name.slice(0, 1).toUpperCase()}</span>
+        <span className="player-part">
+          <Icon strokeWidth={ICON_STROKE} />
+        </span>
+        {showReady && m.ready && (
+          <span className="player-ready">
+            <Check strokeWidth={ICON_STROKE} />
+          </span>
+        )}
       </span>
-      <span className="song-text">
-        <span className="song-title party-name">
-          {m.name}
+      <span className="player-text">
+        <span className="player-name">
+          <span className="player-name-text">{m.name}</span>
           {host && <Crown strokeWidth={ICON_STROKE} aria-label="Host" />}
-          {me && <span className="dim"> · you</span>}
+          {me && <span className="player-you">You</span>}
         </span>
-        <span className="song-artist party-pick">
-          <Icon strokeWidth={ICON_STROKE} aria-hidden />
-          {PART_LABEL[m.part]} · {DIFFICULTY_LABEL[m.difficulty]}
-          {notes.length > 0 && <span className="dim"> · {notes.join(' · ')}</span>}
+        <span className="player-pick">
+          {PART_LABEL[m.part]} · <Pips difficulty={m.difficulty} /> {DIFFICULTY_LABEL[m.difficulty]}
         </span>
+        {notes.length > 0 && <span className="player-notes">{notes.join(' · ')}</span>}
+        {showReady && <span className="sr-only">{m.ready ? 'Ready' : 'Not ready'}</span>}
       </span>
-      {showReady && (
-        <span className={`party-tick ${m.ready ? 'on' : ''}`} aria-label={m.ready ? 'Ready' : 'Not ready'}>
-          {m.ready && <Check strokeWidth={ICON_STROKE} aria-hidden />}
-        </span>
-      )}
       {onRemove && (
         <button type="button" className="icon-btn party-remove" aria-label={`Remove ${m.name} from the party`} onClick={onRemove}>
           <UserMinus strokeWidth={ICON_STROKE} aria-hidden />
@@ -794,6 +840,17 @@ function ModeLobby({
   const nextSong = party.set[nextIndex];
   const canStart = host && !watching && !!nextSong && playable(nextSong.id);
   const total = formatTime(party.set.reduce((t, x) => t + x.duration, 0));
+  // Everyone ready (two or more): the next song counts down and starts by itself; the host can still start it now.
+  const counting = !watching && !!nextSong && party.members.filter((m) => m.connected).length >= 2 && everyoneReady;
+  const left = useCountdown(counting, AUTO_START_S);
+  const started = useRef(false);
+  useEffect(() => {
+    if (!counting) started.current = false;
+    else if (left === 0 && canStart && !started.current) {
+      started.current = true;
+      onStartSong(nextIndex);
+    }
+  }, [counting, left, canStart, nextIndex, onStartSong]);
 
   useActions([
     backAction(onBack),
@@ -849,7 +906,7 @@ function ModeLobby({
   const diffRow = useSlide<HTMLDivElement>(me.difficulty);
 
   return (
-    <div className="lobby-body party-lobby">
+    <div className={`lobby-body party-lobby ${sd ? 'ringside' : ''}`}>
       <div className="party-main">
         <div className="party-set-head">
           <h2 className="label">
@@ -866,6 +923,13 @@ function ModeLobby({
               <Hint {...keysOf('party.pickSongs')} {...hints} />
               <ListMusic strokeWidth={ICON_STROKE} aria-hidden />
               Pick songs
+            </button>
+          )}
+          {host && (
+            <button type="button" className="btn small" data-action="party-change-mode" disabled={watching} onClick={changeMode}>
+              <Hint {...keysOf('party.changeMode')} {...hints} />
+              <Undo2 strokeWidth={ICON_STROKE} aria-hidden />
+              Other mode
             </button>
           )}
         </div>
@@ -906,6 +970,7 @@ function ModeLobby({
         )}
         <Players party={party} me={me} host={host} showReady />
       </div>
+      {sd && <div className="ring-window" aria-hidden />}
 
       <section className="ready-panel" data-nav-group="ready" aria-label="Your part and difficulty">
         {watching && <PartyBoardPanel s={s} party={party} hints={hints} />}
@@ -980,7 +1045,7 @@ function ModeLobby({
         </p>
         {!calibrated && (
           <p className="hint party-calibrate">
-            Scores are compared here, and your audio offset was never calibrated on this output.
+            <span>Your audio offset was never calibrated on this output, and scores are compared here.</span>
             <button type="button" className="btn small" onClick={() => setCalibrating(true)}>
               <Gauge strokeWidth={ICON_STROKE} aria-hidden />
               Calibrate
@@ -1008,6 +1073,17 @@ function ModeLobby({
           {me.ready && <span className="btn-note">Press again if you are not</span>}
         </button>
 
+        {counting && left !== null && (
+          <p className="party-countdown" role="status" style={{ ['--left' as string]: left / AUTO_START_S }}>
+            <span className="party-countdown-num" key={left}>
+              {left}
+            </span>
+            <span className="party-countdown-text">
+              Everyone is ready
+              <span className="dim">{nextSong ? `${nextSong.title} starts by itself` : 'Starting'}</span>
+            </span>
+          </p>
+        )}
         {host ? (
           <HoldButton
             label={nextSong ? `Start ${nextSong.title}` : 'Start'}
@@ -1020,8 +1096,8 @@ function ModeLobby({
                     ? 'You need this song, with notes, to start it: everyone plays your charts.'
                     : everyoneReady
                       ? hints.mode === 'keyboard'
-                        ? 'Hold Enter to start'
-                        : 'Hold to start'
+                        ? 'Hold Enter to start now'
+                        : 'Hold to start now'
                       : 'Not everyone is ready. Hold to start anyway.'
             }
             disabled={!canStart}
@@ -1035,18 +1111,6 @@ function ModeLobby({
             song{everyoneReady ? '.' : ' once everyone is ready.'}
           </p>
         )}
-        <div className="party-row party-foot">
-          {host && (
-            <button type="button" className="btn small" data-action="party-change-mode" disabled={watching} onClick={changeMode}>
-              <Hint {...keysOf('party.changeMode')} {...hints} />
-              <Undo2 strokeWidth={ICON_STROKE} aria-hidden />
-              Other mode
-            </button>
-          )}
-          <span className="party-code-chip" title="The party’s code">
-            {party.code}
-          </span>
-        </div>
         <LeaveButton host={host} hints={hints} />
       </section>
     </div>
@@ -1158,40 +1222,27 @@ function ShowdownOptionsPanel({
   const sd = party.showdown!;
   const left = party.members.filter((m) => !m.eliminated).length;
   const onePart = sd.part ?? me.part;
-  const rows: [string, string, string, [string, boolean][], () => void][] = [
-    [
-      'party-hits',
-      'party.hits',
-      'Hits',
-      [
-        ['On', sd.hits],
-        ['Off', !sd.hits],
-      ],
-      on.toggleHits,
-    ],
-    [
-      'party-one-part',
-      'party.onePart',
-      'Parts',
-      [
-        ['Any part', !sd.part],
-        [`${PART_LABEL[onePart]} only`, !!sd.part],
-      ],
-      on.toggleOnePart,
-    ],
-    [
-      'party-rotation',
-      'party.rotation',
-      'Songs',
-      [
-        ['The host’s', !sd.rotation],
-        ['Server rotation', sd.rotation],
-      ],
-      on.toggleRotation,
-    ],
+  const chips: { id: string; binding: string; icon: LucideIcon; label: string; value: string; run(): void }[] = [
+    { id: 'party-hits', binding: 'party.hits', icon: Crosshair, label: 'Hits', value: sd.hits ? 'On' : 'Off', run: on.toggleHits },
+    {
+      id: 'party-one-part',
+      binding: 'party.onePart',
+      icon: PART_ICON[onePart],
+      label: 'Parts',
+      value: sd.part ? `${PART_LABEL[onePart]} only` : 'Any',
+      run: on.toggleOnePart,
+    },
+    {
+      id: 'party-rotation',
+      binding: 'party.rotation',
+      icon: ListMusic,
+      label: 'Songs',
+      value: sd.rotation ? 'Server rotation' : 'The host’s',
+      run: on.toggleRotation,
+    },
   ];
   return (
-    <section className="ready-panel showdown-panel" aria-label="Showdown options">
+    <section className="showdown-rules" aria-label="Showdown options">
       <h2 className="label">
         <Swords strokeWidth={ICON_STROKE} aria-hidden /> Showdown
         {party.songIndex >= 0 && (
@@ -1201,34 +1252,25 @@ function ShowdownOptionsPanel({
         )}
       </h2>
       <p className="hint">
-        The best scores stay in, and the lowest go out after each song.
-        {sd.hits &&
-          ' Your overdrive button strikes the player just above you. A hit fogs the far highway and holds the multiplier at ×2 while it lasts.'}
+        The lowest scores go out after each song.
+        {sd.hits && ' Your overdrive strikes the player just above you: their highway shimmers and their multiplier stays at ×2.'}
       </p>
-      <div className="option-rows">
-        {rows.map(([id, binding, label, choices, run]) => (
-          <div key={id} className="option-row">
-            <span className="option-label">
-              {label}
-              {host && <Hint {...keysOf(binding)} {...hints} />}
-            </span>
-            <div className="choice-pair" role="radiogroup" aria-label={label}>
-              {choices.map(([text, chosen]) => (
-                <button
-                  key={text}
-                  type="button"
-                  role="radio"
-                  aria-checked={chosen}
-                  className={`choice ${chosen ? 'on' : ''}`}
-                  data-action={chosen ? undefined : id}
-                  disabled={!host}
-                  onClick={() => !chosen && run()}
-                >
-                  {text}
-                </button>
-              ))}
-            </div>
-          </div>
+      <div className="option-chips">
+        {chips.map(({ id, binding, icon: Icon, label, value, run }) => (
+          <button
+            key={id}
+            type="button"
+            className="option-chip"
+            data-action={id}
+            disabled={!host}
+            aria-label={`${label}: ${value}${host ? ', change' : ''}`}
+            onClick={run}
+          >
+            {host && <Hint {...keysOf(binding)} {...hints} />}
+            <Icon strokeWidth={ICON_STROKE} aria-hidden />
+            <span className="option-chip-label">{label}</span>
+            <span className="option-chip-value">{value}</span>
+          </button>
         ))}
       </div>
     </section>

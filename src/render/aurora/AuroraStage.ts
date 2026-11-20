@@ -90,7 +90,11 @@ export class AuroraStage {
     return new AuroraStage(canvas, await loadVenue(), g, opts);
   }
 
-  readonly director: Director;
+  /** The camera's director: the band's, or a Showdown ring's while there is one. */
+  director: Director;
+  private readonly bandDirector: Director;
+  private readonly menu: boolean;
+  private readonly bandSet: VenueAssets['band'];
   /** Bass, middle and treble as the page meters them (see BandMeter). */
   private readonly bandsIn: BandLevels = { low: 0.25, mid: 0.25, high: 0.2 };
   /** The canvas's size on the page, in CSS pixels, and the screen's pixel ratio. */
@@ -107,6 +111,10 @@ export class AuroraStage {
   private players: Person[] = [];
   /** A Showdown's ring of players (see StageOptions.ring), or null for the band. */
   private ring: Ring | null = null;
+  private ringFigures: Figures | null = null;
+  /** What makes way for a ring: the band's island, steps and podiums, and the venue's meshes with its speaker stacks cut out. */
+  private island: THREE.Object3D[] = [];
+  private stacks: { mesh: THREE.Mesh; whole: THREE.BufferGeometry; cut: THREE.BufferGeometry }[] = [];
   /**
    * The lake, and the picture it mirrors: the scene above it, drawn once more each frame from the
    * camera's reflection below the surface.
@@ -183,7 +191,8 @@ export class AuroraStage {
     canvas.addEventListener('webglcontextrestored', this.onContextRestored as EventListener);
     const menu = opts.mode === 'menu';
     this.show = new LightShow(menu);
-    const ringed = !menu && !!opts.ring?.length;
+    this.menu = menu;
+    this.bandSet = assets.band;
 
     const moon = this.data.moon;
     shared.uGlowPos.value.set(...moon.center);
@@ -195,20 +204,18 @@ export class AuroraStage {
     this.owned.push(sky.geometry, sky.material);
 
     const venue = assets.scene.clone(true);
-    // A Showdown's ring stands on the open deck: the band's island, steps and podiums go.
-    if (ringed) {
-      venue.remove(...venue.children.filter((o) => /^(Island|Step_|Podium_)/.test(o.name)));
-      this.owned.push(...cutOut(venue, ISLAND_STACKS));
-    }
+    this.stacks = cutOut(venue, ISLAND_STACKS);
+    this.owned.push(...this.stacks.map((x) => x.cut));
     this.owned.push(...applyVenueMaterials(venue, this.data.deck, g.lights === 'medium' || g.lights === 'high'));
     this.scene.add(venue);
     // Each podium and what stands on it moves as one.
-    for (const [part, p] of Object.entries(ringed ? {} : (this.data.podiums ?? {}))) {
+    for (const [part, p] of Object.entries(this.data.podiums ?? {})) {
       const group = new THREE.Group();
       venue.add(group);
       for (const piece of venue.children.filter((o) => o.name.startsWith(`Podium_${part}_`))) group.add(piece);
       this.lifts.push({ part, index: PLAYERS.indexOf(part), group, rest: this.data.band[part]?.[1] ?? 0, travel: p.travel, height: 0 });
     }
+    this.island = [...venue.children.filter((o) => /^(Island|Step_)/.test(o.name)), ...this.lifts.map((l) => l.group)];
 
     // The land, the lake and the festival grounds around the stage.
     const land = assets.scenery;
@@ -252,34 +259,21 @@ export class AuroraStage {
     this.band = new Figures(assets.band);
     // The part being played is picked out: more light on that player and under their feet.
     const focus = opts.part === 'vocals' ? 'vox' : opts.part;
-    if (ringed) {
-      const ring = new Ring(opts.ring!, this.data.deck, assets.band.data.band ?? {}, this.band);
-      this.ring = ring;
-      this.scene.add(ring.group);
-      this.owned.push(ring);
-      // No band member's light pools on the deck; its rings of light spread from the ring's middle.
-      for (const v of shared.uBand.value) v.set(0, -100, 0);
-      const { center, rx, rz } = ring.layout;
-      shared.uIsland.value.set(center[0], center[2], rx, rz);
-    } else {
-      const players = makeBand(this.data, assets.band.data.band ?? {}, focus);
-      this.band.add(players, true);
-      this.players = players;
-      if (opts.avatars) this.setAvatars(opts.avatars);
-      for (const lift of this.lifts) lift.person = players.find((p) => p.part === lift.part);
-      PLAYERS.forEach((key, i) => {
-        const p = this.data.band[key];
-        if (p) shared.uBand.value[i].set(...p);
-        shared.uFeature.value[i] = !focus ? 0.6 : key === focus ? 1 : 0.4;
-      });
-      const island = this.data.island;
-      if (island) shared.uIsland.value.set(island.center[0], island.center[2], island.a, island.b);
-    }
-    // Around a ring the band's own shots have nobody to film: the ring's take their place.
-    const shots = buildShots(this.data.cameras, this.ring ? {} : this.data.band, opts.part);
-    this.director = this.ring
-      ? new Director([...shots.filter((s) => !/^(band|close)/.test(s.name)), ...this.ring.shots()], 'auto', 7, false, 'ring')
-      : new Director(shots, menu ? 'calm' : 'auto', 7, menu);
+    const players = makeBand(this.data, assets.band.data.band ?? {}, focus);
+    this.band.add(players, true);
+    this.players = players;
+    if (opts.avatars) this.setAvatars(opts.avatars);
+    for (const lift of this.lifts) lift.person = players.find((p) => p.part === lift.part);
+    PLAYERS.forEach((key, i) => {
+      const p = this.data.band[key];
+      if (p) shared.uBand.value[i].set(...p);
+      shared.uFeature.value[i] = !focus ? 0.6 : key === focus ? 1 : 0.4;
+    });
+    const island = this.data.island;
+    if (island) shared.uIsland.value.set(island.center[0], island.center[2], island.a, island.b);
+    this.bandDirector = new Director(buildShots(this.data.cameras, this.data.band, opts.part), menu ? 'calm' : 'auto', 7, menu);
+    this.director = this.bandDirector;
+    if (opts.ring?.length) this.setRing(opts.ring);
     this.scene.add(this.crowd.group, this.band.group);
     this.owned.push(this.crowd, this.band);
 
@@ -372,6 +366,51 @@ export class AuroraStage {
 
   overdriveStart() {
     this.show.overdriveStart();
+  }
+
+  /**
+   * Puts a Showdown's players on a ring of podiums in place of the band (the island, its steps and
+   * podiums and the speaker stacks on it make way), or brings the band back (null or nobody).
+   * The camera's shots go with it: the ring's, or the band's.
+   */
+  setRing(seats: RingSeat[] | null) {
+    if (this.ring) {
+      this.scene.remove(this.ring.group, this.ringFigures!.group);
+      this.ring.dispose();
+      this.ringFigures!.dispose();
+      this.ring = this.ringFigures = null;
+    }
+    const on = !!seats?.length;
+    for (const o of this.island) o.visible = !on;
+    for (const x of this.stacks) x.mesh.geometry = on ? x.cut : x.whole;
+    this.band.group.visible = !on;
+    if (!seats?.length) {
+      this.director = this.bandDirector;
+      return;
+    }
+    const figures = new Figures(this.bandSet);
+    const ring = new Ring(seats, this.data.deck, this.bandSet.data.band ?? {}, figures);
+    this.ring = ring;
+    this.ringFigures = figures;
+    this.scene.add(ring.group, figures.group);
+    // The band's own shots have nobody to film: the ring's take their place. The menu keeps to the ring's.
+    const shots = ring.shots();
+    this.director = this.menu
+      ? new Director(
+          // Not over this player's shoulder: in a menu they stand behind its panels at the left.
+          shots.filter((x) => x.name !== 'ring-me').map((x) => ({ ...x, calm: true })),
+          'calm',
+          7,
+          true,
+          'ring',
+        )
+      : new Director(
+          [...buildShots(this.data.cameras, {}).filter((x) => !/^(band|close)/.test(x.name)), ...shots],
+          'auto',
+          7,
+          false,
+          'ring',
+        );
   }
 
   /** A Showdown's board as it stands (see Ring.setPlaces). */
@@ -511,8 +550,18 @@ export class AuroraStage {
       this.barTail = this.barPulse;
     }
     this.applyShow(this.show.state, bands, dt);
-    this.moveLifts(this.show.state, dt);
-    this.ring?.update(dt, this.pulse, this.sparks);
+    if (this.ring) {
+      this.ring.update(dt, this.pulse, this.sparks);
+      // No band member's light pools on the deck; its rings of light spread from the ring's middle.
+      // (Set every frame: the shaders' values are shared by every stage drawn here.)
+      for (const v of shared.uBand.value) v.set(0, -100, 0);
+      const { center, rx, rz } = this.ring.layout;
+      shared.uIsland.value.set(center[0], center[2], rx, rz);
+    } else {
+      const island = this.data.island;
+      if (island) shared.uIsland.value.set(island.center[0], island.center[2], island.a, island.b);
+      this.moveLifts(this.show.state, dt);
+    }
 
     const pose = this.director.pose();
     // A close-up of a player follows their podium up and down.
@@ -563,7 +612,9 @@ export class AuroraStage {
       .set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1)
       .multiply(cam.projectionMatrix)
       .multiply(cam.matrixWorldInverse);
-    const left = [this.water, this.crowd.group, this.band.group, this.beams.group].filter((o) => o.visible);
+    const left = [this.water, this.crowd.group, this.band.group, this.ringFigures?.group, this.beams.group].filter(
+      (o): o is THREE.Object3D => !!o?.visible,
+    );
     for (const o of left) o.visible = false;
     this.renderer.setRenderTarget(mirror);
     this.renderer.render(this.scene, cam);
@@ -589,6 +640,7 @@ export class AuroraStage {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this.setRing(null);
     this.canvas.removeEventListener('webglcontextlost', this.onContextLost);
     this.canvas.removeEventListener('webglcontextrestored', this.onContextRestored as EventListener);
     for (const o of this.owned) o.dispose();
@@ -708,7 +760,8 @@ export class AuroraStage {
       l.height += (l.travel * Math.min(1, want) - l.height) * Math.min(1, dt * 0.9);
       l.group.position.y = l.height;
       if (l.person) this.band.setHeight(l.person, l.rest + l.height);
-      if (l.index >= 0) shared.uBand.value[l.index].y = l.rest + l.height;
+      const at = this.data.band[l.part];
+      if (l.index >= 0 && at) shared.uBand.value[l.index].set(at[0], l.rest + l.height, at[2]);
     }
   }
 
@@ -803,11 +856,11 @@ const ISLAND_STACKS = [-1, 1].map(
 );
 
 /**
- * Takes every triangle that lies wholly inside one of `boxes` out of the meshes directly under
- * `root` (their geometry is copied first: the loaded venue is shared). Returns the copies.
+ * Copies of the meshes directly under `root` without the triangles that lie wholly inside one of
+ * `boxes`, beside the geometry they have now (the loaded venue's, shared, so it is never changed).
  */
-function cutOut(root: THREE.Object3D, boxes: THREE.Box3[]): THREE.BufferGeometry[] {
-  const made: THREE.BufferGeometry[] = [];
+function cutOut(root: THREE.Object3D, boxes: THREE.Box3[]): { mesh: THREE.Mesh; whole: THREE.BufferGeometry; cut: THREE.BufferGeometry }[] {
+  const made: { mesh: THREE.Mesh; whole: THREE.BufferGeometry; cut: THREE.BufferGeometry }[] = [];
   const v = new THREE.Vector3();
   for (const o of root.children) {
     const mesh = o as THREE.Mesh;
@@ -823,10 +876,9 @@ function cutOut(root: THREE.Object3D, boxes: THREE.Box3[]): THREE.BufferGeometry
       if (!(inside(a) && inside(b) && inside(c))) keep.push(a, b, c);
     }
     if (keep.length === index.count) continue;
-    const geometry = mesh.geometry.clone();
-    geometry.setIndex(keep);
-    mesh.geometry = geometry;
-    made.push(geometry);
+    const cut = mesh.geometry.clone();
+    cut.setIndex(keep);
+    made.push({ mesh, whole: mesh.geometry, cut });
   }
   return made;
 }
