@@ -125,7 +125,7 @@ const FIELDS: Record<Tab, readonly (keyof Settings)[]> = {
   controller: ['glyphs', 'rumble', 'rumbleHits', 'rumbleMisses', 'rumbleSustains', 'rumbleOverdrive', 'ps5Haptics'],
   touch: ['touchHaptics', 'touchOverdriveSide'],
   shortcuts: ['keys4', 'keys5', 'overdriveKey', 'pad4', 'pad5', 'padOverdrive', 'bindings'],
-  online: ['playMode', 'displayName', 'postScores', 'showdownHits', 'discordJoin', 'shareSongs'],
+  online: ['displayName', 'postScores', 'showdownHits', 'discordJoin', 'shareSongs', 'keepPartySongs'],
   advanced: ['checkUpdates', 'discordStatus'],
 };
 
@@ -1718,21 +1718,8 @@ function onlineSections(s: Settings, set: (patch: Partial<Settings>) => void): S
   });
   return [
     {
-      title: 'How you play',
+      title: 'Playing together',
       rows: [
-        {
-          kind: 'choice',
-          id: 'playMode',
-          label: 'How to play',
-          help: 'Just me keeps the game offline, as it always was. With friends nearby, the desktop app hosts sessions friends join on this network or over the internet, with no accounts. On a server, you sign in to a Soundwave server for parties, leaderboards and shared songs.',
-          value: s.playMode,
-          options: [
-            { value: 'solo', label: 'Just me' },
-            { value: 'nearby', label: 'With friends nearby' },
-            { value: 'server', label: 'On a server' },
-          ],
-          set: (v) => set({ playMode: v as Settings['playMode'], playModeAsked: true }),
-        },
         {
           kind: 'text',
           id: 'displayName',
@@ -1747,6 +1734,13 @@ function onlineSections(s: Settings, set: (patch: Partial<Settings>) => void): S
           'In a party you host, a song a player does not have goes to them through the server, audio, charts and all, so they can play it. The server keeps it for a while, for your party’s players only. Off: players without a song sit it out.',
           s.shareSongs,
           (v) => set({ shareSongs: v }),
+        ),
+        onOff(
+          'keepPartySongs',
+          'Keep the songs I get in a party',
+          'A party’s song you do not have is downloaded for the party and goes when you leave it, so your library stays yours. On: each one is added to your library instead. You can also keep one from the party’s set.',
+          s.keepPartySongs,
+          (v) => set({ keepPartySongs: v }),
         ),
       ],
     },

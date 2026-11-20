@@ -5,7 +5,6 @@ import { DEFAULT_GRAPHICS, normalizeGraphics, type GraphicsSettings } from './gr
 import { DEFAULT_VIDEO_EXPORT, normalizeVideoExport, type VideoExportSettings } from './videoExport';
 
 /** Just me; with friends nearby (a session the desktop app hosts); on a server. */
-export type PlayMode = 'solo' | 'nearby' | 'server';
 
 /** Whether the audio offset was calibrated on the output device in use. */
 export const isCalibrated = (s: Settings) => s.calibratedOn !== null && s.calibratedOn === s.outputDevice;
@@ -68,10 +67,6 @@ export interface Settings {
   checkUpdates: boolean;
   /** The desktop app shows what is being played on the player's Discord profile. */
   discordStatus: boolean;
-  /** How the player plays: alone, in a session on this network or the internet, or on a server. */
-  playMode: PlayMode;
-  /** The one-time card asking how to play has been answered. */
-  playModeAsked: boolean;
   /** The name shown in a local session (no accounts there). */
   displayName: string;
   /** Finished songs go to the server's leaderboards, with their runs, while signed in. */
@@ -82,6 +77,8 @@ export interface Settings {
   discordJoin: boolean;
   /** The songs of a party this player hosts go to the players who lack them, through the server (src/net/partySongs.ts). */
   shareSongs: boolean;
+  /** A party's songs this player gets are added to their library, not only held for the party. */
+  keepPartySongs: boolean;
   /** The output device the offset was last calibrated on ('' for the system default), or null: never calibrated. */
   calibratedOn: string | null;
   /** Which volume defaults the stored volumes have been brought up to (not shown; see normalizeSettings). */
@@ -162,13 +159,12 @@ export const DEFAULT_SETTINGS: Settings = {
   videoExport: DEFAULT_VIDEO_EXPORT,
   checkUpdates: true,
   discordStatus: true,
-  playMode: 'solo',
-  playModeAsked: false,
   displayName: '',
   postScores: true,
   showdownHits: 'fog',
   discordJoin: false,
   shareSongs: true,
+  keepPartySongs: false,
   calibratedOn: null,
   volumeDefaults: VOLUME_DEFAULTS,
 };
@@ -213,13 +209,12 @@ export function normalizeSettings(raw: Partial<Settings>): Settings {
   s.replayLimit = clampReplayLimit(Number(s.replayLimit));
   s.videoExport = normalizeVideoExport(s.videoExport);
   s.discordStatus = Boolean(s.discordStatus);
-  if (!['solo', 'nearby', 'server'].includes(s.playMode)) s.playMode = 'solo';
-  s.playModeAsked = Boolean(s.playModeAsked);
   s.displayName = typeof s.displayName === 'string' ? s.displayName.slice(0, 24) : '';
   s.postScores = s.postScores !== false;
   if (s.showdownHits !== 'drain') s.showdownHits = 'fog';
   s.discordJoin = Boolean(s.discordJoin);
   s.shareSongs = s.shareSongs !== false;
+  s.keepPartySongs = s.keepPartySongs === true;
   if (typeof s.calibratedOn !== 'string') s.calibratedOn = null;
   if (typeof s.outputDevice !== 'string') s.outputDevice = '';
   if (typeof s.outputDeviceName !== 'string' || !s.outputDevice) s.outputDeviceName = '';

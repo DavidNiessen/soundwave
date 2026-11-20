@@ -148,6 +148,10 @@ export function BoardsScreen({ library, playable, setlist, pick, thin, settings,
 
   return (
     <div className="page boards">
+      <header className="page-head">
+        <h1 className="page-title">Leaderboards</h1>
+        <p className="head-count">{s.info?.name}</p>
+      </header>
       {problem && (
         <p className="party-error" role="alert">
           {problem}
@@ -158,10 +162,6 @@ export function BoardsScreen({ library, playable, setlist, pick, thin, settings,
       )}
       <div className="boards-layout">
         <aside className="boards-side" data-nav-group="boards-side">
-          <header className="boards-head">
-            <h1 className="page-title">Leaderboards</h1>
-            <p className="head-count">{s.info?.name}</p>
-          </header>
           {view === 'songs' && song ? (
             <>
               <div className="boards-cover">

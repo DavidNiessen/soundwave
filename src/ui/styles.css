@@ -6760,7 +6760,7 @@ a.btn {
 .party-home > * {
   flex: none;
 }
-.page.party .page-head {
+.page.party.centered .page-head {
   width: 100%;
   max-width: 82rem;
   margin: 0 auto;
@@ -6878,9 +6878,9 @@ a.btn {
     background 0.18s,
     box-shadow 0.18s;
 }
+/* The game's focus ring goes round the whole field (data-ring-box), not the bare input inside it. */
 .connect-input:focus-within {
   background: rgb(12 7 40 / 0.86);
-  box-shadow: inset 0 0 0 2px var(--mint);
 }
 .connect-input svg {
   flex: none;
@@ -7370,10 +7370,53 @@ a.btn {
 .party-results .set-card {
   grid-template-columns: 1.6rem minmax(0, 1fr) auto;
 }
-.tile.together .tile-title .keycap-hint,
-.tile.together .tile-title .hint-glyph {
+/* The main menu's Play together tile: the party's glow beside it, the key with the name, and a
+   line saying where the player stands online. */
+.together-art {
+  flex: none;
+  align-self: stretch;
+  aspect-ratio: 1;
+  max-width: 42%;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(90% 70% at 30% 100%, rgb(255 77 157 / 0.5) 0%, transparent 70%),
+    radial-gradient(80% 60% at 85% 0%, rgb(93 242 214 / 0.35) 0%, transparent 70%), var(--well);
+  color: var(--ink);
+}
+.together-art svg {
+  width: 38%;
+  height: 38%;
+  filter: drop-shadow(0 0.4rem 1.2rem rgb(255 77 157 / 0.55));
+  transition: transform 0.3s var(--ease);
+}
+.tile.together.is-focus .together-art svg,
+:root[data-input='mouse'] .tile.together:hover .together-art svg {
+  transform: scale(1.08) rotate(-4deg);
+}
+.together-title .nowrap {
+  white-space: nowrap;
+}
+.together-title .keycap-hint,
+.together-title .hint-glyph {
   margin-left: 0.5rem;
   vertical-align: middle;
+}
+.together-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  align-self: flex-start;
+  margin-top: 0.2rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 1rem;
+  background: var(--well);
+  color: var(--ink-3);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.together-status.on {
+  color: var(--ok);
 }
 @media (max-width: 900px) {
   .mode-tiles {
@@ -7554,10 +7597,24 @@ a.btn {
 .home-body[data-tab='play'] {
   position: relative;
 }
+.play-row {
+  flex: 0 1 auto;
+  display: flex;
+  gap: clamp(0.8rem, 1.5vw, 1.5rem);
+  min-height: 0;
+  height: min(100%, 30rem);
+}
+.play-row > .tiles {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+}
+.play-row > .online-side {
+  overflow-y: auto;
+}
 .online-side {
-  float: right;
+  flex: none;
   width: clamp(14rem, 20vw, 18rem);
-  margin-left: clamp(0.8rem, 1.6vw, 1.4rem);
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
@@ -7622,24 +7679,22 @@ a.btn {
   color: var(--gold);
 }
 @media (max-width: 900px) {
+  .play-row {
+    flex-direction: column-reverse;
+  }
   .online-side {
-    float: none;
     width: auto;
-    margin: 0 0 0.8rem;
   }
 }
 
 /* ------------------------------------------------------------------------------------------- */
 /* Leaderboards: the song on the left, the part and difficulty as tabs on top, the runs below.  */
 
-.page.boards {
-  padding-top: calc(var(--safe-t) + clamp(0.9rem, 2.4vh, 1.6rem));
-}
 .boards-layout {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(19rem, 0.7fr) minmax(0, 1.6fr);
+  grid-template-columns: minmax(16rem, 0.62fr) minmax(0, 1.6fr);
   gap: clamp(1rem, 2.6vw, 2.6rem);
 }
 .boards-side {
@@ -7650,14 +7705,6 @@ a.btn {
   overflow-x: hidden;
   overflow-y: auto;
   padding-bottom: 1rem;
-}
-.boards-head {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-.boards-head .page-title {
-  font-size: clamp(1.5rem, 2.4vw, 2.4rem);
 }
 .boards-cover {
   width: min(100%, 22rem);
@@ -7906,4 +7953,14 @@ a.btn {
   .board-row .board-pill {
     display: none;
   }
+}
+.transfer.held {
+  color: var(--ink-2);
+}
+/* On its own in the stack the tile stands upright, its glow on top. */
+.tile-stack .tile:only-child .together-art {
+  flex: 1;
+  aspect-ratio: auto;
+  max-width: none;
+  min-height: 0;
 }

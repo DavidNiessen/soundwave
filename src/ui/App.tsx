@@ -437,6 +437,17 @@ export function App() {
   }, [known, booted]);
 
   const byId = useMemo(() => new Map(songs.map((s) => [s.id, s])), [songs]);
+  const byIdRef = useRef(byId);
+  byIdRef.current = byId;
+  // The party sees the songs held for it as songs the player has, beside their library.
+  const held = useSyncExternalStore(partySongs.subscribe, partySongs.songs);
+  const partyLibrary = useMemo(() => {
+    const ids = Object.keys(held);
+    if (!ids.length) return byId;
+    const all = new Map(byId);
+    for (const id of ids) if (!all.has(id)) all.set(id, held[id].meta);
+    return all;
+  }, [byId, held]);
   /** Per song, the parts it hardly has: they are not offered for playing. */
   const thin: ThinParts = useMemo(() => Object.fromEntries(Object.entries(status).map(([id, s]) => [id, s.thin])), [status]);
   // Songs that were removed leave the setlist with them.
@@ -498,8 +509,6 @@ export function App() {
   inviteRef.current = (text) => {
     const invite = parseInvite(text);
     if (!invite) return;
-    // Following an invite is the choice to play on a server: the first-start card need not ask.
-    if (!settingsRef.current.playModeAsked) updateSettings({ ...settingsRef.current, playMode: 'server', playModeAsked: true });
     void online.useInvite(invite).then(
       () => {
         if (!['play', 'replay', 'export', 'editor'].includes(viewRef.current.name)) setView({ name: 'party' });
@@ -902,7 +911,9 @@ export function App() {
     } catch {
       /* scores are best-effort */
     }
-    if (inputs && settingsRef.current.replays) void saveReplay(song, run.charts[run.index], results, inputs, best);
+    // A song held only for a party leaves with it, so its replay could never be watched.
+    if (inputs && settingsRef.current.replays && byIdRef.current.has(song.id))
+      void saveReplay(song, run.charts[run.index], results, inputs, best);
     if (inputs) void postRun(run, results, inputs);
     return best;
   };
@@ -1038,7 +1049,7 @@ export function App() {
   partyStartRef.current = (start) => {
     const song = online.snapshot().party?.set[start.songIndex];
     if (!start.chart || !song) return;
-    const meta = byId.get(song.id);
+    const meta = byId.get(song.id) ?? partySongs.songs()[song.id]?.meta;
     const chart = cleanChart(start.chart);
     const busy = ['play', 'replay', 'export', 'editor'].includes(viewRef.current.name);
     if (!meta || !chart || busy) {
@@ -1072,8 +1083,8 @@ export function App() {
   // The party's next song is loaded ahead, so it starts on time.
   const partyNext = onlineState.party ? onlineState.party.set[onlineState.party.songIndex + 1]?.id : undefined;
   useEffect(() => {
-    if (partyNext && byId.has(partyNext)) void loadSongBuffer(partyNext).catch(() => {});
-  }, [partyNext, byId]);
+    if (partyNext && (byId.has(partyNext) || partySongs.songs()[partyNext])) void loadSongBuffer(partyNext).catch(() => {});
+  }, [partyNext, byId, held]);
 
   /**
    * The band on stage dressed as the players: in a party each member at their part, else the
@@ -1115,12 +1126,13 @@ export function App() {
   };
   const shareSong = async (song: SongMeta) => void (await online.shareSong(await songFile(song.id)));
   // A party's songs reach every player by themselves: the host's game sends a song someone lacks,
-  // and the games without it download it from the server (src/net/partySongs.ts).
+  // and the games without it download it from the server, held for the party or kept in the
+  // library (src/net/partySongs.ts).
   const partyAdd = useRef(async (_: File) => {});
   partyAdd.current = async (file) => {
     const got = await importFiles([file]);
     if (!got.length) throw new Error(`"${file.name.replace(/\.soundwave$/, '')}" could not be added.`);
-    toast(`Got "${got[0].title}" for the party.`);
+    toast(`"${got[0].title}" is in your library.`);
   };
   useEffect(() => {
     partySongs.update({
@@ -1128,11 +1140,12 @@ export function App() {
       me: onlineState.account?.id,
       serverOn: !!onlineState.info?.partySongs,
       share: settings.shareSongs,
+      keep: settings.keepPartySongs,
       has: (id) => byId.has(id),
       file: (id) => songFile(id),
       add: (file) => partyAdd.current(file),
     });
-  }, [onlineState.party, onlineState.account, onlineState.info, settings.shareSongs, byId]);
+  }, [onlineState.party, onlineState.account, onlineState.info, settings.shareSongs, settings.keepPartySongs, byId]);
 
   /** A party's song is over: the score is kept here as any other, and the party gets it. */
   const finishPartySong = (run: Run, results: Results, inputs?: ReplayInputs) => {
@@ -1501,7 +1514,7 @@ export function App() {
     } else if (view.name === 'party') {
       screen = (
         <PartyScreen
-          library={byId}
+          library={partyLibrary}
           playable={(id) => canPlay(analysisStatus[id])}
           setlist={setSongs_}
           pick={pick}
@@ -1584,7 +1597,7 @@ export function App() {
           onBoards={() => setView({ name: 'boards', from: 'home' })}
           together={
             onlineState.party
-              ? `In party ${onlineState.party.code}`
+              ? `In party ${onlineState.party.code} · ${onlineState.party.members.length} ${onlineState.party.members.length === 1 ? 'player' : 'players'}`
               : onlineState.account
                 ? `Signed in to ${onlineState.info?.name ?? 'a server'}`
                 : undefined
@@ -1680,45 +1693,6 @@ export function App() {
           onStart={(v, plan) => recordVideo(exportAsk, v, plan)}
           onClose={() => setExportAsk(null)}
         />
-      )}
-      {/* The first start asks once how the player wants to play (Settings → Online changes it). */}
-      {booted && !settings.playModeAsked && view.name === 'home' && launch === null && (
-        <Dialog
-          title="How do you want to play?"
-          variant="card"
-          closeLabel="Just me"
-          onClose={() => updateSettings({ ...settingsRef.current, playModeAsked: true })}
-        >
-          {(close) => (
-            <div className="pause-card">
-              <h2 className="display">How do you want to play?</h2>
-              <p className="hint">You can change this any time in Settings → Online.</p>
-              <button type="button" className="btn primary wide" data-autofocus onClick={close}>
-                Just me
-              </button>
-              <button
-                type="button"
-                className="btn wide"
-                onClick={() => {
-                  updateSettings({ ...settingsRef.current, playMode: 'nearby', playModeAsked: true });
-                  setView({ name: 'party' });
-                }}
-              >
-                With friends nearby
-              </button>
-              <button
-                type="button"
-                className="btn wide"
-                onClick={() => {
-                  updateSettings({ ...settingsRef.current, playMode: 'server', playModeAsked: true });
-                  setView({ name: 'party' });
-                }}
-              >
-                On a server
-              </button>
-            </div>
-          )}
-        </Dialog>
       )}
       {exitAsk && (
         <Dialog title="Close the game" variant="card" closeLabel="Stay" onClose={() => setExitAsk(false)}>

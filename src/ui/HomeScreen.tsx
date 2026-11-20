@@ -307,103 +307,114 @@ export function HomeScreen({
         ) : tab === 'play' ? (
           <>
             <h2 className="page-title">Pick a set</h2>
-            <OnlineSidebar onTogether={onTogether} onBoards={onBoards} />
-            <div className="tiles" data-nav-group="tiles">
-              {/* The feature: the player's own set, with its covers, and its songs in order. */}
-              <button
-                type="button"
-                className="tile hero"
-                data-autofocus
-                aria-label={
-                  setlist.length
-                    ? `Your setlist: ${summary(setlist).replace(' · ', ', ')}`
-                    : 'Your setlist: empty. Pick up to four songs from your library.'
-                }
-                onClick={onLibrary}
-              >
-                {setlist.length ? (
-                  <Mosaic songs={setlist} />
-                ) : (
-                  <span className="mosaic blank" aria-hidden>
-                    <ListMusic strokeWidth={ICON_STROKE} />
-                  </span>
-                )}
-                <span className="tile-text">
-                  <span className="tile-title">Your setlist</span>
-                  <span className="tile-cap">{setlist.length ? summary(setlist) : 'Pick up to four songs from your library'}</span>
-                  <span className="hero-songs">
-                    {Array.from({ length: SET_MAX }, (_, i) => {
-                      const s = setlist[i];
-                      return (
-                        <span key={i} className={`hero-song ${s ? '' : 'open'}`}>
-                          <span className="hero-num">{i + 1}</span>
-                          <span className="hero-name">{s ? s.title : 'Open slot'}</span>
-                          {s && <span className="hero-by">{s.artist}</span>}
-                        </span>
-                      );
-                    })}
-                  </span>
-                </span>
-              </button>
-              <div className="tile-stack">
-                {/* Playing together, on a Soundwave server: a set with friends, at the same moment. */}
+            {/* Signed in to a server, the connected sidebar stands beside the tiles. */}
+            <div className="play-row">
+              <div className="tiles" data-nav-group="tiles">
+                {/* The feature: the player's own set, with its covers, and its songs in order. */}
                 <button
                   type="button"
-                  className="tile together"
-                  data-action="together"
-                  style={{ ['--i' as string]: 1 }}
-                  onClick={onTogether}
+                  className="tile hero"
+                  data-autofocus
+                  aria-label={
+                    setlist.length
+                      ? `Your setlist: ${summary(setlist).replace(' · ', ', ')}`
+                      : 'Your setlist: empty. Pick up to four songs from your library.'
+                  }
+                  onClick={onLibrary}
                 >
-                  <span className="mosaic blank" aria-hidden>
-                    <Users strokeWidth={ICON_STROKE} />
-                  </span>
-                  <span className="tile-text">
-                    <span className="tile-title">
-                      Play together
-                      <Hint {...keysOf('home.together')} mode={mode} style={style} />
+                  {setlist.length ? (
+                    <Mosaic songs={setlist} />
+                  ) : (
+                    <span className="mosaic blank" aria-hidden>
+                      <ListMusic strokeWidth={ICON_STROKE} />
                     </span>
-                    <span className="tile-cap">{together ?? 'Play a set with friends on a Soundwave server, all at the same moment.'}</span>
+                  )}
+                  <span className="tile-text">
+                    <span className="tile-title">Your setlist</span>
+                    <span className="tile-cap">{setlist.length ? summary(setlist) : 'Pick up to four songs from your library'}</span>
+                    <span className="hero-songs">
+                      {Array.from({ length: SET_MAX }, (_, i) => {
+                        const s = setlist[i];
+                        return (
+                          <span key={i} className={`hero-song ${s ? '' : 'open'}`}>
+                            <span className="hero-num">{i + 1}</span>
+                            <span className="hero-name">{s ? s.title : 'Open slot'}</span>
+                            {s && <span className="hero-by">{s.artist}</span>}
+                          </span>
+                        );
+                      })}
+                    </span>
                   </span>
                 </button>
-                {sets.map((set, i) => {
-                  const list = set.songs.map((id) => byId.get(id)!).filter(Boolean);
-                  return (
-                    <button
-                      type="button"
-                      key={set.id}
-                      className={`tile ${late(set.id)}`}
-                      style={{ ['--i' as string]: i + 2 }}
-                      onClick={() => onSet(set.songs)}
-                    >
-                      <Mosaic songs={list} />
-                      <span className="tile-text">
-                        <span className="tile-title">{set.title}</span>
-                        <span className="tile-cap">{set.caption}</span>
-                        <span className="tile-meta">{summary(list)}</span>
-                      </span>
-                    </button>
-                  );
-                })}
-                {empty && (
+                <div className="tile-stack">
+                  {/* Playing together, on a Soundwave server: a set with friends, at the same moment. */}
                   <button
                     type="button"
-                    className={`tile add ${late('add')}`}
-                    style={{ ['--i' as string]: sets.length + 2 }}
-                    onClick={onAdd}
+                    className="tile together"
+                    data-action="together"
+                    style={{ ['--i' as string]: 1 }}
+                    onClick={onTogether}
                   >
-                    <span className="mosaic blank dashed" aria-hidden>
-                      <Plus strokeWidth={ICON_STROKE} />
+                    <span className="together-art" aria-hidden>
+                      <Users strokeWidth={ICON_STROKE} />
                     </span>
                     <span className="tile-text">
-                      <span className="tile-title">Add your music</span>
-                      <span className="tile-cap">
-                        {touch ? 'Pick files from this device.' : 'Drop files anywhere or browse.'} MP3, WAV, FLAC, OGG and M4A. Each song
-                        takes about a minute to turn into charts.
+                      <span className="tile-title together-title">
+                        Play{' '}
+                        <span className="nowrap">
+                          together
+                          <Hint {...keysOf('home.together')} mode={mode} style={style} />
+                        </span>
+                      </span>
+                      <span className="tile-cap">A set with friends, all at the same moment: Versus or Showdown.</span>
+                      {/* Where the player stands online, or what it takes to start. */}
+                      <span className={`together-status ${together ? 'on' : ''}`}>
+                        <span className={`online-dot ${together ? 'on' : ''}`} aria-hidden />
+                        {together ?? 'On a Soundwave server you or a friend runs'}
                       </span>
                     </span>
                   </button>
-                )}
+                  {sets.map((set, i) => {
+                    const list = set.songs.map((id) => byId.get(id)!).filter(Boolean);
+                    return (
+                      <button
+                        type="button"
+                        key={set.id}
+                        className={`tile ${late(set.id)}`}
+                        style={{ ['--i' as string]: i + 2 }}
+                        onClick={() => onSet(set.songs)}
+                      >
+                        <Mosaic songs={list} />
+                        <span className="tile-text">
+                          <span className="tile-title">{set.title}</span>
+                          <span className="tile-cap">{set.caption}</span>
+                          <span className="tile-meta">{summary(list)}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {empty && (
+                    <button
+                      type="button"
+                      className={`tile add ${late('add')}`}
+                      style={{ ['--i' as string]: sets.length + 2 }}
+                      onClick={onAdd}
+                    >
+                      <span className="mosaic blank dashed" aria-hidden>
+                        <Plus strokeWidth={ICON_STROKE} />
+                      </span>
+                      <span className="tile-text">
+                        <span className="tile-title">Add your music</span>
+                        <span className="tile-cap">
+                          {touch ? 'Pick files from this device.' : 'Drop files anywhere or browse.'} MP3, WAV, FLAC, OGG and M4A. Each song
+                          takes about a minute to turn into charts.
+                        </span>
+                      </span>
+                    </button>
+                  )}
+                </div>
               </div>
+              <OnlineSidebar onTogether={onTogether} onBoards={onBoards} />
             </div>
           </>
         ) : (

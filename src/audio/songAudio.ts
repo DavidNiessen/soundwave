@@ -15,7 +15,7 @@ export function loadSongBuffer(id: string): Promise<AudioBuffer> {
     return hit;
   }
   const p = (async () => {
-    const blob = await getAudio(id);
+    const blob = lent.get(id) ?? (await getAudio(id));
     if (!blob) throw new DecodeError('The audio file for this song is missing.');
     try {
       return await getEngine().decode(await blob.arrayBuffer());
@@ -27,6 +27,19 @@ export function loadSongBuffer(id: string): Promise<AudioBuffer> {
   cache.set(id, p);
   while (cache.size > MAX_CACHED) cache.delete(cache.keys().next().value!);
   return p;
+}
+
+/**
+ * Songs played without being in the library (a party's songs, kept only for the party): their audio,
+ * lent here by src/net/partySongs.ts until the party is over. `null` takes it back.
+ */
+const lent = new Map<string, Blob>();
+export function lendSongAudio(id: string, audio: Blob | null) {
+  if (audio) lent.set(id, audio);
+  else {
+    lent.delete(id);
+    cache.delete(id);
+  }
 }
 
 export function forgetSongBuffer(id: string) {

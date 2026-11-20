@@ -155,7 +155,7 @@ export function PartyScreen(props: Props) {
   }
 
   return (
-    <div className="page party">
+    <div className={`page party ${party ? '' : 'centered'}`}>
       <header className="page-head">
         <h1 className="page-title">{title}</h1>
         <p className="head-count">
@@ -287,7 +287,7 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
             </p>
             <label className="meta-field">
               <span className="dim">Address or invite link</span>
-              <span className="connect-input">
+              <span className="connect-input" data-ring-box>
                 <ServerIcon strokeWidth={ICON_STROKE} aria-hidden />
                 <input
                   value={address}
@@ -369,7 +369,7 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
             )}
             <label className="meta-field">
               <span className="dim">Name</span>
-              <span className="connect-input">
+              <span className="connect-input" data-ring-box>
                 <UserRound strokeWidth={ICON_STROKE} aria-hidden />
                 <input
                   value={name}
@@ -383,7 +383,7 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
             </label>
             <label className="meta-field">
               <span className="dim">Password</span>
-              <span className="connect-input">
+              <span className="connect-input" data-ring-box>
                 <KeyRound strokeWidth={ICON_STROKE} aria-hidden />
                 <input
                   type="password"
@@ -399,7 +399,7 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
             {how === 'up' && mode === 'password' && !invite && (
               <label className="meta-field">
                 <span className="dim">The server’s password</span>
-                <span className="connect-input">
+                <span className="connect-input" data-ring-box>
                   <ShieldCheck strokeWidth={ICON_STROKE} aria-hidden />
                   <input type="password" value={serverPassword} onChange={(e) => setServerPassword(e.target.value)} />
                 </span>
@@ -408,7 +408,7 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
             {how === 'up' && !s.invite && (
               <label className="meta-field">
                 <span className="dim">{mode === 'invite' ? 'Your invite link or code' : 'An invite link or code (if you have one)'}</span>
-                <span className="connect-input">
+                <span className="connect-input" data-ring-box>
                   <LinkIcon strokeWidth={ICON_STROKE} aria-hidden />
                   <input value={code} onChange={(e) => setCode(e.target.value)} spellCheck={false} />
                 </span>
@@ -919,6 +919,7 @@ function ModeLobby({
   const calibrated = isCalibrated(settings);
   const [calibrating, setCalibrating] = useState(false);
   const transfers = useSyncExternalStore(partySongs.subscribe, partySongs.transfers);
+  const held = useSyncExternalStore(partySongs.subscribe, partySongs.songs);
   const pad = hints.mode === 'pad';
   const host = party.host === s.account!.id;
   const sd = party.showdown;
@@ -1056,6 +1057,7 @@ function ModeLobby({
                 next={!watching && i === nextIndex}
                 serverOn={serverOn}
                 transfer={transfers[song.id]}
+                held={!!held[song.id]}
               />
             ))}
           </ol>
@@ -1229,6 +1231,7 @@ function SetCard({
   next,
   serverOn,
   transfer,
+  held,
 }: {
   song: SetSong;
   i: number;
@@ -1237,6 +1240,8 @@ function SetCard({
   next: boolean;
   serverOn: boolean;
   transfer: Transfer | undefined;
+  /** Downloaded for this party only: it goes when the player leaves, unless they keep it. */
+  held: boolean;
 }) {
   const done = party.results.some((r) => r.songIndex === i);
   const count = party.members.filter((m) => m.have.includes(song.id)).length;
@@ -1272,6 +1277,17 @@ function SetCard({
         {serverOn
           ? 'Not in your library yet: it comes from the host’s game, unless they keep their songs to themselves.'
           : 'Not in your library, and this server does not pass songs on: add it yourself, or you sit it out.'}
+      </span>
+    );
+  else if (held)
+    note = (
+      <span className="transfer held">
+        <CloudDownload strokeWidth={ICON_STROKE} aria-hidden />
+        Here for this party
+        <button type="button" className="btn small" onClick={() => void partySongs.keep(song.id)}>
+          <Download strokeWidth={ICON_STROKE} aria-hidden />
+          Keep it
+        </button>
       </span>
     );
   else note = count === party.members.length ? 'Everyone has it' : `${count} of ${party.members.length} have it`;
