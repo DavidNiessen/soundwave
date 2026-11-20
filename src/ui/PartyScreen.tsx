@@ -875,14 +875,7 @@ function ModeLobby({
         )}
 
         {mode === 'showdown' && sd && (
-          <ShowdownOptionsPanel
-            party={party}
-            host={host}
-            me={me}
-            settings={settings}
-            hints={hints}
-            on={{ toggleHits, toggleOnePart, toggleRotation }}
-          />
+          <ShowdownOptionsPanel party={party} host={host} me={me} hints={hints} on={{ toggleHits, toggleOnePart, toggleRotation }} />
         )}
         <Players party={party} me={me} host={host} showReady />
       </div>
@@ -1126,14 +1119,12 @@ function ShowdownOptionsPanel({
   party,
   host,
   me,
-  settings,
   hints,
   on,
 }: {
   party: PartyState;
   host: boolean;
   me: Member;
-  settings: Settings;
   hints: Hints;
   on: { toggleHits(): void; toggleOnePart(): void; toggleRotation(): void };
 }) {
@@ -1185,7 +1176,7 @@ function ShowdownOptionsPanel({
       <p className="hint">
         Scores count as a share of each chart’s best, and the lowest go out after each song.
         {sd.hits &&
-          ` Your overdrive button strikes the player just above you; their hits reach you as ${settings.showdownHits === 'drain' ? 'Drain (calm)' : 'Fog'} (Settings → Online).`}
+          ' Your overdrive button strikes the player just above you. A hit fogs the far highway and holds the multiplier at ×2 while it lasts.'}
       </p>
       <div className="option-rows">
         {rows.map(([id, binding, label, choices, run]) => (

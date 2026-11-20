@@ -71,8 +71,6 @@ export interface Settings {
   displayName: string;
   /** Finished songs go to the server's leaderboards, with their runs, while signed in. */
   postScores: boolean;
-  /** How a Showdown hit reaches this player: a haze over the far highway, or a capped multiplier. */
-  showdownHits: 'fog' | 'drain';
   /** Discord friends can join this player's session or party from their status (never a private one). */
   discordJoin: boolean;
   /** The songs of a party this player hosts go to the players who lack them, through the server (src/net/partySongs.ts). */
@@ -161,7 +159,6 @@ export const DEFAULT_SETTINGS: Settings = {
   discordStatus: true,
   displayName: '',
   postScores: true,
-  showdownHits: 'fog',
   discordJoin: false,
   shareSongs: true,
   keepPartySongs: false,
@@ -211,7 +208,6 @@ export function normalizeSettings(raw: Partial<Settings>): Settings {
   s.discordStatus = Boolean(s.discordStatus);
   s.displayName = typeof s.displayName === 'string' ? s.displayName.slice(0, 24) : '';
   s.postScores = s.postScores !== false;
-  if (s.showdownHits !== 'drain') s.showdownHits = 'fog';
   s.discordJoin = Boolean(s.discordJoin);
   s.shareSongs = s.shareSongs !== false;
   s.keepPartySongs = s.keepPartySongs === true;

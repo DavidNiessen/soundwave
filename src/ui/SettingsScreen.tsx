@@ -125,7 +125,7 @@ const FIELDS: Record<Tab, readonly (keyof Settings)[]> = {
   controller: ['glyphs', 'rumble', 'rumbleHits', 'rumbleMisses', 'rumbleSustains', 'rumbleOverdrive', 'ps5Haptics'],
   touch: ['touchHaptics', 'touchOverdriveSide'],
   shortcuts: ['keys4', 'keys5', 'overdriveKey', 'pad4', 'pad5', 'padOverdrive', 'bindings'],
-  online: ['displayName', 'postScores', 'showdownHits', 'discordJoin', 'shareSongs', 'keepPartySongs'],
+  online: ['displayName', 'postScores', 'discordJoin', 'shareSongs', 'keepPartySongs'],
   advanced: ['checkUpdates', 'discordStatus'],
 };
 
@@ -1765,18 +1765,6 @@ function onlineSections(s: Settings, set: (patch: Partial<Settings>) => void): S
           s.postScores,
           (v) => set({ postScores: v }),
         ),
-        {
-          kind: 'choice',
-          id: 'showdownHits',
-          label: 'Showdown hits reach me as',
-          help: 'Fog hazes the far part of your highway, never the strike line, and leaves your score alone. Drain caps your multiplier at 2× instead: nothing on the highway moves or flashes, only a coloured edge and a timer show the hit. Both cost about the same.',
-          value: s.showdownHits,
-          options: [
-            { value: 'fog', label: 'Fog' },
-            { value: 'drain', label: 'Drain (calm hits)' },
-          ],
-          set: (v) => set({ showdownHits: v as Settings['showdownHits'] }),
-        },
         onOff(
           'discordJoin',
           'Friends can join from Discord',

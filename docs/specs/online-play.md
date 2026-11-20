@@ -37,6 +37,8 @@ Decisions made while building, which override what follows:
   lacks a song of the set, the host's game sends it to the server (unless the host turned that off), which keeps
   it as a cache for that party's players only; every game without it downloads it. A downloaded song is held for the party only (in memory) and goes when the player leaves; **Keep it** on the set, or the setting _Keep the songs I get in a party_, adds it to the library. Not streamed: a song is decoded whole before it starts, so a slow connection never stalls it mid-song. On
   by default; the owner can turn it off (`partySongs`). Not the shared library: nothing lists these songs.
+- **Showdown hits are Fog and Drain together**, with no choice: every hit hazes the far highway and holds the
+  multiplier at ×2 for as long as it lasts. The setting _Showdown hits reach me as_ (4.1, 5.x) is not built.
 - **Later, not now:** the in-game server list (3.2b), local sessions hosted by the desktop app (level 1), and its
   STUN fallback.
 

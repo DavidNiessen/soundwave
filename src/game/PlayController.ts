@@ -374,9 +374,13 @@ export class PlayController {
     if (this.phase === 'playing') this.recorder?.overdrive(this.engine.time());
   }
 
-  /** Showdown: a hit on this player from `at` (performance.now ms) for `ms`, as Drain or Fog. */
-  hit(at: number, ms: number, drain: boolean) {
-    this.addEffect(at, ms, drain ? 'drain' : 'fog');
+  /**
+   * Showdown: a hit on this player from `at` (performance.now ms) for `ms`. Every hit is both: Fog
+   * hazes the far highway and Drain holds the multiplier at ×2, for as long as it lasts.
+   */
+  hit(at: number, ms: number) {
+    this.addEffect(at, ms, 'fog');
+    this.addEffect(at, ms, 'drain');
   }
 
   private addEffect(at: number, ms: number, kind: 'drain' | 'fog') {

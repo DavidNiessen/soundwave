@@ -59,7 +59,6 @@ interface HitNote {
   from: string;
   at: number;
   ms: number;
-  drain: boolean;
 }
 
 /** What the pause menu asks about before it throws the run away. */
@@ -178,7 +177,7 @@ export function PlayScreen({
   /**
    * Showdown: the overdrive button asks the server whom to strike when this player has someone to
    * aim at (the board says so); the answer spends the charge, or makes the press an overdrive after
-   * all. Hits land on the controller as Fog or Drain, as the player chose, with a warning first.
+   * all. Hits land on the controller as Fog and Drain together, with a warning first.
    */
   function showdown(ctrl: PlayController, sd: { songIndex: number; hits: boolean; me: string }) {
     let asking = false;
@@ -201,9 +200,8 @@ export function PlayScreen({
         setNote({ text: `Strike on ${name(e.target)}`, key: performance.now() });
         return;
       }
-      const drain = settingsRef.current.showdownHits === 'drain';
-      ctrl.hit(e.at, e.ms, drain);
-      setHit({ from: e.from, at: e.at, ms: e.ms, drain });
+      ctrl.hit(e.at, e.ms);
+      setHit({ from: e.from, at: e.at, ms: e.ms });
     });
   }
 
@@ -423,10 +421,10 @@ function HitBanner({ hit, onOver }: { hit: HitNote; onOver(): void }) {
   }, [hit]);
   const coming = now < hit.at;
   const left = Math.max(0, Math.ceil((hit.at + hit.ms - now) / 1000));
-  const what = hit.drain ? 'Drain: your multiplier is held at ×2' : 'Fog over the far highway';
+  const what = 'Fog, and your multiplier held at ×2';
   return (
     <>
-      {hit.drain && !coming && <div className="showdown-edge" aria-hidden />}
+      {!coming && <div className="showdown-edge" aria-hidden />}
       <p className={`showdown-hit ${coming ? 'coming' : ''}`} role="alert">
         {coming ? `${hit.from} strikes you!` : `${what} · ${hit.from} · ${left} s`}
       </p>
