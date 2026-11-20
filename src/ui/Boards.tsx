@@ -57,6 +57,12 @@ export function BoardsScreen({ library, playable, setlist, pick, thin, settings,
   const [difficulty, setDifficulty] = useState(pick.difficulty);
   const [week, setWeek] = useState(false);
   const [view, setView] = useState<'songs' | 'shared'>('songs');
+  const [find, setFind] = useState('');
+  // The list narrowed by what is typed, in title or artist.
+  const listed = useMemo(() => {
+    const q = find.trim().toLowerCase();
+    return q ? songs.filter((x) => `${x.title} ${x.artist}`.toLowerCase().includes(q)) : songs;
+  }, [songs, find]);
   const own = song ? songParts(song.id, thin) : PARTS;
   const shown: Pick = { part: partAmong(part, own) ?? part, difficulty };
 
@@ -162,124 +168,135 @@ export function BoardsScreen({ library, playable, setlist, pick, thin, settings,
       )}
       <div className="boards-layout">
         <aside className="boards-side" data-nav-group="boards-side">
-          {view === 'songs' && song ? (
-            <>
-              <div className="boards-cover">
-                <Cover blob={song.cover} title={song.title} />
-              </div>
-              <div className="boards-song">
-                <span className="song-text">
-                  <span className="boards-title">{song.title}</span>
-                  <span className="song-artist">{song.artist || 'Unknown artist'}</span>
-                </span>
-              </div>
-              {/* Every song with charts, to pick from; the shortcuts step through it too. */}
-              <ol className="boards-songs" aria-label="Songs">
-                {songs.map((x) => (
-                  <li key={x.id}>
-                    <button
-                      type="button"
-                      className={`boards-song-item ${x.id === song.id ? 'on' : ''}`}
-                      aria-current={x.id === song.id}
-                      onClick={() => setSongId(x.id)}
-                    >
-                      <Cover blob={x.cover} title={x.title} />
-                      <span className="song-text">
-                        <span className="song-title">{x.title}</span>
-                        <span className="song-artist">{x.artist}</span>
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ol>
-            </>
-          ) : view === 'songs' ? (
-            <p className="hint">Songs with charts in your library show their boards here.</p>
+          {pair(
+            'Show',
+            'boards.replays',
+            view,
+            [
+              ['songs', 'Song boards'],
+              ['shared', 'Shared replays'],
+            ],
+            setView,
+          )}
+          {view === 'songs' ? (
+            songs.length ? (
+              <>
+                <input
+                  className="boards-find"
+                  type="search"
+                  value={find}
+                  onChange={(e) => setFind(e.target.value)}
+                  placeholder="Find a song"
+                  aria-label="Find a song"
+                  spellCheck={false}
+                />
+                {/* First the song, then its board: every song with charts, in the library's order. */}
+                <ol className="boards-songs" aria-label="Songs">
+                  {listed.map((x) => (
+                    <li key={x.id}>
+                      <button
+                        type="button"
+                        className={`boards-song-item ${x.id === song?.id ? 'on' : ''}`}
+                        aria-current={x.id === song?.id}
+                        onClick={() => setSongId(x.id)}
+                      >
+                        <Cover blob={x.cover} title={x.title} />
+                        <span className="song-text">
+                          <span className="song-title">{x.title}</span>
+                          <span className="song-artist">{x.artist}</span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                  {listed.length === 0 && <li className="hint">No song matches “{find}”.</li>}
+                </ol>
+              </>
+            ) : (
+              <p className="hint">Songs with charts in your library show their boards here.</p>
+            )
           ) : (
             <p className="hint">Runs players chose to share, newest first. Watch any of them for a song you have.</p>
           )}
-          <div className="boards-options">
-            {view === 'songs' &&
-              pair(
-                'Scores',
-                'boards.week',
-                week ? 'week' : 'all',
-                [
-                  ['all', 'All time'],
-                  ['week', 'This week'],
-                ],
-                (v) => setWeek(v === 'week'),
-              )}
-            {pair(
-              'Show',
-              'boards.replays',
-              view,
-              [
-                ['songs', 'Song boards'],
-                ['shared', 'Shared replays'],
-              ],
-              setView,
-            )}
-          </div>
         </aside>
 
         <main className="boards-main">
           {view === 'songs' ? (
             <>
-              <div className="boards-tabs">
-                <span className="boards-tabs-label">
-                  {PART_LABEL[shown.part]} · {DIFFICULTY_LABEL[difficulty]}
-                </span>
-                <div className="boards-tab-strip">
-                  <Hint {...keysOf('menus.tabPrev')} {...hints} />
-                  <div className="part-row slide boards-parts" ref={partRow} role="radiogroup" aria-label="Part">
-                    <span className="sel" aria-hidden />
-                    {PARTS.map((p) => {
-                      const Icon = PART_ICON[p];
-                      const on = shown.part === p;
-                      return (
-                        <button
-                          key={p}
-                          type="button"
-                          role="radio"
-                          aria-checked={on}
-                          aria-label={PART_LABEL[p]}
-                          title={PART_LABEL[p]}
-                          data-on={on}
-                          className={`choice ${on ? 'on' : ''}`}
-                          disabled={!own.includes(p)}
-                          onClick={() => setPart(p)}
-                        >
-                          <Icon strokeWidth={ICON_STROKE} aria-hidden />
-                        </button>
-                      );
-                    })}
+              {song && (
+                <header className="boards-song-head">
+                  <Cover blob={song.cover} title={song.title} />
+                  <span className="song-text">
+                    <span className="boards-title">{song.title}</span>
+                    <span className="song-artist">{song.artist || 'Unknown artist'}</span>
+                  </span>
+                  {pair(
+                    'Scores',
+                    'boards.week',
+                    week ? 'week' : 'all',
+                    [
+                      ['all', 'All time'],
+                      ['week', 'This week'],
+                    ],
+                    (v) => setWeek(v === 'week'),
+                  )}
+                </header>
+              )}
+              {song && (
+                <div className="boards-tabs">
+                  <span className="boards-tabs-label">
+                    {PART_LABEL[shown.part]} · {DIFFICULTY_LABEL[difficulty]}
+                  </span>
+                  <div className="boards-tab-strip">
+                    <Hint {...keysOf('menus.tabPrev')} {...hints} />
+                    <div className="part-row slide boards-parts" ref={partRow} role="radiogroup" aria-label="Part">
+                      <span className="sel" aria-hidden />
+                      {PARTS.map((p) => {
+                        const Icon = PART_ICON[p];
+                        const on = shown.part === p;
+                        return (
+                          <button
+                            key={p}
+                            type="button"
+                            role="radio"
+                            aria-checked={on}
+                            aria-label={PART_LABEL[p]}
+                            title={PART_LABEL[p]}
+                            data-on={on}
+                            className={`choice ${on ? 'on' : ''}`}
+                            disabled={!own.includes(p)}
+                            onClick={() => setPart(p)}
+                          >
+                            <Icon strokeWidth={ICON_STROKE} aria-hidden />
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <Hint {...keysOf('menus.tabNext')} {...hints} />
+                    <div className="diff-row slide boards-diffs" ref={diffRow} role="radiogroup" aria-label="Difficulty">
+                      <span className="sel" aria-hidden />
+                      {DIFFICULTIES.map((d) => {
+                        const on = difficulty === d;
+                        return (
+                          <button
+                            key={d}
+                            type="button"
+                            role="radio"
+                            aria-checked={on}
+                            aria-label={DIFFICULTY_LABEL[d]}
+                            title={DIFFICULTY_LABEL[d]}
+                            data-on={on}
+                            className={`choice ${on ? 'on' : ''}`}
+                            onClick={() => setDifficulty(d)}
+                          >
+                            <Pips difficulty={d} />
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <Hint {...keysOf('boards.difficulty')} {...hints} />
                   </div>
-                  <Hint {...keysOf('menus.tabNext')} {...hints} />
-                  <div className="diff-row slide boards-diffs" ref={diffRow} role="radiogroup" aria-label="Difficulty">
-                    <span className="sel" aria-hidden />
-                    {DIFFICULTIES.map((d) => {
-                      const on = difficulty === d;
-                      return (
-                        <button
-                          key={d}
-                          type="button"
-                          role="radio"
-                          aria-checked={on}
-                          aria-label={DIFFICULTY_LABEL[d]}
-                          title={DIFFICULTY_LABEL[d]}
-                          data-on={on}
-                          className={`choice ${on ? 'on' : ''}`}
-                          onClick={() => setDifficulty(d)}
-                        >
-                          <Pips difficulty={d} />
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <Hint {...keysOf('boards.difficulty')} {...hints} />
                 </div>
-              </div>
+              )}
               {song ? (
                 <SongBoard song={song} pick={shown} week={week} mod={mod} onWatch={onWatch} onProblem={setProblem} />
               ) : (

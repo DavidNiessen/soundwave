@@ -124,13 +124,21 @@ function useCountdown(on: boolean, seconds: number): number | null {
 type Hints = ReturnType<typeof useHints>;
 
 /** Each mode as the room offers it: what it is in a sentence, and who it is for. */
-export const MODES: Record<PartyMode, { label: string; icon: LucideIcon; cap: string; who: string; binding: string }> = {
+export const MODES: Record<
+  PartyMode,
+  { label: string; icon: LucideIcon; cap: string; who: string; binding: string; steps: [string, string][] }
+> = {
   versus: {
     label: 'Versus',
     icon: Trophy,
     cap: 'Everyone plays the set on the part they like. The best score takes each song, and the set.',
     who: `2 to ${PARTY_MAX} players`,
     binding: 'party.versus',
+    steps: [
+      ['Pick your part', 'Any part, any difficulty: everyone plays at the same moment.'],
+      ['Play the set', 'Scores show live beside the highway.'],
+      ['Top the board', 'The best score takes each song, and the set.'],
+    ],
   },
   showdown: {
     label: 'Showdown',
@@ -138,6 +146,11 @@ export const MODES: Record<PartyMode, { label: string; icon: LucideIcon; cap: st
     cap: 'The lowest go out after each song, and your overdrive strikes the player just above you.',
     who: 'Best with 3 or more',
     binding: 'party.showdown',
+    steps: [
+      ['Stay above the cut', 'After each song the lowest scores go out.'],
+      ['Strike the player above', 'Your overdrive hazes their highway and holds them at ×2.'],
+      ['Be the last one in', 'The final leaves one winner.'],
+    ],
   },
 };
 
@@ -785,6 +798,18 @@ function PartyRoom({ party, s, settings, onBack, me }: PartyProps & { me: Member
                     {host && <Hint {...keysOf(binding)} {...hints} />}
                   </span>
                   <span className="tile-cap">{cap}</span>
+                  {/* How it plays, in three steps. */}
+                  <span className="mode-steps">
+                    {MODES[m].steps.map(([head, text], k) => (
+                      <span key={head} className="mode-step">
+                        <span className="hero-num">{k + 1}</span>
+                        <span>
+                          <span className="mode-step-head">{head}</span>
+                          <span className="mode-step-text">{text}</span>
+                        </span>
+                      </span>
+                    ))}
+                  </span>
                   <span className="tile-meta">{who}</span>
                   {note && <span className="tile-meta warn">{note}</span>}
                 </span>
@@ -1278,10 +1303,19 @@ function ShowdownOptionsPanel({
           </span>
         )}
       </h2>
-      <p className="hint">
-        The lowest scores go out after each song.
-        {sd.hits && ' Your overdrive strikes the player just above you: their highway shimmers and their multiplier stays at ×2.'}
-      </p>
+      <ol className="mode-steps compact">
+        {MODES.showdown.steps
+          .filter((_, k) => k !== 1 || sd.hits)
+          .map(([head, text], k) => (
+            <li key={head} className="mode-step">
+              <span className="hero-num">{k + 1}</span>
+              <span>
+                <span className="mode-step-head">{head}</span>
+                <span className="mode-step-text">{text}</span>
+              </span>
+            </li>
+          ))}
+      </ol>
       <div className="option-chips">
         {chips.map(({ id, binding, icon: Icon, label, value, run }) => (
           <button

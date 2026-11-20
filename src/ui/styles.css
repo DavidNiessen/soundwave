@@ -9126,3 +9126,115 @@ a.btn {
 .replay-mark.hit {
   color: var(--danger-2);
 }
+
+/* Cards in a scrolling area (the Online tab, a party's lobby) lift on hover and rise as they come
+   in. The area clips at its edges, so it keeps room for both: space above for the lift (taken back
+   with a negative margin, so nothing moves), and a rise short enough to stay inside its padding. */
+.online-panel,
+.lobby-body {
+  margin-top: -0.7rem;
+  padding-top: 0.7rem;
+  padding-inline: 0.5rem;
+  margin-inline: -0.5rem;
+  padding-bottom: 1.2rem;
+}
+.online-panel .tile,
+.lobby-body .tile {
+  animation-name: tile-rise-near, tile-fade;
+}
+@keyframes tile-rise-near {
+  from {
+    transform: translateY(0.9rem) scale(0.97);
+  }
+}
+
+/* The leaderboard picks the song first: the list fills the left column, the chosen song heads the board. */
+.boards-side .boards-songs {
+  flex: 1;
+  min-height: 0;
+}
+.boards-find {
+  flex: none;
+  min-height: var(--target);
+  padding: 0 0.9rem;
+  border: 0;
+  outline: none;
+  border-radius: var(--r-m);
+  background: var(--well);
+  color: var(--ink);
+  caret-color: var(--mint);
+  font: inherit;
+  font-weight: 700;
+}
+.boards-find::placeholder {
+  color: var(--ink-3);
+}
+.boards-song-item {
+  min-height: 3.4rem;
+}
+.boards-song-head {
+  display: grid;
+  grid-template-columns: 4.2rem minmax(0, 1fr) minmax(14rem, 18rem);
+  align-items: center;
+  gap: 1rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--r-l);
+  background: var(--panel-solid);
+  animation: fade-in 0.25s var(--ease);
+}
+.boards-song-head .cover {
+  width: 100%;
+  border-radius: var(--r-s);
+}
+.boards-song-head .boards-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 900px) {
+  .boards-song-head {
+    grid-template-columns: 3.4rem minmax(0, 1fr);
+  }
+  .boards-song-head .boards-option {
+    grid-column: 1 / -1;
+  }
+}
+
+/* A mode's card: how it plays in three steps; the cards fill the room's height. */
+.party-room .mode-tiles {
+  min-height: min(32rem, 62vh);
+}
+.party-room .mode-tile {
+  min-height: 100%;
+}
+.mode-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.4rem 0 0.2rem;
+  padding: 0;
+  list-style: none;
+}
+.mode-step {
+  display: grid;
+  grid-template-columns: 1.4rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+}
+.mode-step > span:last-child {
+  display: flex;
+  flex-direction: column;
+}
+.mode-step-head {
+  font-weight: 800;
+}
+.mode-step-text {
+  color: var(--ink-2);
+  font-size: 0.88rem;
+}
+.mode-steps.compact .mode-step {
+  padding: 0.35rem 0.6rem;
+}
