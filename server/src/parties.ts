@@ -40,6 +40,7 @@ import {
   type ResultLine,
   type ServerMessage,
   type SetSong,
+  type ShowdownOptions,
   type SongScore,
   type WireChart,
 } from '../../src/net/protocol.ts';
@@ -146,6 +147,7 @@ class Party {
       phase: 'lobby',
       songIndex: -1,
       results: [],
+      mode: null,
       showdown: null,
       band: false,
       private: false,
@@ -167,12 +169,36 @@ export class Parties {
   private readonly rotation: () => SetSong[];
   /** Band mode: a band finished a song, every player with a final score (for the band boards). */
   private readonly onBand: (run: BandRun) => void;
+  /** Whether the server holds a song for parties (server/src/partySongs.ts). */
+  private readonly cached: (songId: string) => boolean;
 
-  constructor(send: Send, now: () => number, rotation: () => SetSong[] = () => [], onBand: (run: BandRun) => void = () => {}) {
+  constructor(
+    send: Send,
+    now: () => number,
+    rotation: () => SetSong[] = () => [],
+    onBand: (run: BandRun) => void = () => {},
+    cached: (songId: string) => boolean = () => false,
+  ) {
     this.send = send;
     this.now = now;
     this.rotation = rotation;
     this.onBand = onBand;
+    this.cached = cached;
+  }
+
+  /** Whether a song is in the set of the party a player is in: only then may they send it or get it. */
+  inSet(player: string, songId: string): boolean {
+    return !!this.partyOf.get(player)?.state.set.some((s) => s.id === songId);
+  }
+
+  /** The server now holds a song: every party with it in its set hears so, and its players without it download it. */
+  songCached(songId: string) {
+    for (const party of this.parties.values()) {
+      const song = party.state.set.find((s) => s.id === songId && !s.cached);
+      if (!song) continue;
+      song.cached = true;
+      this.share(party);
+    }
   }
 
   /** The party a player is in (for tests and the moderation tools). */
@@ -221,20 +247,21 @@ export class Parties {
         if (s.showdown?.rotation) return fail('This Showdown plays the server’s rotation. Turn that off to pick your own set.');
         this.newSet(party, msg.songs);
         return this.share(party);
-      case 'showdown': {
-        if (!host) return fail('Only the host sets up a Showdown.');
-        if (s.phase === 'playing') return fail('A Showdown can be set up once this song is over.');
-        const o = msg.options;
-        if (o?.rotation && !this.rotation().length)
-          return fail('This server has no Showdown rotation yet. Its owner or a moderator sets one.');
+      case 'mode': {
+        if (!host) return fail('Only the host picks what the party plays.');
+        if (s.phase === 'playing') return fail('Wait for this song to end.');
         const wasRotation = !!s.showdown?.rotation;
-        s.showdown = o;
-        if (o) s.band = false;
-        if (o?.part) for (const m of s.members) m.part = o.part;
-        // The rotation is the set while it is chosen; turned off, the set is the host's to pick again.
-        this.newSet(party, o?.rotation ? this.rotation() : wasRotation ? [] : s.set);
+        s.mode = msg.mode;
+        s.band = msg.mode === 'band';
+        s.showdown = msg.mode === 'showdown' ? (s.showdown ?? { hits: true, part: null, rotation: false }) : null;
+        this.newSet(party, wasRotation && !s.showdown?.rotation ? [] : s.set);
         return this.share(party);
       }
+      case 'showdown':
+        if (!host) return fail('Only the host sets up a Showdown.');
+        if (s.phase === 'playing') return fail('A Showdown can be set up once this song is over.');
+        if (s.mode !== 'showdown') return fail('Pick Showdown first.');
+        return this.setShowdown(party, msg.options, fail);
       case 'ready':
         me.part = s.showdown?.part ?? msg.part;
         me.difficulty = msg.difficulty;
@@ -279,13 +306,6 @@ export class Parties {
         } else line.out = true;
         return this.maybeEndSong(party);
       }
-      case 'band':
-        if (!host) return fail('Only the host makes the party a band.');
-        if (s.phase === 'playing') return fail('The party can become a band once this song is over.');
-        s.band = msg.on;
-        if (msg.on) s.showdown = null;
-        for (const m of s.members) m.ready = false;
-        return this.share(party);
       case 'private':
         if (!host) return fail('Only the host makes the party private.');
         s.private = msg.on;
@@ -322,18 +342,19 @@ export class Parties {
         this.send(msg.id, { type: 'error', message: 'The host removed you from the party.' });
         return;
       }
-      case 'request-song': {
-        // Asked of the host, who has the song: they share it to the server's library for this player.
-        if (!s.set.some((x) => x.id === msg.songId)) return fail('That song is not in the set.');
-        if (host) return;
-        this.send(s.host, { type: 'song-request', songId: msg.songId, from: player.id, name: player.name });
-        return;
-      }
-      case 'song-sent':
-        if (!host || !party.member(msg.to)) return;
-        this.send(msg.to, { type: 'song-ready', songId: msg.songId, ok: msg.ok });
-        return;
     }
+  }
+
+  /** The Showdown's options: one part for everyone, and the server's rotation as the set, or the host's own. */
+  private setShowdown(party: Party, o: ShowdownOptions, fail: (message: string) => void) {
+    const s = party.state;
+    if (o.rotation && !this.rotation().length) return fail('This server has no Showdown rotation yet. Its owner or a moderator sets one.');
+    const wasRotation = !!s.showdown?.rotation;
+    s.showdown = o;
+    if (o.part) for (const m of s.members) m.part = o.part;
+    // The rotation is the set while it is chosen; turned off, the set is the host's to pick again.
+    this.newSet(party, o.rotation ? this.rotation() : wasRotation ? [] : s.set);
+    this.share(party);
   }
 
   private start(party: Party, player: Player, msg: Extract<ClientMessage, { type: 'start' }>) {
@@ -341,6 +362,7 @@ export class Parties {
     const fail = (message: string) => this.send(player.id, { type: 'error', message });
     if (s.host !== player.id) return fail('Only the host starts a song.');
     if (s.phase === 'playing') return fail('A song is already playing.');
+    if (!s.mode) return fail('Pick what to play first.');
     if (msg.songIndex < 0 || msg.songIndex >= s.set.length) return fail('That song is not in the set.');
     if (s.showdown) {
       // A set begins with everyone in it; later songs only with the players still in.
@@ -534,7 +556,7 @@ export class Parties {
   /** A new set: no results yet, nobody ready, and in a Showdown everyone in again. */
   private newSet(party: Party, songs: SetSong[]) {
     const s = party.state;
-    s.set = songs;
+    s.set = songs.map((song) => ({ ...song, cached: this.cached(song.id) }));
     s.results = [];
     s.songIndex = -1;
     s.phase = 'lobby';

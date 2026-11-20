@@ -4,10 +4,12 @@
  */
 import {
   PARTY_MAX,
+  PARTY_MODES,
   SONG_ID,
   type ClientMessage,
   type Difficulty,
   type Part,
+  type PartyMode,
   type SetSong,
   type SongScore,
   type WireChart,
@@ -141,10 +143,11 @@ export function clientMessage(raw: unknown): ClientMessage | undefined {
       return str(raw.id, 64) ? { type: 'kick', id: raw.id } : undefined;
     case 'status':
       return typeof raw.activity === 'string' ? { type: 'status', activity: raw.activity.slice(0, 120) } : undefined;
-    case 'request-song':
-      return str(raw.songId, 64) && SONG_ID.test(raw.songId) ? { type: 'request-song', songId: raw.songId } : undefined;
+    case 'mode':
+      return raw.mode === null || PARTY_MODES.includes(raw.mode as PartyMode)
+        ? { type: 'mode', mode: raw.mode as PartyMode | null }
+        : undefined;
     case 'showdown': {
-      if (raw.options === null) return { type: 'showdown', options: null };
       const o = raw.options;
       if (!isObj(o) || typeof o.hits !== 'boolean' || typeof o.rotation !== 'boolean') return undefined;
       if (o.part !== null && !PARTS.includes(o.part as Part)) return undefined;
@@ -156,7 +159,6 @@ export function clientMessage(raw: unknown): ClientMessage | undefined {
         : undefined;
     case 'cheer':
       return { type: 'cheer' };
-    case 'band':
     case 'private':
       return typeof raw.on === 'boolean' ? { type: raw.type, on: raw.on } : undefined;
     case 'overdrive':
@@ -169,10 +171,6 @@ export function clientMessage(raw: unknown): ClientMessage | undefined {
         : undefined;
     case 'revive':
       return Number.isInteger(raw.songIndex) ? { type: 'revive', songIndex: raw.songIndex as number } : undefined;
-    case 'song-sent':
-      return str(raw.songId, 64) && SONG_ID.test(raw.songId) && str(raw.to, 64) && typeof raw.ok === 'boolean'
-        ? { type: 'song-sent', songId: raw.songId, to: raw.to, ok: raw.ok }
-        : undefined;
   }
   return undefined;
 }

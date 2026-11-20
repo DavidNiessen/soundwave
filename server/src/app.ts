@@ -20,6 +20,7 @@ import { Rotation } from './rotation.ts';
 import { Scores } from './scores.ts';
 import { joinPage } from './joinPage.ts';
 import { Songs } from './songs.ts';
+import { PartySongs } from './partySongs.ts';
 import { clientMessage } from './validate.ts';
 
 /** The most bytes an HTTP request's body may have (everything it carries is small). */
@@ -99,6 +100,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
   const accounts = new Accounts(store, config);
   const scores = new Scores(store);
   const songs = new Songs(store, config);
+  const partySongs = new PartySongs(config);
   const rotation = new Rotation(store);
   const profiles = new Profiles(store);
   const bands = new Bands(store);
@@ -114,6 +116,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     clock,
     () => rotation.songs(),
     (run) => void bands.record(run),
+    (id) => partySongs.has(id),
   );
   /** What each player online says they are doing. */
   const activity = new Map<string, string>();
@@ -148,6 +151,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       online: sockets.size,
       sharing: config.songSharing,
       publicCovers: config.publicCovers,
+      partySongs: config.partySongs,
     }),
     'POST /songs': async (req, _body, ip, _p, raw) => {
       if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many songs at once. Wait a minute.');
@@ -260,6 +264,27 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       /^\/songs\/([0-9a-f]{64})\/file$/,
       (req, _b, _ip, [id]) => (me(req), new Binary('application/x-soundwave', songs.file(id), `${id}.soundwave`)),
     ],
+    [
+      'PUT',
+      /^\/party\/songs\/([0-9a-f]{64})$/,
+      async (req, _b, ip, [id], raw) => {
+        const u = me(req);
+        if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many songs at once. Wait a minute.');
+        if (!parties.inSet(u.id, id)) throw new Refusal(403, 'Only a song in your party’s set can be sent.');
+        await partySongs.put(id, raw);
+        parties.songCached(id);
+        return { ok: true };
+      },
+    ],
+    [
+      'GET',
+      /^\/party\/songs\/([0-9a-f]{64})$/,
+      (req, _b, _ip, [id]) => {
+        const u = me(req);
+        if (!parties.inSet(u.id, id)) throw new Refusal(403, 'Only the players of a party with this song in its set can get it.');
+        return new Binary('application/x-soundwave', partySongs.get(id), `${id}.soundwave`);
+      },
+    ],
     ['GET', /^\/songs\/([0-9a-f]{64})\/charts$/, (req, _b, _ip, [id]) => (me(req), songs.charts(id))],
     [
       'DELETE',
@@ -349,7 +374,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
         break;
       }
     if (!route) return reply(res, 404, { error: 'There is nothing here.' });
-    const upload = req.method === 'POST' && path === '/songs';
+    const upload = (req.method === 'POST' && path === '/songs') || (req.method === 'PUT' && path.startsWith('/party/songs/'));
     const limit = path === '/scores' ? RUN_MAX : upload ? config.songMaxMb * 1024 * 1024 + 1 : BODY_MAX;
     try {
       let body: Record<string, unknown> = {};

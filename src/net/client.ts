@@ -25,6 +25,7 @@ import {
   type Difficulty,
   type Invite,
   type Part,
+  type PartyMode,
   type PartyState,
   type ServerInfo,
   type ServerMessage,
@@ -67,8 +68,6 @@ export interface OnlineState {
   avatar: Avatar | null;
 }
 
-/** A party's song changing hands (see `onSong`). */
-export type SongEvent = Extract<ServerMessage, { type: 'song-request' | 'song-ready' }>;
 /**
  * What happens to a player during a party's song: a Showdown Strike's answer or a hit coming, band
  * overdrive or being brought back in a band, a cheer. Times (`at`) are this machine's performance.now.
@@ -177,7 +176,6 @@ class OnlineClient {
   private boardState: { songIndex: number; lines: BoardLine[] } | null = null;
   private readonly boardListeners = new Set<() => void>();
   private readonly startListeners = new Set<(s: PartyStart) => void>();
-  private readonly songListeners = new Set<(e: SongEvent) => void>();
   private readonly playListeners = new Set<(e: PlayEvent) => void>();
   private ws: WebSocket | null = null;
   private access: string | null = null;
@@ -228,12 +226,6 @@ class OnlineClient {
     return () => void this.startListeners.delete(fn);
   }
 
-  /** Called when a party's song changes hands: the host is asked for one, or a song asked for is ready. */
-  onSong(fn: (e: SongEvent) => void) {
-    this.songListeners.add(fn);
-    return () => void this.songListeners.delete(fn);
-  }
-
   /** Called for what happens to the player during a party's song (see PlayEvent). */
   onPlayEvent(fn: (e: PlayEvent) => void) {
     this.playListeners.add(fn);
@@ -260,10 +252,13 @@ class OnlineClient {
 
   /* HTTP --------------------------------------------------------------------------------------- */
 
-  /** `raw`: a file sent as it is (a shared song); `file`: the answer is a file, not JSON. */
+  /**
+   * `raw`: a file sent as it is (a shared song); `file`: the answer is a file, not JSON, and
+   * `progress` hears how much of it has come (0..1), where the server says how big it is.
+   */
   private async request<T>(
     path: string,
-    init: { method?: string; body?: unknown; auth?: boolean; raw?: Blob; file?: boolean } = {},
+    init: { method?: string; body?: unknown; auth?: boolean; raw?: Blob; file?: boolean; progress?: (done: number) => void } = {},
   ): Promise<T> {
     const server = this.state.server;
     if (!server) throw new Error('No server is chosen.');
@@ -289,7 +284,7 @@ class OnlineClient {
       if (e instanceof Error && e.name !== 'TypeError') throw e;
       throw new Error('The server could not be reached. Check the address and your connection.');
     }
-    if (init.file && res.ok) return (await res.blob()) as T;
+    if (init.file && res.ok) return (init.progress ? await readWithProgress(res, init.progress) : await res.blob()) as T;
     const body = (await res.json().catch(() => ({}))) as T | ApiError;
     if (!res.ok) throw new Error((body as ApiError).error ?? `The server answered with an error (${res.status}).`);
     return body as T;
@@ -465,13 +460,13 @@ class OnlineClient {
     return this.request<Online[]>('/presence', { auth: true });
   }
 
-  /** Asks the party's host for one of the set's songs this player lacks. */
-  requestSong(songId: string) {
-    this.send({ type: 'request-song', songId });
+  /** Sends one of the party's songs (its .soundwave file) to the server, for the players who lack it. */
+  sendPartySong(songId: string, file: Blob) {
+    return this.request<unknown>(`/party/songs/${songId}`, { method: 'PUT', raw: file, auth: true });
   }
-  /** The host answers a request: the song is in the server's library now (or not). */
-  songSent(songId: string, to: string, ok: boolean) {
-    this.send({ type: 'song-sent', songId, to, ok });
+  /** Downloads one of the party's songs the server holds, as its .soundwave file. */
+  getPartySong(songId: string, progress?: (done: number) => void) {
+    return this.request<Blob>(`/party/songs/${songId}`, { auth: true, file: true, progress });
   }
 
   /* Moderation (owner and moderators) --------------------------------------------------------- */
@@ -602,10 +597,6 @@ class OnlineClient {
       case 'error':
         this.set({ error: msg.message });
         return;
-      case 'song-request':
-      case 'song-ready':
-        for (const l of this.songListeners) l(msg);
-        return;
       case 'hit':
       case 'struck':
       case 'cheer':
@@ -669,9 +660,9 @@ class OnlineClient {
   finish(songIndex: number, result: SongScore, run?: { ops: string; times: string }) {
     this.sendOrKeep({ type: 'finish', songIndex, result, ...(run ? { run } : {}) });
   }
-  /** The host makes the party a band, or not. */
-  setBand(on: boolean) {
-    this.send({ type: 'band', on });
+  /** The host picks what the party plays, or goes back to just the players (null). */
+  setMode(mode: PartyMode | null) {
+    this.send({ type: 'mode', mode });
   }
   /** The host makes the party private (never offered on Discord), or not. */
   setPrivate(on: boolean) {
@@ -713,8 +704,8 @@ class OnlineClient {
   backToLobby() {
     this.send({ type: 'lobby' });
   }
-  /** The host makes the party a Showdown with these options, or a plain party (null). */
-  setShowdown(options: ShowdownOptions | null) {
+  /** The host changes the Showdown's options. */
+  setShowdown(options: ShowdownOptions) {
     this.send({ type: 'showdown', options });
   }
   /** Showdown: spends the charge on a hit against the player above (the server picks whom). */
@@ -742,3 +733,20 @@ class OnlineClient {
 }
 
 export const online = new OnlineClient();
+
+/** Reads a response's body, telling `progress` how much of it has come (when its length is known). */
+async function readWithProgress(res: Response, progress: (done: number) => void): Promise<Blob> {
+  const size = Number(res.headers.get('Content-Length')) || 0;
+  const reader = res.body?.getReader();
+  if (!reader || !size) return res.blob();
+  const parts: Uint8Array<ArrayBuffer>[] = [];
+  let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value);
+    got += value.length;
+    progress(Math.min(1, got / size));
+  }
+  return new Blob(parts, { type: res.headers.get('Content-Type') ?? '' });
+}

@@ -104,11 +104,11 @@ describe('shared songs', () => {
     expect((await api('POST', '/songs', (await songFile(7)).bytes, bo.access)).status).toBe(413);
   });
 
-  it('pass a player’s request for a missing song to the party’s host, and the host’s answer back', async () => {
-    await start({ songSharing: 'songs' });
-    const sessions = [await signUp('Host'), await signUp('Guest')];
+  it('pass a party’s songs on through the server, to the party’s players only', async () => {
+    await start();
+    const sessions = [await signUp('Host'), await signUp('Guest'), await signUp('Stranger')];
     const [host, guest] = await Promise.all(
-      sessions.map(async (s) => {
+      sessions.slice(0, 2).map(async (s) => {
         const ws = new WebSocket(server.url.replace('http', 'ws') + '/ws');
         const got: ServerMessage[] = [];
         ws.on('message', (d) => got.push(JSON.parse(d.toString())));
@@ -123,18 +123,35 @@ describe('shared songs', () => {
       return found()!;
     };
     const f = await songFile(9);
+    const other = await songFile(10);
+    // On by default, and nothing to do with sharing songs to the library (off here).
+    expect((await api<ServerInfo>('GET', '/info')).body).toMatchObject({ partySongs: true, sharing: 'off' });
     host.send({ type: 'party-create' });
     const party = (await wait(host, 'party', (m) => m.type === 'party' && !!m.party)) as Extract<ServerMessage, { type: 'party' }>;
     guest.send({ type: 'party-join', code: party.party!.code });
+    host.send({ type: 'mode', mode: 'versus' });
     host.send({ type: 'set', songs: [{ id: f.id, title: 'Song 9', artist: 'Band', duration: 30 }] });
-    await new Promise((r) => setTimeout(r, 100));
-    guest.send({ type: 'request-song', songId: f.id });
-    const asked = (await wait(host, 'song-request')) as Extract<ServerMessage, { type: 'song-request' }>;
-    expect(asked).toMatchObject({ songId: f.id, name: 'Guest' });
-    await api('POST', '/songs', f.bytes, sessions[0].access);
-    host.send({ type: 'song-sent', songId: f.id, to: asked.from, ok: true });
-    expect(await wait(guest, 'song-ready')).toMatchObject({ songId: f.id, ok: true });
+    await wait(guest, 'party', (m) => m.type === 'party' && m.party?.set.length === 1);
+
+    // Only a song in the party's set, and only the song its id names.
+    expect((await api('PUT', `/party/songs/${other.id}`, other.bytes, sessions[0].access)).status).toBe(403);
+    expect((await api('PUT', `/party/songs/${f.id}`, other.bytes, sessions[0].access)).status).toBe(400);
+    expect((await api('PUT', `/party/songs/${f.id}`, f.bytes, sessions[0].access)).status).toBe(200);
+    // The party hears that the server has it.
+    await wait(guest, 'party', (m) => m.type === 'party' && !!m.party?.set[0]?.cached);
+
+    const got = await api<Uint8Array<ArrayBuffer>>('GET', `/party/songs/${f.id}`, undefined, sessions[1].access);
+    expect(got.status).toBe(200);
+    expect((await readSoundwave(new Blob([got.body]))).meta.title).toBe('Song 9');
+    // Not a library: someone outside the party cannot get it, and nothing lists it.
+    expect((await api('GET', `/party/songs/${f.id}`, undefined, sessions[2].access)).status).toBe(403);
+    expect((await api<SharedSong[]>('GET', '/songs', undefined, sessions[2].access)).body).toEqual([]);
     host.ws.close();
     guest.ws.close();
+  });
+
+  it('do not pass a party’s songs on where the owner turned that off', async () => {
+    await start({ partySongs: false });
+    expect((await api<ServerInfo>('GET', '/info')).body.partySongs).toBe(false);
   });
 });

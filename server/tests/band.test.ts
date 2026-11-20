@@ -36,7 +36,7 @@ function band(parts: Part[]) {
   say(0, { type: 'party-create' });
   const code = parties.stateOf('p0')!.code;
   for (let i = 1; i < players.length; i++) say(i, { type: 'party-join', code });
-  say(0, { type: 'band', on: true });
+  say(0, { type: 'mode', mode: 'band' });
   say(0, { type: 'set', songs: [{ id: SONG, title: 'One', artist: '', duration: 30 }] });
   parts.forEach((part, i) => say(i, { type: 'ready', part, difficulty: 'medium', ready: true, have: [SONG] }));
   const charts = parts.map(chart);

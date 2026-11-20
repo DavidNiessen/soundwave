@@ -105,9 +105,26 @@ report a song, and the uploader, you or a moderator can remove it everywhere at 
 With `publicCovers` (`SOUNDWAVE_PUBLIC_COVERS`) on, song covers are served without signing in, so a
 player's Discord status can show the cover of the song they play. Only covers, never audio.
 
-In a party, a player without one of the set's songs can get it: from the library when it is there,
-otherwise the host's game shares it for them (if the host lets it, in Settings → Online, and the
-server takes whole songs).
+## A party's songs
+
+A player can only play a song they have. So, on by default, a party's songs are passed on through the
+server: when a player in a party lacks one of the set's songs, the host's game sends it here (unless
+the host turned that off in Settings → Online), and the game of every player without it downloads it
+by itself. This is separate from shared songs: nothing lists these songs, and only the players of a
+party with the song in its set can send or get it. The server checks that the file holds the song
+its id names.
+
+They are a cache, kept in `party-songs/` in the data folder: a song goes `partyCacheDays` after it
+was last used, and the least recently used go first once the cache passes `partyCacheMb`. Turn it
+off with `partySongs: false` (`SOUNDWAVE_PARTY_SONGS=false`); players without a song then sit it out.
+
+| Setting          | Variable                     | Default | What it is                                      |
+| ---------------- | ---------------------------- | ------- | ----------------------------------------------- |
+| `partySongs`     | `SOUNDWAVE_PARTY_SONGS`      | `true`  | Pass a party's songs on to its players.         |
+| `partyCacheMb`   | `SOUNDWAVE_PARTY_CACHE_MB`   | `4000`  | The most the cache holds, MB.                   |
+| `partyCacheDays` | `SOUNDWAVE_PARTY_CACHE_DAYS` | `7`     | How long a song is kept after it was last used. |
+
+`songMaxMb` limits one song here too.
 
 ## HTTPS
 
@@ -177,6 +194,7 @@ player's access token (`Authorization: Bearer …`). Bodies and answers are JSON
 | `GET /songs/:id/file`, `GET /songs/:id/charts`       | A shared song's file, or its charts without the audio                       |
 | `POST /songs/:id/report`, `DELETE /songs/:id`        | Report a song; remove it (its uploader, the owner, moderators)              |
 | `GET /covers/:songId.jpg`                            | A shared song's cover (public with `publicCovers`)                          |
+| `PUT /party/songs/:id`, `GET /party/songs/:id`       | Send one of your party's songs to the server; get it (party players only)   |
 | `GET /mod/reports`                                   | Reported songs (owner and moderators)                                       |
 | `POST /mod/…`, `GET /mod/audit`                      | Moderation, see above                                                       |
 | `/ws`                                                | The WebSocket: parties, Showdown, bands (see Protocol)                      |

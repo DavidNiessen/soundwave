@@ -214,8 +214,11 @@ describe('parties over the network', () => {
     guest.send({ type: 'party-join', code: code.toLowerCase() });
     await host.next('party', (m) => m.party?.members.length === 2);
 
+    // A party is just its players until the host picks what to play.
+    expect(made.party!.mode).toBeNull();
+    host.send({ type: 'mode', mode: 'versus' });
     host.send({ type: 'set', songs: [{ id: SONG, title: 'One', artist: 'Band', duration: 30 }] });
-    await guest.next('party', (m) => m.party?.set.length === 1);
+    await guest.next('party', (m) => m.party?.set.length === 1 && m.party.mode === 'versus');
     guest.send({ type: 'ready', part: 'bass', difficulty: 'hard', ready: true, have: [SONG, SONG2] });
     const ready = await host.next('party', (m) => !!m.party?.members.find((x) => x.id === guestS.user.id)?.ready);
     // Only songs in the set count as had.
@@ -337,6 +340,7 @@ describe('parties, on their own clock', () => {
     const { parties, last, advance } = setup();
     parties.handle(host, { type: 'party-create' });
     parties.handle(guest, { type: 'party-join', code: parties.stateOf('h')!.code });
+    parties.handle(host, { type: 'mode', mode: 'versus' });
     parties.handle(host, { type: 'set', songs: [{ id: SONG, title: 'One', artist: '', duration: 10 }] });
     for (const p of [host, guest]) parties.handle(p, { type: 'ready', part: 'lead', difficulty: 'easy', ready: true, have: [SONG] });
     parties.handle(host, { type: 'start', songIndex: 0, charts: [chart(10)], assign: { h: 0, g: 0 } });
@@ -355,6 +359,7 @@ describe('parties, on their own clock', () => {
     const { parties, last } = setup();
     parties.handle(host, { type: 'party-create' });
     parties.handle(guest, { type: 'party-join', code: parties.stateOf('h')!.code });
+    parties.handle(host, { type: 'mode', mode: 'versus' });
     parties.handle(host, { type: 'set', songs: [{ id: SONG, title: 'One', artist: '', duration: 10 }] });
     parties.handle(host, { type: 'ready', part: 'lead', difficulty: 'easy', ready: true, have: [SONG] });
     parties.handle(guest, { type: 'ready', part: 'lead', difficulty: 'easy', ready: true, have: [] });

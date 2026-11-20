@@ -8,7 +8,7 @@
  */
 
 /** Raised whenever a message changes in a way an older game or server would misread. */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 /** The most players in one party. */
 export const PARTY_MAX = 16;
 /** How long a dropped player keeps their place in a party, ms. */
@@ -63,6 +63,11 @@ export interface ServerInfo {
   sharing: SongSharing;
   /** Song covers are served to anyone (for the Discord status), not only to players signed in. */
   publicCovers: boolean;
+  /**
+   * A party's songs are passed on through the server: the host's game sends a song a player lacks,
+   * the server keeps it for a while, and the player's game downloads it by itself.
+   */
+  partySongs: boolean;
 }
 
 export type SongSharing = 'off' | 'charts' | 'songs';
@@ -137,7 +142,19 @@ export interface SetSong {
   title: string;
   artist: string;
   duration: number;
+  /** The server holds this song for the party: a player without it downloads it from there. */
+  cached?: boolean;
 }
+
+/**
+ * What a party plays. A party starts as just its players; the host picks a mode, and its set and
+ * options, before the first song.
+ * - versus: everyone plays the set, and the scores are compared;
+ * - band: up to four, one on each part, for one band score (spec 4.5);
+ * - showdown: the lowest go out after each song, and overdrive strikes the player above (spec 4.1).
+ */
+export type PartyMode = 'versus' | 'band' | 'showdown';
+export const PARTY_MODES: PartyMode[] = ['versus', 'band', 'showdown'];
 
 /** A party's Showdown, chosen by the host in the lobby; a party without one plays for scores alone. */
 export interface ShowdownOptions {
@@ -221,7 +238,9 @@ export interface PartyState {
   songIndex: number;
   /** Every finished song's results, by song index. */
   results: SongResults[];
-  /** The party plays a Showdown, with these options; null for a plain party. */
+  /** What the party plays, or null while the host has not picked yet (the party is just its players). */
+  mode: PartyMode | null;
+  /** The party plays a Showdown, with these options; null for any other mode. */
   showdown: ShowdownOptions | null;
   /** The party plays as a band (spec 4.5): up to four, one per part, for one band score. */
   band: boolean;
@@ -288,20 +307,16 @@ export type ClientMessage =
   | { type: 'lobby' }
   /** The host removes a player from the party. */
   | { type: 'kick'; id: string }
-  /** A player without one of the set's songs asks the host for it (they chose to get it). */
-  | { type: 'request-song'; songId: string }
   /** What the player is doing, in a line for others ("In the menus", "Playing Song · Lead"). */
   | { type: 'status'; activity: string }
-  /** The host shared the song to the server's library for that player (or `ok: false`: they won't). */
-  | { type: 'song-sent'; songId: string; to: string; ok: boolean }
-  /** The host makes the party a Showdown, changes its options, or makes it a plain party again (null). */
-  | { type: 'showdown'; options: ShowdownOptions | null }
+  /** The host picks what the party plays, or goes back to just the players (null). */
+  | { type: 'mode'; mode: PartyMode | null }
+  /** The host changes the Showdown's options (the party plays a Showdown). */
+  | { type: 'showdown'; options: ShowdownOptions }
   /** Showdown: the player spends their charge (0..1) on a hit against the player above them. */
   | { type: 'strike'; songIndex: number; charge: number }
   /** A player who is not playing this song cheers the others on. */
   | { type: 'cheer' }
-  /** The host makes the party a band, or not. */
-  | { type: 'band'; on: boolean }
   /** The host makes the party private (never offered on Discord), or not. */
   | { type: 'private'; on: boolean }
   /** Band mode: this player started overdrive in bar `bar` of the song, for `seconds`. */
@@ -321,10 +336,6 @@ export type ServerMessage =
   | { type: 'error'; message: string }
   /** The server closes the connection, and says why. */
   | { type: 'bye'; reason: string }
-  /** To the host: a player asks for one of the set's songs. */
-  | { type: 'song-request'; songId: string; from: string; name: string }
-  /** To that player: the song is in the server's library to download (or the host could not send it). */
-  | { type: 'song-ready'; songId: string; ok: boolean }
   /**
    * Showdown, to the striker: whom their Strike hits, or null when nobody above can be hit (then
    * their press is an overdrive, and the charge stays theirs).

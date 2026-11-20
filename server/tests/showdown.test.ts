@@ -44,6 +44,7 @@ function showdown(n: number, options: ShowdownOptions = { hits: true, part: null
   say(0, { type: 'party-create' });
   const code = parties.stateOf('p0')!.code;
   for (let i = 1; i < n; i++) say(i, { type: 'party-join', code });
+  say(0, { type: 'mode', mode: 'showdown' });
   say(0, { type: 'showdown', options });
   if (!options.rotation) say(0, { type: 'set', songs: SET });
   players.forEach((_, i) => say(i, { type: 'ready', part: 'lead', difficulty: 'medium', ready: true, have: [SONG, SONG2] }));

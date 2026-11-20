@@ -41,6 +41,16 @@ export interface Config {
   quotaMb: number;
   /** Covers of shared songs are served to anyone, so the Discord status can show them. */
   publicCovers: boolean;
+  /**
+   * A party's songs are passed on through the server (on by default): the host's game sends a song
+   * a player in the party lacks, and only the party's players can download it. No one else can list
+   * or fetch it, and it is kept only as a cache (server/src/partySongs.ts).
+   */
+  partySongs: boolean;
+  /** The most the party song cache holds, MB: the least recently used songs go first. */
+  partyCacheMb: number;
+  /** How long a party's song is kept after it was last used, days. */
+  partyCacheDays: number;
 }
 
 const MODES: JoinMode[] = ['public', 'password', 'invite'];
@@ -61,6 +71,9 @@ export const DEFAULTS: Config = {
   songMaxMb: 100,
   quotaMb: 2000,
   publicCovers: false,
+  partySongs: true,
+  partyCacheMb: 4000,
+  partyCacheDays: 7,
 };
 
 /** Reads the settings: defaults, then the file, then the environment. */
@@ -89,12 +102,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     ...(env.SOUNDWAVE_SONG_MAX_MB ? { songMaxMb: Number(env.SOUNDWAVE_SONG_MAX_MB) } : {}),
     ...(env.SOUNDWAVE_QUOTA_MB ? { quotaMb: Number(env.SOUNDWAVE_QUOTA_MB) } : {}),
     ...(env.SOUNDWAVE_PUBLIC_COVERS ? { publicCovers: env.SOUNDWAVE_PUBLIC_COVERS === '1' || env.SOUNDWAVE_PUBLIC_COVERS === 'true' } : {}),
+    ...(env.SOUNDWAVE_PARTY_SONGS ? { partySongs: env.SOUNDWAVE_PARTY_SONGS === '1' || env.SOUNDWAVE_PARTY_SONGS === 'true' } : {}),
+    ...(env.SOUNDWAVE_PARTY_CACHE_MB ? { partyCacheMb: Number(env.SOUNDWAVE_PARTY_CACHE_MB) } : {}),
+    ...(env.SOUNDWAVE_PARTY_CACHE_DAYS ? { partyCacheDays: Number(env.SOUNDWAVE_PARTY_CACHE_DAYS) } : {}),
     ...(env.SOUNDWAVE_TRUST_PROXY ? { trustProxy: env.SOUNDWAVE_TRUST_PROXY === '1' || env.SOUNDWAVE_TRUST_PROXY === 'true' } : {}),
   };
   const c: Config = { ...DEFAULTS, ...fromFile, ...fromEnv, ...overrides, dataDir };
   if (!MODES.includes(c.mode)) throw new Error(`mode must be one of ${MODES.join(', ')}, not "${c.mode}".`);
   if (!['off', 'charts', 'songs'].includes(c.songSharing)) throw new Error('songSharing must be off, charts or songs.');
   if (!(c.songMaxMb > 0) || !(c.quotaMb > 0)) throw new Error('songMaxMb and quotaMb must be more than 0.');
+  if (!(c.partyCacheMb > 0) || !(c.partyCacheDays > 0)) throw new Error('partyCacheMb and partyCacheDays must be more than 0.');
   if (c.mode === 'password' && !c.password) throw new Error('mode "password" needs a password (SOUNDWAVE_PASSWORD).');
   if (!Number.isInteger(c.port) || c.port < 0 || c.port > 65535) throw new Error(`port must be a number from 0 to 65535.`);
   if (!c.publicUrl) c.publicUrl = `http://localhost:${c.port}`;

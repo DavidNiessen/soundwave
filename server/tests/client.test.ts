@@ -100,6 +100,7 @@ describe('the game’s connection', () => {
 
     online.createParty();
     await until((s) => !!s.party);
+    online.setMode('versus');
     online.setSet([{ id: SONG, title: 'Song', artist: 'Band', duration: 20 }]);
     await until((s) => s.party?.set.length === 1);
     online.ready('drums', 'easy', true, [SONG]);
