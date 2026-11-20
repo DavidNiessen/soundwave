@@ -295,7 +295,7 @@ export class StageView {
 
   /** Keeps the camera on one part's band member, or lets it roam again (null). */
   lookAt(part: Part | null) {
-    this.send({ type: 'look', id: this.id, part });
+    this.send({ type: 'hold', id: this.id, part });
   }
 
   /**

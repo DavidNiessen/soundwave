@@ -168,7 +168,7 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
         slot.avatars = m.avatars;
         slot.stage?.setAvatars(m.avatars);
         break;
-      case 'look':
+      case 'hold':
         slot.stage?.lookAt(m.part);
         break;
       case 'capture':

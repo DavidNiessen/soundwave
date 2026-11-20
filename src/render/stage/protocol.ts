@@ -44,7 +44,7 @@ export type ToStage =
   /** Dresses the band as the players on its parts. */
   | { type: 'avatars'; id: number; avatars: Avatars }
   /** Keeps the camera on one part's band member, or lets it roam again (null). */
-  | { type: 'look'; id: number; part: Part | null }
+  | { type: 'hold'; id: number; part: Part | null }
   | { type: 'debug'; id: number }
   /** Sends a copy of every frame drawn (`frame`) while on: for recording a video. */
   | { type: 'capture'; id: number; on: boolean }

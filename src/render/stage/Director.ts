@@ -161,8 +161,9 @@ export class Director {
 
   /** Stays on the named shot, moving to and fro, until called with null. */
   hold(name: string | null) {
-    this.held = name;
+    // Only a shot the stage has: otherwise the camera would stop cutting for nothing.
     const s = name ? this.shots.find((x) => x.name === name) : undefined;
+    this.held = s ? name : null;
     if (s) this.cut(s);
   }
 
