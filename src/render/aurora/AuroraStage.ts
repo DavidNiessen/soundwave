@@ -423,9 +423,23 @@ export class AuroraStage {
     this.ring?.strike(from, to, ms);
   }
 
-  /** Keeps the camera on one part's band member (while a player dresses them), or lets it roam again (null). */
-  lookAt(part: Part | null) {
+  /**
+   * Keeps the camera on one part's band member (while a player dresses them), or lets it roam again
+   * (null). `shift`: how far right of the middle they stand in the picture, as a share of its width
+   * (the menus beside them take the left).
+   */
+  lookAt(part: Part | null, shift = 0) {
     this.director.hold(part ? `band-${part}` : null);
+    this.shift = part ? shift : 0;
+    this.frameShift();
+  }
+
+  /** A share of the picture's width the view is moved by, so the held subject stands off-centre. */
+  private shift = 0;
+  private frameShift() {
+    const { width: w, height: h } = this.size;
+    if (this.shift) this.camera.setViewOffset(w, h, -this.shift * w, 0, w, h);
+    else this.camera.clearViewOffset();
   }
 
   /** Dresses each part's band member as the player on that part, or as themselves where nobody is. */
@@ -468,6 +482,7 @@ export class AuroraStage {
     this.mirror?.setSize(Math.max(1, Math.round((w * ratio) / 2)), Math.max(1, Math.round((h * ratio) / 2)));
     this.camera.aspect = w / Math.max(1, h);
     this.camera.updateProjectionMatrix();
+    this.frameShift();
   }
 
   /**
@@ -603,6 +618,11 @@ export class AuroraStage {
     cam.aspect = this.camera.aspect;
     cam.near = this.camera.near;
     cam.far = this.camera.far;
+    // The reflection is framed as the picture is, off-centre too.
+    if (this.camera.view?.enabled) {
+      const v = this.camera.view;
+      cam.setViewOffset(v.fullWidth, v.fullHeight, v.offsetX, v.offsetY, v.width, v.height);
+    } else cam.clearViewOffset();
     cam.updateProjectionMatrix();
     cam.position.set(pos[0], 2 * level - pos[1], pos[2]);
     cam.up.set(0, -1, 0);

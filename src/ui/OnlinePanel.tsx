@@ -33,6 +33,9 @@ import { OnlineSidebar } from './OnlineSidebar';
 import { MODES } from './PartyScreen';
 import { AdminPanel, download, InvitePanel } from './ServerAdmin';
 
+/** How far right of the middle the player's band member stands in the picture (a share of its width). */
+const AVATAR_SHIFT = 0.27;
+
 /** A role as players read it: the server's owner is its admin. */
 const ROLE_LABEL: Record<Role, string> = { owner: 'Admin', moderator: 'Moderator', player: 'Player' };
 
@@ -176,12 +179,13 @@ function SignedIn({ settings, setlist, library, onParty, onBoards, onAvatar, bas
   const players = party ? party.members.length : 0;
   // The stage's camera holds on the player's band member, under their nametag.
   useEffect(() => {
-    setMenuLook(part);
+    // Framed on the right of the picture, where the nametag is; the bento takes the left.
+    setMenuLook(part, AVATAR_SHIFT);
     return () => setMenuLook(null);
   }, [part]);
 
   return (
-    <div className="online-panel">
+    <div className="online-panel with-avatar">
       {s.error && (
         <p className="party-error" role="alert">
           {s.error}
@@ -191,88 +195,105 @@ function SignedIn({ settings, setlist, library, onParty, onBoards, onAvatar, bas
         </p>
       )}
       <div className="online-stage">
-        {/* Left: playing together. */}
-        <div className="online-col" data-nav-group="tiles">
-          <button
-            type="button"
-            className={`online-party ${party ? 'in-party' : ''}`}
-            data-action="party-create"
-            data-autofocus
-            onClick={start}
-          >
-            <span className="online-party-art" aria-hidden>
-              <PartyPopper strokeWidth={ICON_STROKE} />
-            </span>
-            <span className="online-party-text">
-              <span className="online-party-title">
-                {party ? 'Your party' : 'Start a party'}
-                <Hint {...keysOf('party.create')} {...hints} />
-              </span>
-              {party ? (
-                <>
-                  <span className="display party-code-text">{party.code}</span>
-                  <span className="dim">
-                    {players} {players === 1 ? 'player' : 'players'}
-                    {party.mode ? ` · ${MODES[party.mode].label}` : ' · picking what to play'}
-                  </span>
-                </>
-              ) : (
-                <span className="dim">Versus or Showdown, up to {PARTY_MAX} players</span>
-              )}
-            </span>
-          </button>
-          {!party && (
-            <form
-              className="online-join"
-              onSubmit={(e) => {
-                e.preventDefault();
-                join();
-              }}
+        {/* Left: the bento, playing together and the server's boards, with the week's best under it. */}
+        <div className="online-bento">
+          <div className="tiles party-tiles" data-nav-group="tiles">
+            <button
+              type="button"
+              className={`tile hero ${party ? 'in-party' : ''}`}
+              data-action="party-create"
+              data-autofocus
+              onClick={start}
             >
-              <span className="online-row-label">
-                Join with a code
-                <Hint {...keysOf('party.join')} {...hints} />
+              <span className="mosaic blank" aria-hidden>
+                <PartyPopper strokeWidth={ICON_STROKE} />
               </span>
-              <span className="party-join-row">
-                <input
-                  ref={codeInput}
-                  value={code}
-                  onChange={(e) =>
-                    setCode(
-                      e.target.value
-                        .toUpperCase()
-                        .replace(/[^A-Z0-9]/g, '')
-                        .slice(0, 5),
-                    )
-                  }
-                  placeholder="B7KQX"
-                  aria-label="The party’s code, from its host"
-                  maxLength={12}
-                  spellCheck={false}
-                  autoCapitalize="characters"
-                />
-                <button type="submit" className="btn primary" data-action="party-join" disabled={!code.trim()}>
-                  <UserPlus strokeWidth={ICON_STROKE} aria-hidden />
-                  Join
-                </button>
-              </span>
-            </form>
-          )}
-          <nav className="online-links" aria-label="On the server">
-            {more.map(([id, binding, Icon, label, cap, run]) => (
-              <button key={id} type="button" className="online-link" data-action={id} onClick={run}>
-                <Icon strokeWidth={ICON_STROKE} aria-hidden />
-                <span className="online-link-text">
-                  <span className="online-link-title">{label}</span>
-                  <span className="dim">{cap}</span>
+              <span className="tile-text">
+                <span className="tile-title">
+                  {party ? 'Your' : 'Start a'}{' '}
+                  <span className="nowrap">
+                    party
+                    <Hint {...keysOf('party.create')} {...hints} />
+                  </span>
                 </span>
-                <Hint {...keysOf(binding)} {...hints} />
-              </button>
-            ))}
-          </nav>
+                {party ? (
+                  <>
+                    <span className="display party-code-text">{party.code}</span>
+                    <span className="tile-cap">
+                      {players} {players === 1 ? 'player' : 'players'}
+                      {party.mode ? ` · ${MODES[party.mode].label}` : ' · picking what to play'}
+                    </span>
+                    <span className="tile-meta">Open the lobby</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="tile-cap">Friends join with its code. Then you pick what to play together.</span>
+                    <span className="tile-meta">Versus or Showdown · up to {PARTY_MAX} players</span>
+                  </>
+                )}
+              </span>
+            </button>
+            <div className="tile-stack">
+              {!party && (
+                <form
+                  className="tile party-join"
+                  style={{ ['--i' as string]: 1 }}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    join();
+                  }}
+                >
+                  <span className="tile-text">
+                    <span className="tile-title">
+                      Join a party
+                      <Hint {...keysOf('party.join')} {...hints} />
+                    </span>
+                    <span className="party-join-row">
+                      <input
+                        ref={codeInput}
+                        value={code}
+                        onChange={(e) =>
+                          setCode(
+                            e.target.value
+                              .toUpperCase()
+                              .replace(/[^A-Z0-9]/g, '')
+                              .slice(0, 5),
+                          )
+                        }
+                        placeholder="B7KQX"
+                        aria-label="The party’s code, from its host"
+                        maxLength={12}
+                        spellCheck={false}
+                        autoCapitalize="characters"
+                      />
+                      <button type="submit" className="btn primary" data-action="party-join" disabled={!code.trim()}>
+                        <UserPlus strokeWidth={ICON_STROKE} aria-hidden />
+                        Join
+                      </button>
+                    </span>
+                  </span>
+                </form>
+              )}
+              {more.map(([id, binding, Icon, label, cap, run], i) => (
+                <button key={id} type="button" className="tile small" data-action={id} style={{ ['--i' as string]: i + 2 }} onClick={run}>
+                  <span className="tile-icon" aria-hidden>
+                    <Icon strokeWidth={ICON_STROKE} />
+                  </span>
+                  <span className="tile-text">
+                    <span className="tile-title">
+                      {label}
+                      <Hint {...keysOf(binding)} {...hints} />
+                    </span>
+                    <span className="tile-cap">{cap}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <OnlineSidebar onBoards={onBoards} />
         </div>
 
-        {/* Middle: the player, on stage behind, with their nametag over them. */}
+        {/* Right: the player themselves, their band member on stage in their look, the nametag over them. */}
         <div className="online-me">
           <button type="button" className="nametag" data-action="party-account" onClick={() => setModal('account')}>
             <span className={`online-dot ${s.status === 'online' ? 'on' : ''}`} aria-hidden />
@@ -285,9 +306,6 @@ function SignedIn({ settings, setlist, library, onParty, onBoards, onAvatar, bas
           </button>
           <span className="nametag-pin" aria-hidden />
         </div>
-
-        {/* Right: the week's best and who is online. */}
-        <OnlineSidebar onBoards={onBoards} />
       </div>
 
       {modal === 'account' && (

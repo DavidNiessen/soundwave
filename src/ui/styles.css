@@ -10058,3 +10058,51 @@ a.btn {
   font: inherit;
   font-weight: 700;
 }
+
+/* The Online tab, signed in: the bento on the left, the player on the right. */
+.online-stage {
+  grid-template-columns: minmax(0, 1.35fr) minmax(16rem, 1fr);
+  align-items: stretch;
+}
+.online-bento {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.7rem, 1.6vh, 1.1rem);
+  min-width: 0;
+}
+.online-bento .party-tiles {
+  min-height: min(22rem, 46vh);
+}
+/* The week's best and who is online side by side under the bento. */
+.online-bento .online-side {
+  width: auto;
+  flex-direction: row;
+}
+.online-bento .online-side > * {
+  flex: 1;
+  min-width: 0;
+}
+.online-me {
+  padding-top: clamp(1rem, 9vh, 6rem);
+}
+/* The veil that darkens the stage behind the menus lifts over the right, so the player's band
+   member shows in full light. */
+.menu.on-home:has(.online-panel.with-avatar) .veil {
+  -webkit-mask-image: linear-gradient(90deg, #000 40%, rgb(0 0 0 / 0.25) 68%, rgb(0 0 0 / 0.15));
+  mask-image: linear-gradient(90deg, #000 40%, rgb(0 0 0 / 0.25) 68%, rgb(0 0 0 / 0.15));
+}
+@media (max-width: 1000px) {
+  .online-bento .online-side {
+    flex-direction: column;
+  }
+}
+.online-stage {
+  grid-template-columns: minmax(0, 1.6fr) minmax(15rem, 1fr);
+}
+.online-bento .tile-stack .tile.small .tile-title {
+  font-size: clamp(0.95rem, 1.15vw, 1.2rem);
+  white-space: nowrap;
+}
+.online-bento .tile.hero .mosaic {
+  max-width: 34%;
+}

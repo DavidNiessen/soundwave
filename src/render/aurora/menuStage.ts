@@ -28,10 +28,13 @@ let held: Held | null = null;
 let dressed: Avatars = {};
 /** A Showdown lobby's players on the ring, or null for the band. */
 let ringed: RingSeat[] | null = null;
+/** Where the menu stage's camera holds, for any menu stage built later. */
+let looking: { part: Part | null; shift: number } = { part: null, shift: 0 };
 
 /** Keeps the menu stage's camera on one part's band member, or lets it roam again (null). */
-export function setMenuLook(part: Part | null) {
-  held?.stage.lookAt(part);
+export function setMenuLook(part: Part | null, shift = 0) {
+  looking = { part, shift };
+  held?.stage.lookAt(part, shift);
 }
 
 /** Dresses the menu stage's band, now and for any menu stage built later. */
@@ -70,6 +73,7 @@ export function acquireMenuStage(host: HTMLElement, g: GraphicsSettings): StageV
       if (held === mine) held = null;
     });
     held = mine;
+    if (looking.part) mine.stage.lookAt(looking.part, looking.shift);
   }
   const h = held;
   if (h.timer) {

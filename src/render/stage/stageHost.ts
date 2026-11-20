@@ -175,7 +175,7 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
         slot.stage?.setAvatars(m.avatars);
         break;
       case 'hold':
-        slot.stage?.lookAt(m.part);
+        slot.stage?.lookAt(m.part, m.shift);
         break;
       case 'ring':
         slot.ring = m.seats;

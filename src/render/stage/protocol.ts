@@ -45,7 +45,7 @@ export type ToStage =
   /** Dresses the band as the players on its parts. */
   | { type: 'avatars'; id: number; avatars: Avatars }
   /** Keeps the camera on one part's band member, or lets it roam again (null). */
-  | { type: 'hold'; id: number; part: Part | null }
+  | { type: 'hold'; id: number; part: Part | null; shift?: number }
   /** A Showdown's players on a ring of podiums in place of the band, or the band again (null). */
   | { type: 'ring'; id: number; seats: RingSeat[] | null }
   /** A Showdown's board as it stands: the ring's podiums follow it. */
