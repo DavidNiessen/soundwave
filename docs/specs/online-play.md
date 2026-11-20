@@ -429,7 +429,7 @@ Showdown uses the game's existing **overdrive meter**. When it has charge, the p
 | Overdrive  | As in a normal song: their own multiplier goes up while it lasts.                |
 | **Strike** | Spends the charge on a hit against the player just above them on the scoreboard. |
 
-- **Bigger charge, longer hit:** a quarter meter (the minimum) gives a 3 s hit, and a full meter 8 s, scaling in
+- **Bigger charge, longer hit:** a quarter meter (the minimum) gives a 6 s hit, and a full meter 14 s, scaling in
   between. Saving up is a real choice: a big hit later, or overdrive points now.
 - **Who's hit:** the player directly above. If that player is protected (see below), the Strike goes to the next
   one up. First place has no one above, so for them the meter is only overdrive.

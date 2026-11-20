@@ -25,8 +25,8 @@ export const SONG_ID = /^[0-9a-f]{64}$/;
 /* Showdown (docs/specs/online-play.md, 4.1). Starting values, to tune in play. */
 /** The least charge a Strike takes (a quarter meter), and the hit it gives, ms; a full meter gives the longest. */
 export const STRIKE_MIN_CHARGE = 0.25;
-export const HIT_MIN_MS = 3_000;
-export const HIT_MAX_MS = 8_000;
+export const HIT_MIN_MS = 6_000;
+export const HIT_MAX_MS = 14_000;
 /** How long before a hit lands its target is warned, with the attacker's name, ms. */
 export const HIT_WARNING_MS = 500;
 /** After a hit ends, its target cannot be hit for this long, ms. */

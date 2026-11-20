@@ -79,11 +79,11 @@ describe('Showdown', () => {
     expect(state().cut).toBe(survivors(6, 0, 2));
   });
 
-  it('makes a hit 3 s for a quarter meter and 8 s for a full one, half as long when repeated', () => {
-    expect(hitLength(0.25, false)).toBe(3000);
-    expect(hitLength(1, false)).toBe(8000);
-    expect(hitLength(0.625, false)).toBe(5500);
-    expect(hitLength(1, true)).toBe(4000);
+  it('makes a hit 6 s for a quarter meter and 14 s for a full one, half as long when repeated', () => {
+    expect(hitLength(0.25, false)).toBe(6000);
+    expect(hitLength(1, false)).toBe(14000);
+    expect(hitLength(0.625, false)).toBe(10000);
+    expect(hitLength(1, true)).toBe(7000);
   });
 
   it('ranks by score and knocks out the lowest after a song', () => {

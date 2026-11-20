@@ -58,7 +58,7 @@ export function survivors(start: number, songIndex: number, songs: number): numb
   return start - Math.round(((songIndex + 1) * (start - final)) / (songs - 1));
 }
 
-/** How long a Strike's hit lasts: 3 s for a quarter meter, 8 s for a full one, half for a repeat. */
+/** How long a Strike's hit lasts: 6 s for a quarter meter, 14 s for a full one, half for a repeat. */
 export function hitLength(charge: number, repeat: boolean): number {
   const k = Math.max(0, Math.min(1, (charge - STRIKE_MIN_CHARGE) / (1 - STRIKE_MIN_CHARGE)));
   const ms = Math.round(HIT_MIN_MS + k * (HIT_MAX_MS - HIT_MIN_MS));
