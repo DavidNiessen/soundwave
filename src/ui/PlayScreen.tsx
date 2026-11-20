@@ -1,4 +1,4 @@
-import { Crosshair, LogOut, Play, RotateCcw, Settings as SettingsIcon, SkipForward, Swords } from 'lucide-react';
+import { Crown, LogOut, Play, RotateCcw, Settings as SettingsIcon, SkipForward } from 'lucide-react';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { showSong } from '../app/discord';
 import { getEngine } from '../audio/engine';
@@ -15,7 +15,8 @@ import { menuPulse } from '../input/rumble';
 import { useActions } from './actions';
 import { Dialog } from './Dialog';
 import { hudRefs, PlayHud } from './PlayHud';
-import { ICON_STROKE } from './icons';
+import { ICON_STROKE, PART_ICON } from './icons';
+import { PlayerFace } from './PartyScreen';
 import { BOARD_INTERVAL_MS, STRIKE_MIN_CHARGE } from '../net/protocol';
 import { online } from '../net/client';
 import type { Avatars } from '../render/aurora/AuroraStage';
@@ -63,6 +64,13 @@ interface Props {
       ring: RingSeat[];
     };
   };
+}
+
+/** The player's own Strike: on whom, when it went (performance.now ms) and how long its hit lasts. */
+interface StrikeNote {
+  target: string;
+  at: number;
+  ms: number;
 }
 
 /** A Showdown hit on this player: who struck, when it lands (performance.now ms) and for how long. */
@@ -116,6 +124,7 @@ export function PlayScreen({
   const [count, setCount] = useState(3);
   const [run, setRun] = useState(0);
   const [hit, setHit] = useState<HitNote | null>(null);
+  const [fired, setFired] = useState<StrikeNote | null>(null);
   const [note, setNote] = useState<{ text: string; key: number } | null>(null);
   const finishRef = useRef(onFinish);
   finishRef.current = onFinish;
@@ -199,7 +208,6 @@ export function PlayScreen({
    */
   function showdown(ctrl: PlayController, sd: { songIndex: number; hits: boolean; me: string }) {
     let asking = false;
-    const name = (id: string) => online.snapshot().party?.members.find((m) => m.id === id)?.name ?? 'the player above';
     if (sd.hits)
       ctrl.strike = (charge) => {
         if (asking) return true;
@@ -226,7 +234,7 @@ export function PlayScreen({
         if (!e.target) return ctrl.overdriveNow();
         ctrl.spendCharge();
         playShowdownSfx('strike');
-        setNote({ text: `Strike on ${name(e.target)}`, key: performance.now() });
+        setFired({ target: e.target, at: performance.now(), ms: e.ms ?? 5000 });
         return;
       }
       ctrl.hit(e.at, e.ms);
@@ -366,7 +374,7 @@ export function PlayScreen({
       {together?.board}
       {hit && <HitBanner hit={hit} onOver={() => setHit(null)} />}
       {together?.showdown?.hits && phase !== 'countdown' && (
-        <StrikeReady me={together.showdown.me} ctrl={ctrlRef} settings={settings} usingPad={mode === 'pad'} />
+        <StrikeReady me={together.showdown.me} ctrl={ctrlRef} settings={settings} usingPad={mode === 'pad'} fired={fired} />
       )}
       {together?.showdown && phase === 'countdown' && (
         <div className="sd-round" aria-live="polite">
@@ -465,24 +473,55 @@ function HitBanner({ hit, onOver }: { hit: HitNote; onOver(): void }) {
     return () => clearInterval(timer);
   }, [hit]);
   const coming = now < hit.at;
-  const left = Math.max(0, Math.ceil((hit.at + hit.ms - now) / 1000));
-  const what = 'Your highway shimmers, and your multiplier holds at ×2';
+  const left = Math.max(0, (hit.at + hit.ms - now) / hit.ms);
+  const fromId = online.snapshot().party?.members.find((m) => m.name === hit.from)?.id ?? '';
   return (
     <>
       {!coming && <div className="showdown-edge" aria-hidden />}
+      {!coming && <HitBurst key={hit.at} />}
       <div className={`sd-struck ${coming ? 'coming' : ''}`} role="alert">
-        <span className="sd-struck-label">{coming ? 'Incoming strike' : 'Struck you!'}</span>
-        <span className="sd-struck-name">
-          <Swords strokeWidth={ICON_STROKE} aria-hidden />
-          {hit.from}
+        <span className="sd-struck-label">{coming ? 'Incoming!' : 'Struck you!'}</span>
+        <span className="sd-struck-pill">
+          <PlayerFace id={fromId} />
+          <span className="sd-struck-name">{hit.from}</span>
         </span>
         {!coming && (
-          <span className="sd-struck-what">
-            {what} · {left} s
+          <span className="sd-segs" aria-label={`${Math.ceil((left * hit.ms) / 1000)} seconds left`}>
+            {[0, 1, 2].map((k) => (
+              <span key={k} style={{ ['--fill' as string]: Math.max(0, Math.min(1, left * 3 - k)) }} />
+            ))}
           </span>
         )}
       </div>
     </>
+  );
+}
+
+/** The moment a hit lands: bright streaks fly across the screen through a violet flash. */
+const STREAKS = Array.from({ length: 16 }, (_, i) => ({
+  // Spread over the screen, each with its own size, delay and speed.
+  x: (i * 37) % 100,
+  y: (i * 61) % 100,
+  w: 7 + ((i * 13) % 9),
+  d: (i % 5) * 45,
+  s: 520 + ((i * 7) % 4) * 90,
+}));
+function HitBurst() {
+  return (
+    <div className="sd-burst" aria-hidden>
+      {STREAKS.map((t, i) => (
+        <span
+          key={i}
+          style={{
+            left: `${t.x}%`,
+            top: `${t.y}%`,
+            ['--w' as string]: `${t.w}rem`,
+            animationDelay: `${t.d}ms`,
+            animationDuration: `${t.s}ms`,
+          }}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -496,53 +535,75 @@ function StrikeReady({
   ctrl,
   settings,
   usingPad,
+  fired,
 }: {
   me: string;
   ctrl: React.RefObject<PlayController | null>;
   settings: Settings;
   usingPad: boolean;
+  /** The player's last Strike: whom, from when (performance.now ms) and for how long. */
+  fired: StrikeNote | null;
 }) {
   const board = useSyncExternalStore(online.subscribeBoard, online.board);
   const [charge, setCharge] = useState(0);
   const [od, setOd] = useState(false);
+  const [now, setNow] = useState(() => performance.now());
   useEffect(() => {
     const t = window.setInterval(() => {
       const s = ctrl.current?.session;
       setCharge(s ? Math.round(s.overdrive * 20) / 20 : 0);
       setOd(!!s?.overdriveActive);
-    }, 150);
+      setNow(performance.now());
+    }, 120);
     return () => clearInterval(t);
   }, [ctrl]);
   const lines = board?.lines ?? [];
   const ranked = lines.filter((l) => !l.out).sort((a, b) => b.score - a.score);
   const at = ranked.findIndex((l) => l.id === me);
   if (at < 0 || lines.find((l) => l.id === me)?.done) return null;
-  const aim = ranked[at].aim;
-  const ready = !!aim && !od && charge >= STRIKE_MIN_CHARGE;
+  const striking = fired && now < fired.at + fired.ms ? fired : null;
+  const aim = striking?.target ?? ranked[at].aim;
+  const ready = !striking && !!aim && !od && charge >= STRIKE_MIN_CHARGE;
   const name = (id: string) => online.snapshot().party?.members.find((m) => m.id === id)?.name ?? 'the player above';
-  const label = at === 0 ? 'You lead' : !aim ? 'Target out of reach' : ready ? 'Ready to strike' : 'Target';
+  const part = aim ? online.snapshot().party?.members.find((m) => m.id === aim)?.part : undefined;
+  const PartIcon = part ? PART_ICON[part] : null;
+  const label = striking ? 'You struck' : at === 0 ? 'You lead' : !aim ? 'Out of reach' : ready ? 'Ready to strike' : 'Your target';
+  // Charging: four quarters of the meter. Striking: the hit draining, in three.
+  const segs = striking
+    ? [0, 1, 2].map((k) => Math.max(0, Math.min(1, ((striking.at + striking.ms - now) / striking.ms) * 3 - k)))
+    : [0, 1, 2, 3].map((k) => Math.max(0, Math.min(1, charge * 4 - k)));
   return (
-    <div className={`sd-ready ${ready ? 'ready' : ''} ${at === 0 ? 'lead' : ''}`} role="status">
+    <div className={`sd-ready ${ready ? 'ready' : ''} ${striking ? 'striking' : ''} ${at === 0 ? 'lead' : ''}`} role="status">
       <span className="sd-ready-label">{label}</span>
-      <span className="sd-ready-target">
-        {at === 0 ? (
-          <span className="sd-ready-name">Nobody above you to strike</span>
-        ) : aim ? (
-          <>
-            <span className="sd-ready-rank num">{ranked.findIndex((l) => l.id === aim) + 1}</span>
-            <Crosshair strokeWidth={ICON_STROKE} aria-hidden />
-            <span className="sd-ready-name">{name(aim)}</span>
-            {ready && <span className="sd-ready-key">{usingPad ? 'Overdrive' : keyLabel(settings.overdriveKey)}</span>}
-          </>
-        ) : (
+      {at === 0 && !striking ? (
+        <span className="sd-ready-target lone">
+          <Crown strokeWidth={ICON_STROKE} aria-hidden />
+          <span className="sd-ready-name">Nobody above you</span>
+        </span>
+      ) : aim ? (
+        <span className="sd-ready-row">
+          <span className="sd-ready-rank num">{ranked.findIndex((l) => l.id === aim) + 1}</span>
+          <span className="sd-ready-target" key={striking ? `s${striking.at}` : 'aim'}>
+            <PlayerFace id={aim} />
+            <span className="sd-ready-mid">
+              <span className="sd-ready-name">{name(aim)}</span>
+              <span className={`sd-segs ${striking ? 'drain' : ''}`} aria-label={`Charge ${Math.round(charge * 100)}%`}>
+                {segs.map((f, k) => (
+                  <span key={k} style={{ ['--fill' as string]: f }} />
+                ))}
+              </span>
+            </span>
+            {PartIcon && (
+              <span className="sd-ready-part" aria-hidden>
+                <PartIcon strokeWidth={ICON_STROKE} />
+              </span>
+            )}
+          </span>
+          {ready && <span className="sd-ready-key">{usingPad ? 'Overdrive' : keyLabel(settings.overdriveKey)}</span>}
+        </span>
+      ) : (
+        <span className="sd-ready-target lone">
           <span className="sd-ready-name">Protected after a hit, or struck by two already</span>
-        )}
-      </span>
-      {at > 0 && (
-        <span className="sd-ready-charge" aria-label={`Charge ${Math.round(charge * 100)}%`}>
-          {[0.25, 0.5, 0.75, 1].map((q) => (
-            <span key={q} className={charge >= q ? 'on' : ''} />
-          ))}
         </span>
       )}
     </div>

@@ -324,7 +324,8 @@ export type ServerMessage =
    * Showdown, to the striker: whom their Strike hits, or null when nobody above can be hit (then
    * their press is an overdrive, and the charge stays theirs).
    */
-  | { type: 'struck'; songIndex: number; target: string | null }
+  /** `ms`: how long the hit on the target lasts (with a target), for the striker's banner. */
+  | { type: 'struck'; songIndex: number; target: string | null; ms?: number }
   /** Showdown, to the target: a hit from `from` (a name) lands at `at` (the server's clock) and lasts `ms`. */
   | { type: 'hit'; songIndex: number; from: string; at: number; ms: number }
   /** Showdown, to everyone in the party: `from` struck `to` (player ids); it lands at `at` (the server's clock). */

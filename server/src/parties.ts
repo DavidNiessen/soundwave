@@ -432,11 +432,11 @@ export class Parties {
     const line =
       party.state.showdown?.hits && song?.index === songIndex && charge >= STRIKE_MIN_CHARGE ? song.board.get(player.id) : undefined;
     const target = line && !line.done && !line.out ? this.aims(party).get(player.id) : undefined;
-    this.send(player.id, { type: 'struck', songIndex, target: target ?? null });
-    if (!target || !song) return;
+    if (!target || !song) return this.send(player.id, { type: 'struck', songIndex, target: null });
     const now = this.now();
     const repeat = now - (song.lastHit.get(target) ?? -Infinity) < HIT_REPEAT_MS;
     const ms = hitLength(Math.min(1, charge), repeat);
+    this.send(player.id, { type: 'struck', songIndex, target, ms });
     const at = now + HIT_WARNING_MS;
     song.hits.set(target, { at, until: at + ms });
     song.lastHit.set(target, now);

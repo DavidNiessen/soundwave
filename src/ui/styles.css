@@ -9238,3 +9238,434 @@ a.btn {
 .mode-steps.compact .mode-step {
   padding: 0.35rem 0.6rem;
 }
+
+/* ------------------------------------------------------------------------------------------- */
+/* Showdown in a song, second pass: pills, faces, the strike banner, the struck pill, the burst. */
+
+/* A player's face: a disc in their look's colours with their initial. */
+.sd-face {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2.7rem;
+  height: 2.7rem;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 3px rgb(255 255 255 / 0.9),
+    0 0.2rem 0.6rem rgb(0 0 0 / 0.45);
+  color: #fff;
+  font-weight: 900;
+  font-style: italic;
+  font-size: 1.15rem;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.6);
+}
+
+/* The board: big pills, the name and score in the middle, the face on the right. */
+.sd-board {
+  width: clamp(15rem, 21vw, 20rem);
+  gap: 0.45rem;
+  top: 34%;
+}
+.sd-row {
+  display: grid;
+  grid-template-columns: 1.6rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+}
+.sd-row.me {
+  background: none;
+  color: inherit;
+  transform: none;
+}
+.sd-row.lead {
+  box-shadow: none;
+}
+.sd-rank {
+  font-size: 1.6rem;
+  color: #fff;
+  text-shadow: 0 0.08em 0.3em rgb(0 0 0 / 0.7);
+}
+.sd-pill {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 3.3rem;
+  padding: 0.25rem 0.3rem 0.25rem 1.1rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3d6bff, #8a4dff 70%, #c04dff);
+  box-shadow: 0 0.3rem 1rem rgb(0 0 0 / 0.35);
+  color: #fff;
+}
+.sd-row.me .sd-pill {
+  background: linear-gradient(90deg, #ffb31a, #ffd23d);
+  color: #2a1600;
+}
+.sd-row.hit .sd-pill {
+  animation: sd-pill-hit 0.6s ease-in-out infinite alternate;
+}
+@keyframes sd-pill-hit {
+  to {
+    box-shadow:
+      0 0 0 2px var(--danger),
+      0 0 1.4rem rgb(255 90 114 / 0.7);
+  }
+}
+.sd-who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.1;
+}
+.sd-name {
+  max-width: 100%;
+  font-size: 1.05rem;
+  font-weight: 900;
+}
+.sd-row.hit:not(.me) .sd-name {
+  color: #fff;
+}
+.sd-share {
+  font-size: 0.85rem;
+  opacity: 0.9;
+}
+.sd-face-wrap {
+  position: relative;
+  flex: none;
+}
+.sd-crown {
+  position: absolute;
+  left: 50%;
+  top: -1.35rem;
+  translate: -50% 0;
+  width: 1.6rem;
+  height: 1.6rem;
+  color: #fff;
+  filter: drop-shadow(0 1px 3px rgb(0 0 0 / 0.7));
+}
+.sd-rank svg {
+  display: none;
+}
+/* The cut: scissors, a dashed line, and the gap in points, red below it, green above. */
+.sd-cut {
+  padding: 0.15rem 0 0.15rem 0.2rem;
+  color: #fff;
+}
+.sd-cut svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+.sd-cut-line {
+  border-top-width: 3px;
+  opacity: 0.9;
+}
+.sd-cut-margin {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0;
+  background: none;
+  font-size: 1.15rem;
+  font-weight: 900;
+  font-style: italic;
+  text-shadow: 0 0.06em 0.3em rgb(0 0 0 / 0.8);
+}
+.sd-cut-arrow {
+  font-style: normal;
+  font-size: 0.9em;
+}
+.sd-left {
+  margin-top: 0.2rem;
+}
+/* Your place: big and white, landing with a bounce when it changes. */
+.sd-place {
+  color: #fff;
+  font-size: clamp(3rem, 5.6vw, 5.2rem);
+  -webkit-text-stroke: 2px rgb(20 10 40 / 0.6);
+  text-shadow: 0 0.06em 0.4em rgb(0 0 0 / 0.55);
+  animation: sd-place-in 0.45s var(--ease) backwards;
+}
+.sd-place.danger {
+  color: #fff;
+}
+@keyframes sd-place-in {
+  from {
+    transform: scale(1.35) translateY(-0.2em);
+    opacity: 0;
+  }
+}
+
+/* The strike banner over the highway: a label, then the target's pill with its rank beside it. */
+.sd-ready {
+  top: calc(var(--safe-t) + 13vh);
+  gap: 0.35rem;
+}
+.sd-ready-label {
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+}
+.sd-ready-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+/* A puff of haze behind the banner. */
+.sd-ready-row::before {
+  content: '';
+  position: absolute;
+  inset: -1.6rem -2.4rem;
+  z-index: -1;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(255 255 255 / 0.28), rgb(196 166 255 / 0.12) 60%, transparent);
+  filter: blur(12px);
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+.sd-ready.ready .sd-ready-row::before,
+.sd-ready.striking .sd-ready-row::before {
+  opacity: 1;
+}
+.sd-ready-rank {
+  font-size: 1.9rem;
+  color: #fff;
+  text-shadow: 0 0.08em 0.3em rgb(0 0 0 / 0.7);
+}
+.sd-ready-target {
+  min-width: 18rem;
+  padding: 0.3rem 0.35rem 0.3rem 0.35rem;
+  gap: 0.7rem;
+  background: rgb(14 10 32 / 0.82);
+  animation: none;
+}
+.sd-ready.ready .sd-ready-target,
+.sd-ready.striking .sd-ready-target {
+  background: linear-gradient(90deg, #9b3dff, #ff4d9d);
+  animation: sd-ready-pulse 1.2s ease-in-out infinite;
+}
+.sd-ready.striking .sd-ready-target {
+  animation: sd-fire 0.5s var(--ease) both;
+}
+@keyframes sd-fire {
+  0% {
+    transform: scale(0.7);
+    filter: brightness(2.2);
+  }
+  60% {
+    transform: scale(1.08);
+  }
+}
+.sd-ready-target.lone {
+  min-width: 0;
+  padding: 0.4rem 1rem;
+}
+.sd-ready-target.lone svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+.sd-ready-mid {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+.sd-ready-name {
+  max-width: 100%;
+  font-size: 1.1rem;
+}
+.sd-ready:not(.ready):not(.striking) .sd-ready-name {
+  color: var(--ink);
+}
+.sd-ready-part {
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.9);
+  color: #7a2ad6;
+}
+.sd-ready-part svg {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+.sd-ready-charge {
+  display: none;
+}
+/* Segments: a charge filling up, or a hit draining away. */
+.sd-segs {
+  display: flex;
+  gap: 0.25rem;
+}
+.sd-segs span {
+  width: 2.3rem;
+  height: 0.38rem;
+  border-radius: 1rem;
+  background: linear-gradient(90deg, var(--od) calc(var(--fill, 0) * 100%), transparent 0), rgb(0 0 0 / 0.35);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.15);
+}
+.sd-segs.drain span {
+  background: linear-gradient(90deg, #6ee7ff calc(var(--fill, 0) * 100%), transparent 0), rgb(0 0 0 / 0.35);
+}
+
+/* Struck: a label and the striker's pill sliding in from the left, with the hit draining. */
+.sd-struck {
+  left: clamp(1rem, 2.4vw, 2.6rem);
+  top: auto;
+  bottom: calc(var(--safe-b) + 30vh);
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  animation: sd-struck-in 0.45s var(--ease) backwards;
+}
+.sd-struck.coming {
+  background: none;
+  color: inherit;
+}
+@keyframes sd-struck-in {
+  from {
+    transform: translateX(-120%);
+    opacity: 0;
+  }
+}
+.sd-struck-label {
+  padding-left: 0.6rem;
+  font-size: 1.05rem;
+  letter-spacing: 0.06em;
+  color: #fff;
+  text-shadow: 0 0.06em 0.3em rgb(0 0 0 / 0.8);
+}
+.sd-struck.coming .sd-struck-label {
+  color: #ffd0d8;
+  animation: sd-blink 0.25s steps(2) infinite;
+}
+@keyframes sd-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+.sd-struck-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  min-width: 16rem;
+  padding: 0.3rem 1.6rem 0.3rem 0.3rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff3d8b, #ff4d9d 55%, rgb(255 77 157 / 0.35));
+  box-shadow: 0 0.3rem 1.2rem rgb(255 61 139 / 0.4);
+}
+.sd-struck:not(.coming) .sd-struck-pill {
+  background: linear-gradient(90deg, #4a3dff, #7a4dff 55%, rgb(122 77 255 / 0.3));
+  box-shadow: 0 0.3rem 1.2rem rgb(90 70 255 / 0.4);
+}
+.sd-struck-name {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #fff;
+}
+.sd-struck .sd-segs {
+  padding-left: 0.6rem;
+}
+
+/* While a hit lasts: a violet glow around the edges instead of a hard red frame. */
+.showdown-edge {
+  box-shadow:
+    inset 0 0 6rem rgb(170 80 255 / 0.55),
+    inset 0 0 1.4rem rgb(255 255 255 / 0.25);
+  animation: sd-edge 1.6s ease-in-out infinite alternate;
+}
+@keyframes sd-edge {
+  to {
+    box-shadow:
+      inset 0 0 9rem rgb(200 90 255 / 0.65),
+      inset 0 0 2rem rgb(255 255 255 / 0.35);
+  }
+}
+
+/* The hit landing: a violet flash and bright streaks flying across the screen. */
+.sd-burst {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  overflow: hidden;
+  pointer-events: none;
+  animation: sd-flash 0.9s ease-out forwards;
+}
+@keyframes sd-flash {
+  0% {
+    background: radial-gradient(circle at 50% 55%, rgb(255 255 255 / 0.45), rgb(170 80 255 / 0.5) 45%, rgb(90 30 200 / 0.35));
+  }
+  100% {
+    background: transparent;
+  }
+}
+.sd-burst span {
+  position: absolute;
+  width: var(--w, 9rem);
+  height: calc(var(--w, 9rem) * 0.16);
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.95) 45%, #fff 80%, rgb(220 200 255 / 0.9));
+  filter: blur(1.5px) drop-shadow(0 0 0.6rem rgb(220 180 255 / 0.9));
+  transform: translate(-60vw, 45vh) rotate(-32deg);
+  opacity: 0;
+  animation-name: sd-streak;
+  animation-timing-function: cubic-bezier(0.3, 0.6, 0.4, 1);
+  animation-fill-mode: both;
+}
+@keyframes sd-streak {
+  0% {
+    transform: translate(-30vw, 30vh) rotate(-32deg) scaleX(0.4);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(40vw, -35vh) rotate(-32deg) scaleX(1.4);
+    opacity: 0;
+  }
+}
+:root[data-motion='reduced'] .sd-burst span {
+  display: none;
+}
+@media (max-width: 720px) {
+  .sd-board {
+    top: calc(var(--safe-t) + 4.5rem);
+  }
+  .sd-ready-target {
+    min-width: 0;
+  }
+  .sd-struck-pill {
+    min-width: 0;
+  }
+}
+/* The gap in points on its own dark pill: plain text over the stage is not readable. */
+.sd-cut-margin {
+  padding: 0.05rem 0.6rem;
+  border-radius: 999px;
+  background: rgb(12 8 28 / 0.85);
+}
+.sd-cut.danger .sd-cut-margin {
+  color: #ff6b84;
+}
+.sd-cut.safe .sd-cut-margin {
+  color: #6ff0a6;
+}
+/* Places skipped between the leader and you: three small dots, centred under the pills. */
+.sd-gap {
+  width: auto;
+  height: 0.6rem;
+  margin: 0 0 0 2rem;
+  background: radial-gradient(circle, rgb(255 255 255 / 0.7) 1.5px, transparent 2px) center / 0.6rem 0.6rem repeat-x;
+  opacity: 0.8;
+}

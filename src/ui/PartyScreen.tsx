@@ -45,7 +45,7 @@ import {
   WifiOff,
   type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { DIFFICULTIES, PARTS, type Difficulty, type Part } from '../chart/types';
 import type { Results } from '../game/GameSession';
 import { isCalibrated, type Settings } from '../game/settings';
@@ -1382,17 +1382,48 @@ export const ordinal = (n: number) => {
   return `${n}${suffix}`;
 };
 
+/** A player's badge: a disc in their look's colours with their initial (violet without a look). */
+export function PlayerFace({ id, className = '' }: { id: string; className?: string }) {
+  const m = online.snapshot().party?.members.find((x) => x.id === id);
+  const top = m?.avatar?.top ?? '#5b3ee0';
+  const bottom = m?.avatar?.bottom ?? '#ff4d9d';
+  return (
+    <span className={`sd-face ${className}`} style={{ background: `linear-gradient(140deg, ${top}, ${bottom})` }} aria-hidden>
+      {(m?.name ?? '?').slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
 /**
- * A Showdown's board beside the highway: the leader always, then the players around you; the cut
- * line where the field is cut after this song, with how far above or below it you are; and your
- * place, large, in the corner.
+ * A Showdown's board beside the highway: big pills, the leader under a crown, then the players
+ * around you, yours in gold; the cut line with how far above (+) or below (−) it you are; and your
+ * place, large, in the corner. The pills glide to their new places as the order changes.
  */
 function ShowdownBoard({ me }: { me: string }) {
   const s = useOnline();
   const board = useSyncExternalStore(online.subscribeBoard, online.board);
+  const listRef = useRef<HTMLOListElement>(null);
   const ranked = [...(board?.lines ?? [])].filter((l) => !l.out).sort((a, b) => b.score - a.score);
-  if (!ranked.length) return null;
   const at = ranked.findIndex((l) => l.id === me);
+  const order = ranked.map((l) => l.id).join(',');
+  // The pills glide from where they were to where they are now (FLIP).
+  const tops = useRef(new Map<string, number>());
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    for (const el of list.querySelectorAll<HTMLElement>('[data-id]')) {
+      const id = el.dataset.id!;
+      const top = el.offsetTop;
+      const was = tops.current.get(id);
+      tops.current.set(id, top);
+      if (was === undefined || was === top) continue;
+      el.animate([{ transform: `translateY(${was - top}px)` }, { transform: 'translateY(0)' }], {
+        duration: 420,
+        easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+      });
+    }
+  }, [order]);
+  if (!ranked.length) return null;
   const mine = ranked[at];
   const cut = Math.min(s.party?.cut ?? ranked.length, ranked.length);
   // The leader, then the two above you and the one below (more when you lead).
@@ -1404,15 +1435,18 @@ function ShowdownBoard({ me }: { me: string }) {
   // below it, behind the last who would stay.
   const safe = at >= 0 && at < cut;
   const margin =
-    at < 0 || cut >= ranked.length ? null : safe ? mine.score - (ranked[cut]?.score ?? 0) : (ranked[cut - 1]?.score ?? 0) - mine.score;
-  const name = (id: string) => nameOf(s.party, id);
+    at < 0 || cut >= ranked.length ? null : safe ? mine.score - (ranked[cut]?.score ?? 0) : mine.score - (ranked[cut - 1]?.score ?? 0);
   const cutRow = (
     <li key="cut" className={`sd-cut ${safe ? 'safe' : 'danger'}`} aria-label={`The cut: ${cut} go through`}>
       <Scissors strokeWidth={ICON_STROKE} aria-hidden />
       <span className="sd-cut-line" aria-hidden />
       {margin !== null && (
         <span className="sd-cut-margin num">
-          {safe ? '▲' : '▼'} {Math.max(0, margin).toLocaleString()}
+          <span className="sd-cut-arrow" aria-hidden>
+            {safe ? '▲' : '▼'}
+          </span>
+          {margin >= 0 ? '+' : '−'}
+          {Math.abs(margin).toLocaleString()}
         </span>
       )}
       <span className="sd-cut-line" aria-hidden />
@@ -1423,18 +1457,25 @@ function ShowdownBoard({ me }: { me: string }) {
     if (k > 0 && i - rows[k - 1] > 1) items.push(<li key={`gap-${i}`} className="sd-gap" aria-hidden />);
     if (i === cut && cut < ranked.length && (k === 0 || rows[k - 1] < cut)) items.push(cutRow);
     const l = ranked[i];
-    const hit = l.hit;
     items.push(
-      <li key={l.id} className={`sd-row ${l.id === me ? 'me' : ''} ${i === 0 ? 'lead' : ''} ${hit ? 'hit' : ''}`}>
-        <span className="sd-rank num">{i === 0 ? <Crown strokeWidth={ICON_STROKE} aria-label="First" /> : i + 1}</span>
-        <span className="sd-name">
-          {!!mine?.aim && mine.aim === l.id && (
-            <Crosshair className="aim" strokeWidth={ICON_STROKE} aria-label="Your Strike would hit them" />
-          )}
-          {l.aim === me && <Swords className="aim" strokeWidth={ICON_STROKE} aria-label="Their Strike would hit you" />}
-          {name(l.id)}
+      <li key={l.id} data-id={l.id} className={`sd-row ${l.id === me ? 'me' : ''} ${i === 0 ? 'lead' : ''} ${l.hit ? 'hit' : ''}`}>
+        <span className="sd-rank num">{i + 1}</span>
+        <span className="sd-pill">
+          <span className="sd-who">
+            <span className="sd-name">
+              {!!mine?.aim && mine.aim === l.id && (
+                <Crosshair className="aim" strokeWidth={ICON_STROKE} aria-label="Your Strike would hit them" />
+              )}
+              {l.aim === me && <Swords className="aim" strokeWidth={ICON_STROKE} aria-label="Their Strike would hit you" />}
+              {nameOf(s.party, l.id)}
+            </span>
+            <span className="sd-share num">{l.score.toLocaleString()}</span>
+          </span>
+          <span className="sd-face-wrap">
+            {i === 0 && <Crown className="sd-crown" strokeWidth={ICON_STROKE} aria-label="First" />}
+            <PlayerFace id={l.id} />
+          </span>
         </span>
-        <span className="sd-share num">{l.score.toLocaleString()}</span>
       </li>,
     );
   });
@@ -1442,14 +1483,14 @@ function ShowdownBoard({ me }: { me: string }) {
   if (cut < ranked.length && rows[rows.length - 1] < cut) items.push(cutRow);
   return (
     <>
-      <ol className="sd-board" aria-label="Showdown standings">
+      <ol className="sd-board" aria-label="Showdown standings" ref={listRef}>
         {items}
         <li className="sd-left">
           {ranked.length} playing · {cut === 1 ? 'the best one wins' : `top ${cut} go through`}
         </li>
       </ol>
       {at >= 0 && (
-        <p className={`sd-place ${safe ? '' : 'danger'}`} aria-label={`You are ${ordinal(at + 1)}`}>
+        <p className={`sd-place ${safe ? '' : 'danger'}`} key={at} aria-label={`You are ${ordinal(at + 1)}`}>
           {ordinal(at + 1)}
         </p>
       )}
