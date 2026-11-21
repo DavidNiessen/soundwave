@@ -441,6 +441,8 @@ export class PlayController {
     }
     this.effects = this.effects.filter((e) => e.state !== 2);
     this.highway.fog = this.effects.some((e) => e.state === 1 && e.kind === 'fog') ? 1 : 0;
+    // The dial shows a Drain holding the multiplier down (see .hud.drained).
+    this.hud.root.classList.toggle('drained', this.ruleNow !== 0);
   }
 
   /** Records the multiplier's rule at song time `at`, if it changed. */
@@ -885,8 +887,13 @@ export class PlayController {
       // (--od itself is the overdrive colour.)
       this.hud.root.style.setProperty('--od-level', (od / 100).toFixed(2));
       this.hud.root.classList.toggle('od-ready', od >= 25 && !s.overdriveActive);
+      // In a Showdown the meter is the Strike's charge too: a quarter of it is a Strike ready.
+      this.hud.root.classList.toggle('strike-ready', !!this.strike && od >= 25 && !s.overdriveActive);
     }
-    if (s.overdriveActive !== c.odActive) this.hud.root.classList.toggle('overdrive', s.overdriveActive);
+    if (s.overdriveActive !== c.odActive) {
+      this.hud.root.classList.toggle('overdrive', s.overdriveActive);
+      this.hud.root.classList.toggle('strike-ready', !!this.strike && od >= 25 && !s.overdriveActive);
+    }
     const stars = s.progressStars;
     if (stars !== c.stars) {
       this.hud.stars.dataset.count = String(stars);

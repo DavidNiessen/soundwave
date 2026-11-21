@@ -1,4 +1,5 @@
-import { Pause, Zap } from 'lucide-react';
+import { Lock, Pause, Zap } from 'lucide-react';
+import { useId } from 'react';
 import type { Chart } from '../chart/types';
 import type { HudRefs } from '../game/PlayController';
 import { keyLabel, type Settings } from '../game/settings';
@@ -35,6 +36,7 @@ interface Props {
  */
 export function PlayHud({ title, artist, position, total, chart, settings, onPause, replay = false }: Props) {
   const mode = useInputMode();
+  const charge = `charge-${useId().replace(/:/g, '')}`;
   const style = useGlyphStyle(settings.glyphs);
   const PartIcon = PART_ICON[chart.part];
   const keys = chart.lanes === 5 ? settings.keys5 : settings.keys4;
@@ -118,7 +120,14 @@ export function PlayHud({ title, artist, position, total, chart, settings, onPau
 
       <div className="hud-cluster">
         <div className="hud-dial">
-          <svg viewBox="0 0 120 120" className="hud-dial-ring" aria-hidden>
+          <svg viewBox="0 0 120 120" className="hud-dial-ring" aria-hidden style={{ ['--charge' as string]: `url(#${charge})` }}>
+            <defs>
+              {/* A Strike charged: the meter in the Strike's own colours (see .sd-ready.ready). */}
+              <linearGradient id={charge} x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0" stopColor="var(--violet)" />
+                <stop offset="1" stopColor="var(--pink)" />
+              </linearGradient>
+            </defs>
             <path className="od-track" d={OD_ARC} pathLength={1} />
             <path className="od-fill" d={OD_ARC} pathLength={1} />
             <circle cx="60" cy="60" r="41" className="plate" />
@@ -127,6 +136,10 @@ export function PlayHud({ title, artist, position, total, chart, settings, onPau
           </svg>
           <span className="hud-mult" data-hud="mult" data-level="1">
             ×1
+          </span>
+          {/* A Showdown hit's Drain holds the multiplier down while it lasts. */}
+          <span className="hud-hold" aria-hidden>
+            <Lock strokeWidth={ICON_STROKE} />
           </span>
         </div>
         <button type="button" className="hud-od" data-hud="od" data-sfx="none" tabIndex={-1} aria-label="Start overdrive">

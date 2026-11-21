@@ -3612,6 +3612,52 @@ input.text {
 .hud.overdrive .od-fill {
   filter: drop-shadow(0 0 7px var(--od));
 }
+/* Showdown: a Strike charged lights the meter up in the Strike's colours. */
+.hud.strike-ready .od-fill {
+  stroke: var(--charge, var(--pink));
+  filter: drop-shadow(0 0 5px rgb(255 77 157 / 0.7));
+  animation: hud-charge-pulse 1.2s ease-in-out infinite;
+}
+@keyframes hud-charge-pulse {
+  50% {
+    filter: drop-shadow(0 0 9px rgb(255 77 157 / 0.9));
+  }
+}
+/* Showdown: a hit's Drain holds the multiplier down; the dial gets a red edge and a lock. */
+.hud.drained .hud-dial-ring .plate {
+  stroke: var(--danger);
+  stroke-width: 3;
+}
+.hud.drained .hud-dial-ring .fill {
+  stroke: var(--danger);
+}
+.hud-hold {
+  position: absolute;
+  /* A badge on the dial's lower right edge, clear of the number in the middle. */
+  left: 84%;
+  top: 84%;
+  translate: -50% -50%;
+  display: grid;
+  place-items: center;
+  width: 26cqw;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--danger);
+  color: var(--pink-ink);
+  opacity: 0;
+  scale: 0.6;
+  transition:
+    opacity 0.2s,
+    scale 0.2s var(--ease);
+}
+.hud-hold svg {
+  width: 62%;
+  height: 62%;
+}
+.hud.drained .hud-hold {
+  opacity: 1;
+  scale: 1;
+}
 .hud-mult {
   position: relative;
   font-size: 25cqw;
