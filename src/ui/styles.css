@@ -10142,7 +10142,6 @@ a.btn {
 }
 .online-bento .tile-stack .tile.small .tile-title {
   font-size: clamp(0.95rem, 1.15vw, 1.2rem);
-  white-space: nowrap;
 }
 .online-bento .tile.hero .mosaic {
   max-width: 34%;
@@ -10257,7 +10256,8 @@ a.btn {
 .online-me .nametag {
   position: absolute;
   left: 50%;
-  top: -1.2rem;
+  /* Inside the column (it may scroll, and would cut off what stood above it), clear of its float. */
+  top: 0.5rem;
   translate: -50% 0;
   z-index: 2;
   display: flex;
@@ -10594,4 +10594,33 @@ a.btn {
 }
 .hud.interlude :is(.lane-key, .hud-cluster, .hud-feedback) {
   opacity: 0;
+}
+/* A narrow window has no room for the character beside the bento: the nametag stands alone above it
+   (still the way to the account by touch). */
+@media (max-width: 1000px) {
+  .online-stage {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    align-items: start;
+    align-content: start;
+  }
+  /* The bento's feature keeps its height above the tiles stacked under it. */
+  .online-bento .party-tiles .tile.hero {
+    flex: none;
+    min-height: 10rem;
+  }
+  .online-me {
+    min-height: auto;
+    order: -1;
+    display: flex;
+    justify-content: center;
+  }
+  .online-me :is(.avatar-portrait, .lobby-light, .lobby-shadow) {
+    display: none;
+  }
+  .online-me .nametag {
+    position: static;
+    translate: none;
+    animation: none;
+  }
 }
