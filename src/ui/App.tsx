@@ -114,7 +114,8 @@ interface Run {
   /** A chart played from the track editor: where to go back to, and where in the song it starts. */
   test?: { back: EditorView; startAt: number };
   /** A song played with a party: which of its set, and when it starts (performance.now ms). */
-  party?: { songIndex: number; at: number };
+  /** A party's song: its place in the party's run, when it starts, and the mode it is played in (taken at the start, as the party may change mode before the song is saved). */
+  party?: { songIndex: number; at: number; mode: 'versus' | 'showdown' };
 }
 
 type View =
@@ -921,14 +922,7 @@ export function App() {
     }
     // A song held only for a party leaves with it, so its replay could never be watched.
     if (inputs && settingsRef.current.replays && byIdRef.current.has(song.id))
-      void saveReplay(
-        song,
-        run.charts[run.index],
-        results,
-        inputs,
-        best,
-        run.party ? (online.snapshot().party?.showdown ? 'showdown' : 'versus') : 'solo',
-      );
+      void saveReplay(song, run.charts[run.index], results, inputs, best, run.party?.mode ?? 'solo');
     if (inputs) void postRun(run, results, inputs);
     return best;
   };
@@ -940,8 +934,7 @@ export function App() {
   const postRun = async (run: Run, results: Results, inputs: ReplayInputs) => {
     if (!online.snapshot().account || !settingsRef.current.postScores) return;
     // A Showdown's runs are shaped by the others' hits: they count in the party, not on the song's boards.
-    const party = online.snapshot().party;
-    if (run.party && party?.showdown) return;
+    if (run.party?.mode === 'showdown') return;
     const song = run.songs[run.index];
     try {
       const r = await online.postScore({
@@ -1083,7 +1076,7 @@ export function App() {
       results: [],
       pick: { part: chart.part, difficulty: chart.difficulty },
       lobby: { name: 'lobby', ids: [], from: 'home' },
-      party: { songIndex: start.songIndex, at: start.at },
+      party: { songIndex: start.songIndex, at: start.at, mode: online.snapshot().party?.showdown ? 'showdown' : 'versus' },
     };
     void wipeTo(async () => {
       try {
