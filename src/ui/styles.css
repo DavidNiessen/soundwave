@@ -10585,3 +10585,13 @@ a.btn {
     overflow-y: auto;
   }
 }
+
+/* An interlude: the highway leaves the screen (PlayController, breaks.highwayAway), and the deck's
+   controls go with it: the lane keys, the dial and overdrive, the note tags. The song, the score and
+   the countdown to the next note stay. */
+.hud :is(.lane-key, .hud-cluster, .hud-feedback) {
+  transition: opacity 0.5s var(--ease);
+}
+.hud.interlude :is(.lane-key, .hud-cluster, .hud-feedback) {
+  opacity: 0;
+}

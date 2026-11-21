@@ -5,6 +5,8 @@ import { MAX_MULTIPLIER, multiplierFor } from '../game/scoring';
 import { DRIVE_KIND, PHRASE_KIND, TILE_BANDS, TILE_PALETTES, tileColour, type TileBand } from './tilePalette';
 
 export const LANE_COLORS = [0x3ddc5a, 0xff3b4e, 0xffd23d, 0x3a8bff, 0xff8a1f];
+/** How far the highway sinks as it leaves for an interlude (world units). */
+const AWAY_DROP = 2.6;
 const OVERDRIVE_COLOR = new THREE.Color(0xeaf6ff);
 /** While overdrive lasts every tile on the lane is this light blue, and glows. */
 const OVERDRIVE_TILE = new THREE.Color(0x7fd2ff);
@@ -704,6 +706,14 @@ export class Highway {
   private readonly glowMats: THREE.ShaderMaterial[] = [];
   /** Showdown's Fog: 1 while a hit hazes the far highway, 0 otherwise (it fades between). */
   fog = 0;
+  /**
+   * How far the highway is gone, during an interlude (0: in place, 1: out of sight; see
+   * breaks.highwayAway): it sinks and fades, or with `awaySlide` off (reduced motion) only fades.
+   * The canvas's own opacity is set for the page; a video lays the canvas with the same alpha.
+   */
+  away = 0;
+  awaySlide = true;
+  private shownAway = -1;
   private readonly fogMat = new THREE.ShaderMaterial({
     vertexShader: fogVertex,
     fragmentShader: fogFragment,
@@ -1339,6 +1349,11 @@ export class Highway {
     u.uTime.value = (now / 1000) % 1000;
     // The facets move with the notes; 16 units is a whole number of their repeats.
     u.uTravel.value = (t * speed) % 16;
+    if (this.away !== this.shownAway) {
+      this.shownAway = this.away;
+      this.root.position.y = this.awaySlide ? -AWAY_DROP * this.away : 0;
+      this.canvas.style.opacity = this.away > 0 ? String(1 - this.away) : '';
+    }
     const fu = this.fogMat.uniforms;
     // A hit rolls in fast, with a flash, and clears more slowly.
     if (this.fog > 0.5 && fu.uLevel.value < 0.05) fu.uFlash.value = 1;

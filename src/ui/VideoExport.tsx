@@ -257,7 +257,10 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
       g.fillRect(0, 0, width, height);
       if (stageFrame) g.drawImage(stageFrame, 0, 0, width, height);
       const hw = hwRef.current!;
+      // During an interlude the highway leaves (see breaks.highwayAway), and the deck's dial with it.
+      g.globalAlpha = 1 - ctrl.away;
       g.drawImage(highway, 0, 0, width, height);
+      g.globalAlpha = 1;
       if (video.hud) {
         const s = ctrl.session;
         const layout = ctrl.hudLayout();
@@ -280,7 +283,7 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
           stars: s.progressStars,
           starP: s.nextStarProgress,
           feedback: fb ? { ...fb, age: (now - fb.at) / 1000 } : null,
-          deck: layout ? { x: layout.x * k, y: layout.y * k, foot: layout.foot * k, width: layout.width * k } : null,
+          deck: layout && ctrl.away < 0.5 ? { x: layout.x * k, y: layout.y * k, foot: layout.foot * k, width: layout.width * k } : null,
         });
       }
       const p = Math.max(0, Math.min(1, (t - REPLAY_START) / (length + TAIL - REPLAY_START)));

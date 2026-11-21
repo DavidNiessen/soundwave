@@ -12,7 +12,7 @@ import { ReplayPlayback, ReplayRecorder, replayResults, showdownMarks, type Repl
 import { BufferAnalyser } from '../audio/bufferAnalyser';
 import type { StageInput } from '../render/stage/protocol';
 import { Rumbler } from '../input/rumble';
-import { barsLeft, findBreaks, type Break } from './breaks';
+import { barsLeft, findBreaks, highwayAway, interludes, type Break } from './breaks';
 import { GamepadInput, KeyboardInput, TouchInput, type InputHandlers } from './input';
 import { WINDOWS } from './judge';
 import { GOLD_STARS, MAX_MULTIPLIER, multiplierFor, STREAK_PER_MULTIPLIER } from './scoring';
@@ -141,6 +141,10 @@ export class PlayController {
     scoreLen: -1,
   };
   private readonly breaks: Break[];
+  /** The long breaks, during which the highway leaves the screen (see breaks.highwayAway). */
+  private readonly interludes: Break[];
+  /** How far the highway is gone now (0..1), for a video to lay it with the same alpha. */
+  away = 0;
   /** A beat fell in the frame being drawn, and how much bass there is right now (0..1). */
   private readonly barTimes: number[];
   private feedbackTimer = 0;
@@ -273,6 +277,7 @@ export class PlayController {
     this.highway = new Highway(highwayCanvas, chart);
     this.highway.speed = highwaySpeed(settings.trackSpeed);
     this.breaks = findBreaks(chart);
+    this.interludes = interludes(this.breaks);
     this.barTimes = chart.downbeats.map((i) => chart.beats[i]).filter((x) => x !== undefined);
     this.meter.setAnalyser(engine.analyser);
     this.barLevels = barIntensity(chart);
@@ -767,6 +772,14 @@ export class PlayController {
    */
   private advance(t: number, now: number) {
     this.clock = now;
+    // An interlude: the highway leaves, and the deck's controls with it (see .hud.interlude).
+    const away = this.phase === 'playing' || this.phase === 'paused' ? highwayAway(t, this.interludes) : 0;
+    if (away !== this.away) {
+      if (away > 0.5 !== this.away > 0.5) this.hud.root.classList.toggle('interlude', away > 0.5);
+      this.away = away;
+    }
+    this.highway.away = away;
+    this.highway.awaySlide = !reducedMotion();
     if (this.phase === 'countdown') {
       const n = Math.ceil(this.startAt - t);
       if (t >= this.startAt) this.setPhase('playing');
