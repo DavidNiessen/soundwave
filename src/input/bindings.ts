@@ -145,6 +145,7 @@ export const COMMANDS: Command[] = [
   ]),
   // The admin page's sections, by number, as its tiles stand.
   ...cmd('admin', [
+    { id: 'admin.overview', label: 'Overview', key: 'Digit0' },
     { id: 'admin.library', label: 'Server library', key: 'Digit1' },
     { id: 'admin.players', label: 'Players', key: 'Digit2' },
     { id: 'admin.invites', label: 'Invites', key: 'Digit3' },

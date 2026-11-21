@@ -13,7 +13,7 @@ import type { SharedSong } from '../net/protocol';
 import { serverSongs } from '../net/serverSongs';
 import type { SongMeta } from '../storage/db';
 import { songFile } from '../storage/songFile';
-import { Hint, useActions, useHints } from './actions';
+import { Hint, useActions, useHints, type Action } from './actions';
 import { Cover } from './Cover';
 import { Dialog } from './Dialog';
 import { ICON_STROKE } from './icons';
@@ -49,7 +49,7 @@ function useServerCover(song: SharedSong) {
   return blob;
 }
 
-function ServerCover({ song, className }: { song: SharedSong; className?: string }) {
+export function ServerCover({ song, className }: { song: SharedSong; className?: string }) {
   return <Cover blob={useServerCover(song)} title={song.title} className={className} />;
 }
 
@@ -59,12 +59,15 @@ export function ServerLibrary({
   settings,
   onChange,
   onBack,
+  extra = [],
 }: {
   library: SongMeta[];
   list: SharedSong[];
   settings: Settings;
   onChange(): void;
   onBack(): void;
+  /** The page's other actions (going to another section), kept while this one declares its own. */
+  extra?: Action[];
 }) {
   const hints = useHints(settings);
   const [query, setQuery] = useState('');
@@ -86,7 +89,8 @@ export function ServerLibrary({
   const size = list.reduce((n, x) => n + x.size, 0);
 
   useActions([
-    { id: 'back', label: 'Admin', icon: ArrowLeft, kbd: 'Escape', sfx: 'back', run: onBack },
+    { id: 'back', label: 'Overview', icon: ArrowLeft, kbd: 'Escape', sfx: 'back', run: onBack },
+    ...extra.filter((a) => a.id !== 'admin-library'),
     { id: 'admin-add', label: 'Add songs', icon: Plus, ...keysOf('admin.add'), bar: false, run: () => setAdding(true) },
     {
       id: 'admin-sort',

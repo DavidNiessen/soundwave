@@ -7,10 +7,12 @@
 import {
   ArrowLeft,
   Check,
+  ChevronRight,
   Copy,
   Flag,
   Gavel,
   KeyRound,
+  LayoutDashboard,
   Library,
   ListMusic,
   LogOut,
@@ -19,6 +21,7 @@ import {
   Shield,
   Swords,
   Trash2,
+  TriangleAlert,
   UserPlus,
   Users,
   type LucideIcon,
@@ -29,9 +32,10 @@ import { keysOf } from '../input/bindings';
 import { online } from '../net/client';
 import type { Invite, Role, SetSong, SharedSong, UserEntry } from '../net/protocol';
 import type { SongMeta } from '../storage/db';
-import { Hint, useActions, useHints } from './actions';
+import { Hint, useActions, useHints, type Action } from './actions';
+import { Cover } from './Cover';
 import { Dialog } from './Dialog';
-import { ServerLibrary } from './ServerLibrary';
+import { ServerCover, ServerLibrary } from './ServerLibrary';
 import { ICON_STROKE } from './icons';
 
 /** Saves text as a file the player keeps (their data from the server). */
@@ -104,25 +108,72 @@ export function InvitePanel({ mod }: { mod: boolean }) {
   );
 }
 
-/** The admin's sections: each a tile on the admin page's bento, and a page of its own. */
-type Section = 'library' | 'players' | 'invites' | 'rotation' | 'log' | 'reports';
+/** The admin's sections: each a page of its own, listed down the side of the admin page. */
+type Section = 'overview' | 'library' | 'players' | 'invites' | 'rotation' | 'log' | 'reports';
 
-const SECTIONS: { id: Section; binding: string; label: string; icon: LucideIcon }[] = [
-  { id: 'library', binding: 'admin.library', label: 'Server library', icon: Library },
-  { id: 'players', binding: 'admin.players', label: 'Players', icon: Users },
-  { id: 'invites', binding: 'admin.invites', label: 'Invites', icon: UserPlus },
-  { id: 'rotation', binding: 'admin.rotation', label: 'Showdown rotation', icon: Swords },
-  { id: 'log', binding: 'admin.log', label: 'Moderation log', icon: ScrollText },
-  { id: 'reports', binding: 'admin.reports', label: 'Reported songs', icon: Flag },
+const SECTIONS: { id: Section; binding: string; label: string; icon: LucideIcon; about: string }[] = [
+  { id: 'overview', binding: 'admin.overview', label: 'Overview', icon: LayoutDashboard, about: 'Your server at a glance.' },
+  {
+    id: 'library',
+    binding: 'admin.library',
+    label: 'Server library',
+    icon: Library,
+    about: 'Songs everyone here can stream or download. Renaming one updates every copy players downloaded.',
+  },
+  {
+    id: 'players',
+    binding: 'admin.players',
+    label: 'Players',
+    icon: Users,
+    about: 'Everyone with an account here. Pick one to moderate them.',
+  },
+  {
+    id: 'invites',
+    binding: 'admin.invites',
+    label: 'Invites',
+    icon: UserPlus,
+    about: 'Links that let people make an account on this server.',
+  },
+  {
+    id: 'rotation',
+    binding: 'admin.rotation',
+    label: 'Showdown rotation',
+    icon: Swords,
+    about: 'The songs a Showdown plays when its host picks the server’s set, everyone on the same part.',
+  },
+  {
+    id: 'log',
+    binding: 'admin.log',
+    label: 'Moderation log',
+    icon: ScrollText,
+    about: 'Everything the admin and moderators did, newest first.',
+  },
+  { id: 'reports', binding: 'admin.reports', label: 'Reported songs', icon: Flag, about: 'Songs players asked to have taken down.' },
 ];
 
 type LogEntry = Awaited<ReturnType<typeof online.auditLog>>[number];
 type Report = Awaited<ReturnType<typeof online.songReports>>[number];
+/** Something the page fetched: loading (null), there, or a reason it is not. */
+type Loaded<T> = T | null | { failed: string };
+const failed = <T,>(x: Loaded<T>): x is { failed: string } => !!x && typeof x === 'object' && 'failed' in x;
+const ready = <T,>(x: Loaded<T>): T | null => (failed(x) ? null : x);
+
+/** "3 min ago", "yesterday", or the date. */
+export function timeAgo(at: number, now = Date.now()) {
+  const s = Math.max(0, (now - at) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  if (s < 172800) return 'yesterday';
+  if (s < 7 * 86400) return `${Math.floor(s / 86400)} days ago`;
+  return new Date(at).toLocaleDateString();
+}
+const minutes = (s: number) => (s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min` : `${Math.round(s / 60)} min`);
 
 /**
- * The admin page, for the server's owner and moderators: a bento of what they look after (the
- * server's library, its players, invites, the Showdown rotation, the moderation log and the
- * reported songs), each opening a page of its own.
+ * The admin page, for the server's owner and moderators: its sections down the side (an overview
+ * of the server, its library, players, invites, the Showdown rotation, the moderation log and the
+ * reported songs), the one open beside them under a header that says what it is for.
  */
 export function AdminScreen({
   setlist,
@@ -137,42 +188,53 @@ export function AdminScreen({
 }) {
   const s = useSyncExternalStore(online.subscribe, online.snapshot);
   const hints = useHints(settings);
-  const [section, setSection] = useState<Section | null>(null);
+  const [section, setSection] = useState<Section>('overview');
   const owner = s.account?.role === 'owner';
   const mod = owner || s.account?.role === 'moderator';
 
-  // What the bento shows on each tile, fetched as the page opens and again on coming back to it.
-  const [songs, setSongs] = useState<SharedSong[] | null>(null);
-  const [users, setUsers] = useState<UserEntry[] | null>(null);
-  const [rotation, setRotation] = useState<SetSong[] | null>(null);
-  const [log, setLog] = useState<LogEntry[] | null>(null);
-  const [reports, setReports] = useState<Report[] | null>(null);
+  // What the sections show, fetched as the page opens and again on going to another section.
+  const [songs, setSongs] = useState<Loaded<SharedSong[]>>(null);
+  const [users, setUsers] = useState<Loaded<UserEntry[]>>(null);
+  const [rotation, setRotation] = useState<Loaded<SetSong[]>>(null);
+  const [log, setLog] = useState<Loaded<LogEntry[]>>(null);
+  const [reports, setReports] = useState<Loaded<Report[]>>(null);
   const load = useCallback(() => {
     if (!mod) return;
-    void online.songs('').then(setSongs, () => {});
-    void online.users().then(setUsers, () => {});
-    void online.showdownRotation().then(setRotation, () => {});
-    void online.auditLog().then(setLog, () => {});
-    void online.songReports().then(setReports, () => {});
+    // A server older than the game may not answer some of these: the section says so.
+    const fail = (e: unknown) => ({
+      failed: /not found|404/i.test((e as Error).message)
+        ? 'This server is older than your game and cannot show this. Its owner needs to update it.'
+        : (e as Error).message,
+    });
+    void online.songs('').then(setSongs, (e) => setSongs(fail(e)));
+    void online.users().then(setUsers, (e) => setUsers(fail(e)));
+    void online.showdownRotation().then(setRotation, (e) => setRotation(fail(e)));
+    void online.auditLog().then(setLog, (e) => setLog(fail(e)));
+    void online.songReports().then(setReports, (e) => setReports(fail(e)));
   }, [mod]);
   useEffect(load, [load, section]);
 
-  const back = () => (section ? setSection(null) : onBack());
+  // A section opened by its key takes the focus to its place in the list, as a click does.
+  const go = (id: Section) => {
+    setSection(id);
+    requestAnimationFrame(() =>
+      document.querySelector<HTMLElement>(`.admin-nav [data-action="admin-${id}"]`)?.focus({ preventScroll: true }),
+    );
+  };
+  const nav: Action[] = SECTIONS.map(({ id, binding, label, icon }) => ({
+    id: `admin-${id}`,
+    label,
+    icon,
+    ...keysOf(binding),
+    bar: false,
+    run: () => go(id),
+  }));
+  const back = () => (section === 'overview' ? onBack() : go('overview'));
   useActions(
-    [
-      { id: 'back', label: section ? 'Admin' : 'Back', icon: ArrowLeft, kbd: 'Escape', sfx: 'back', run: back },
-      ...(section
-        ? []
-        : SECTIONS.map(({ id, binding, label, icon }) => ({
-            id: `admin-${id}`,
-            label,
-            icon,
-            ...keysOf(binding),
-            bar: false,
-            run: () => setSection(id),
-          }))),
-    ],
-    { passive: section === 'library' },
+    [{ id: 'back', label: section === 'overview' ? 'Back' : 'Overview', icon: ArrowLeft, kbd: 'Escape', sfx: 'back', run: back }, ...nav],
+    {
+      passive: section === 'library',
+    },
   );
 
   if (!mod)
@@ -185,86 +247,257 @@ export function AdminScreen({
       </div>
     );
 
-  const online_ = users?.filter((u) => u.online).length ?? 0;
-  const banned = users?.filter((u) => u.bannedUntil !== null).length ?? 0;
-  const cap: Record<Section, string> = {
-    library: songs ? `${songs.length} ${songs.length === 1 ? 'song' : 'songs'} everyone here can play` : 'Loading…',
-    players: users ? `${users.length} in all · ${online_} online${banned ? ` · ${banned} banned` : ''}` : 'Loading…',
-    invites: 'Links that let people make an account here.',
-    rotation: rotation ? (rotation.length ? `${rotation.length} songs a Showdown can play` : 'None yet') : 'Loading…',
-    log: log ? (log[0] ? `Last: ${log[0].actor} · ${log[0].action} ${log[0].target}` : 'Nothing yet') : 'Loading…',
-    reports: reports ? (reports.length ? `${reports.length} to look at` : 'None to look at') : 'Loading…',
+  const songList = ready(songs);
+  const userList = ready(users);
+  const reportList = ready(reports);
+  const count: Partial<Record<Section, number>> = {
+    library: songList?.length,
+    players: userList?.length,
+    rotation: ready(rotation)?.length,
+    reports: reportList?.length,
   };
-  const current = SECTIONS.find((x) => x.id === section);
+  const current = SECTIONS.find((x) => x.id === section)!;
 
   return (
     <div className="page admin-page">
       <header className="page-head">
-        <h1 className="page-title">{current ? current.label : 'Admin'}</h1>
+        <h1 className="page-title">Admin</h1>
         <p className="head-count">
           {s.info?.name ?? 'Soundwave server'} · {owner ? 'Admin' : 'Moderator'}
         </p>
       </header>
-      {!section && (
-        <div className="admin-bento" data-nav-group="admin">
-          {SECTIONS.map(({ id, binding, label, icon: Icon }, i) => (
+      <div className="admin-shell">
+        <nav className="admin-nav" aria-label="Admin" data-nav-group="admin-nav">
+          {SECTIONS.map(({ id, binding, label, icon: Icon }) => (
             <button
               key={id}
               type="button"
-              className={`tile admin-tile ${id} ${id === 'reports' && reports?.length ? 'alert' : ''}`}
+              className={`admin-nav-item ${section === id ? 'on' : ''} ${id === 'reports' && reportList?.length ? 'alert' : ''}`}
+              aria-current={section === id ? 'page' : undefined}
               data-action={`admin-${id}`}
-              data-autofocus={i === 0 ? '' : undefined}
-              style={{ ['--i' as string]: i }}
-              onClick={() => setSection(id)}
+              data-autofocus={section === id ? '' : undefined}
+              onClick={() => go(id)}
             >
-              <span className="tile-icon" aria-hidden>
-                <Icon strokeWidth={ICON_STROKE} />
-              </span>
-              <span className="tile-text">
-                <span className="tile-title">
-                  {label}
-                  <Hint {...keysOf(binding)} {...hints} />
-                </span>
-                <span className="tile-cap">{cap[id]}</span>
-                {id === 'library' && songs && songs.length > 0 && (
-                  <span className="admin-tile-list">
-                    {songs.slice(0, 4).map((x) => (
-                      <span key={x.id} className="admin-tile-line">
-                        {x.title}
-                        <span className="dim"> · {x.artist}</span>
-                      </span>
-                    ))}
-                  </span>
-                )}
-                {id === 'players' && users && (
-                  <span className="admin-tile-list">
-                    {users
-                      .filter((u) => u.online)
-                      .slice(0, 3)
-                      .map((u) => (
-                        <span key={u.name} className="admin-tile-line">
-                          <span className="online-dot on" aria-hidden /> {u.name}
-                        </span>
-                      ))}
-                  </span>
-                )}
-              </span>
+              <Icon strokeWidth={ICON_STROKE} aria-hidden />
+              <span className="admin-nav-label">{label}</span>
+              {!!count[id] && <span className="admin-count">{count[id]}</span>}
+              <Hint {...keysOf(binding)} {...hints} />
             </button>
           ))}
-        </div>
-      )}
-      {section && (
-        <section className="admin-section" data-nav-group="admin-section">
-          {section === 'library' && (
-            <ServerLibrary library={library} list={songs ?? []} settings={settings} onChange={load} onBack={() => setSection(null)} />
+        </nav>
+
+        <main className="admin-main" key={section}>
+          <header className="admin-main-head">
+            <h2 className="admin-main-title">{current.label}</h2>
+            <p className="hint">{current.about}</p>
+          </header>
+          {section === 'overview' && <Overview songs={songs} users={users} rotation={rotation} log={log} reports={reports} onGo={go} />}
+          {section === 'library' &&
+            (failed(songs) ? (
+              <Failed reason={songs.failed} />
+            ) : (
+              <ServerLibrary
+                library={library}
+                list={songList ?? []}
+                settings={settings}
+                onChange={load}
+                onBack={() => go('overview')}
+                extra={nav}
+              />
+            ))}
+          {section === 'players' &&
+            (failed(users) ? (
+              <Failed reason={users.failed} />
+            ) : (
+              <Players users={userList} owner={owner} me={s.account!.name} onChange={load} />
+            ))}
+          {section === 'invites' && <AdminInvites />}
+          {section === 'rotation' &&
+            (failed(rotation) ? (
+              <Failed reason={rotation.failed} />
+            ) : (
+              <Rotation rotation={ready(rotation)} setlist={setlist} onChange={setRotation} />
+            ))}
+          {section === 'log' && (failed(log) ? <Failed reason={log.failed} /> : <ModLog log={ready(log)} />)}
+          {section === 'reports' &&
+            (failed(reports) ? <Failed reason={reports.failed} /> : <ReportedSongs reports={reportList} onChange={load} />)}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+/** A section the server could not give. */
+function Failed({ reason }: { reason: string }) {
+  return (
+    <div className="admin-empty">
+      <TriangleAlert strokeWidth={ICON_STROKE} aria-hidden />
+      <p>{reason}</p>
+    </div>
+  );
+}
+
+/** The server at a glance: its numbers, the newest songs, who is online and what was done lately. */
+function Overview({
+  songs,
+  users,
+  rotation,
+  log,
+  reports,
+  onGo,
+}: {
+  songs: Loaded<SharedSong[]>;
+  users: Loaded<UserEntry[]>;
+  rotation: Loaded<SetSong[]>;
+  log: Loaded<LogEntry[]>;
+  reports: Loaded<Report[]>;
+  onGo(s: Section): void;
+}) {
+  const songList = ready(songs);
+  const userList = ready(users);
+  const reportList = ready(reports);
+  const rot = ready(rotation);
+  const onlineNow = userList?.filter((u) => u.online) ?? [];
+  const banned = userList?.filter((u) => u.bannedUntil !== null).length ?? 0;
+  const value = <T,>(x: Loaded<T>, v: (t: T) => string) => (failed(x) ? '–' : x === null ? '…' : v(x));
+  const stats: { id: Section; icon: LucideIcon; label: string; value: string; sub: string; alert?: boolean }[] = [
+    {
+      id: 'library',
+      icon: Library,
+      label: 'Songs',
+      value: value(songs, (l) => String(l.length)),
+      sub: songList ? minutes(songList.reduce((n, x) => n + x.duration, 0)) + ' of music' : '',
+    },
+    {
+      id: 'players',
+      icon: Users,
+      label: 'Players',
+      value: value(users, (l) => String(l.length)),
+      sub: userList ? `${onlineNow.length} online${banned ? ` · ${banned} banned` : ''}` : failed(users) ? 'Update the server' : '',
+    },
+    {
+      id: 'reports',
+      icon: Flag,
+      label: 'Reports',
+      value: value(reports, (l) => String(l.length)),
+      sub: reportList ? (reportList.length ? 'To look at' : 'All clear') : '',
+      alert: !!reportList?.length,
+    },
+    {
+      id: 'rotation',
+      icon: Swords,
+      label: 'Rotation',
+      value: value(rotation, (l) => String(l.length)),
+      sub: rot ? (rot.length ? 'Showdown songs' : 'Not set yet') : '',
+    },
+  ];
+  return (
+    <div className="admin-overview">
+      <div className="admin-stats" data-nav-group="admin-stats">
+        {stats.map(({ id, icon: Icon, label, value: v, sub, alert }) => (
+          <button key={id} type="button" className={`admin-stat ${alert ? 'alert' : ''}`} onClick={() => onGo(id)}>
+            <span className="admin-stat-top">
+              <Icon strokeWidth={ICON_STROKE} aria-hidden />
+              {label}
+            </span>
+            <span className="admin-stat-value">{v}</span>
+            <span className="admin-stat-sub">{sub}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="admin-panels">
+        <section className="admin-panel">
+          <header className="admin-panel-head">
+            <h3>Newest songs</h3>
+            <button type="button" className="admin-link" onClick={() => onGo('library')}>
+              All songs <ChevronRight strokeWidth={ICON_STROKE} aria-hidden />
+            </button>
+          </header>
+          {failed(songs) ? (
+            <p className="hint">{songs.failed}</p>
+          ) : !songList ? (
+            <p className="hint">Loading…</p>
+          ) : !songList.length ? (
+            <p className="hint">No songs yet. Add some under Server library.</p>
+          ) : (
+            <ol className="admin-rows">
+              {[...songList]
+                .sort((a, b) => b.created - a.created)
+                .slice(0, 5)
+                .map((x) => (
+                  <li key={x.id} className="admin-row">
+                    <ServerCover song={x} className="admin-row-cover" />
+                    <span className="admin-row-text">
+                      <span className="admin-row-title">{x.title}</span>
+                      <span className="admin-row-sub">
+                        {x.artist || 'Unknown artist'} · added by {x.by ?? 'a removed account'}
+                      </span>
+                    </span>
+                    <span className="admin-row-meta">{timeAgo(x.created)}</span>
+                  </li>
+                ))}
+            </ol>
           )}
-          {section === 'players' && <Players users={users} owner={owner} me={s.account!.name} onChange={load} />}
-          {section === 'invites' && <InvitePanel mod />}
-          {section === 'rotation' && <Rotation rotation={rotation} setlist={setlist} onChange={setRotation} />}
-          {section === 'log' && <ModLog log={log} />}
-          {section === 'reports' && <ReportedSongs reports={reports} onChange={load} />}
         </section>
-      )}
+
+        <div className="admin-panel-stack">
+          <section className="admin-panel">
+            <header className="admin-panel-head">
+              <h3>Online now</h3>
+              <button type="button" className="admin-link" onClick={() => onGo('players')}>
+                Players <ChevronRight strokeWidth={ICON_STROKE} aria-hidden />
+              </button>
+            </header>
+            {failed(users) ? (
+              <p className="hint">{users.failed}</p>
+            ) : !userList ? (
+              <p className="hint">Loading…</p>
+            ) : !onlineNow.length ? (
+              <p className="hint">Nobody right now.</p>
+            ) : (
+              <div className="admin-chips">
+                {onlineNow.map((u) => (
+                  <span key={u.name} className="admin-chip">
+                    <span className="online-dot on" aria-hidden />
+                    {u.name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </section>
+          <section className="admin-panel">
+            <header className="admin-panel-head">
+              <h3>Recent moderation</h3>
+              <button type="button" className="admin-link" onClick={() => onGo('log')}>
+                The log <ChevronRight strokeWidth={ICON_STROKE} aria-hidden />
+              </button>
+            </header>
+            {failed(log) ? (
+              <p className="hint">{log.failed}</p>
+            ) : !ready(log) ? (
+              <p className="hint">Loading…</p>
+            ) : !ready(log)!.length ? (
+              <p className="hint">Nothing yet.</p>
+            ) : (
+              <ol className="admin-rows compact">
+                {ready(log)!
+                  .slice(0, 4)
+                  .map((a, i) => (
+                    <li key={i} className="admin-row">
+                      <span className="admin-pill">{a.action}</span>
+                      <span className="admin-row-text">
+                        <span className="admin-row-title">{a.target}</span>
+                        <span className="admin-row-sub">by {a.actor}</span>
+                      </span>
+                      <span className="admin-row-meta">{timeAgo(a.at)}</span>
+                    </li>
+                  ))}
+              </ol>
+            )}
+          </section>
+        </div>
+      </div>
     </div>
   );
 }
@@ -327,19 +560,27 @@ function Players({ users, owner, me, onChange }: { users: UserEntry[] | null; ow
     <div className="admin-players">
       <div className="admin-list-side">
         <Search value={query} onChange={setQuery} label="Find a player" />
-        <ol className="boards-lines admin-list">
-          {users === null && <li className="dim">Loading…</li>}
-          {users && !shown.length && <li className="dim">Nobody by that name.</li>}
+        <ol className="admin-rows scroll">
+          {users === null && <li className="hint">Loading…</li>}
+          {users && !shown.length && <li className="hint">Nobody by that name.</li>}
           {shown.map((u) => (
             <li key={u.name}>
               <button
                 type="button"
-                className={`boards-line admin-user ${picked === u.name ? 'on' : ''}`}
+                className={`admin-row admin-user ${picked === u.name ? 'on' : ''}`}
                 aria-pressed={picked === u.name}
                 onClick={() => (setPicked(u.name), setNote(null))}
               >
-                <span className={`online-dot ${u.online ? 'on' : ''}`} aria-label={u.online ? 'Online' : 'Offline'} />
-                <span className="party-name">{u.name}</span>
+                <span className="admin-initial" aria-hidden>
+                  {u.name.slice(0, 1).toUpperCase()}
+                  <span className={`online-dot ${u.online ? 'on' : ''}`} />
+                </span>
+                <span className="admin-row-text">
+                  <span className="admin-row-title">{u.name}</span>
+                  <span className="admin-row-sub">
+                    {u.online ? 'Online now' : `Here since ${new Date(u.created).toLocaleDateString()}`}
+                  </span>
+                </span>
                 {u.role !== 'player' && <span className={`admin-role ${u.role}`}>{ROLE[u.role]}</span>}
                 {u.bannedUntil !== null && <span className="admin-role banned">Banned</span>}
               </button>
@@ -491,98 +732,243 @@ function Players({ users, owner, me, onChange }: { users: UserEntry[] | null; ow
   );
 }
 
-/** The Showdown rotation: the songs a Showdown plays when its host picks the server's set. */
+/** The Showdown rotation: its songs in order, and the player's setlist made the rotation. */
 function Rotation({ rotation, setlist, onChange }: { rotation: SetSong[] | null; setlist: SongMeta[]; onChange(r: SetSong[]): void }) {
   const [note, setNote] = useState<string | null>(null);
-  const use = () =>
-    void online.setShowdownRotation(setlist.map((x) => ({ id: x.id, title: x.title, artist: x.artist, duration: x.duration }))).then(
-      (r) => (onChange(r), setNote(r.length ? 'The Showdown rotation is your setlist now.' : 'The Showdown rotation is empty now.')),
-      (e) => setNote((e as Error).message),
-    );
+  const [busy, setBusy] = useState(false);
+  const use = () => {
+    setBusy(true);
+    void online
+      .setShowdownRotation(setlist.map((x) => ({ id: x.id, title: x.title, artist: x.artist, duration: x.duration })))
+      .then(
+        (r) => (onChange(r), setNote(r.length ? 'The Showdown rotation is your setlist now.' : 'The Showdown rotation is empty now.')),
+        (e) => setNote((e as Error).message),
+      )
+      .finally(() => setBusy(false));
+  };
+  const total = rotation?.reduce((n, x) => n + x.duration, 0) ?? 0;
   return (
-    <div className="admin-narrow">
-      <p className="hint">A Showdown whose host picks the server’s set plays these songs, everyone on the same part.</p>
-      <ol className="boards-lines admin-list">
-        {rotation === null && <li className="dim">Loading…</li>}
-        {rotation?.length === 0 && <li className="dim">None yet.</li>}
-        {rotation?.map((x, i) => (
-          <li key={x.id} className="boards-line">
-            <span className="boards-rank">{i + 1}</span>
-            <span className="party-name">
-              {x.title}
-              <span className="dim"> · {x.artist}</span>
-            </span>
-          </li>
-        ))}
-      </ol>
-      <button type="button" className="btn" data-autofocus onClick={use}>
-        <ListMusic strokeWidth={ICON_STROKE} aria-hidden />
-        {setlist.length ? `Make my setlist the rotation (${setlist.length} songs)` : 'Clear the rotation'}
-      </button>
-      {note && <p className="hint">{note}</p>}
+    <div className="admin-page-body">
+      <div className="admin-toolbar">
+        <p className="admin-toolbar-stats">
+          <strong>{rotation?.length ?? '…'}</strong> {rotation?.length === 1 ? 'song' : 'songs'}
+          {!!rotation?.length && <span className="dim"> · {minutes(total)}</span>}
+        </p>
+        <button type="button" className="btn primary" data-autofocus disabled={busy} onClick={use}>
+          <ListMusic strokeWidth={ICON_STROKE} aria-hidden />
+          {setlist.length ? `Use my setlist (${setlist.length})` : 'Clear the rotation'}
+        </button>
+      </div>
+      {note && (
+        <p className="hint admin-note" role="status">
+          {note}
+        </p>
+      )}
+      {rotation === null ? (
+        <p className="hint">Loading…</p>
+      ) : !rotation.length ? (
+        <div className="admin-empty">
+          <Swords strokeWidth={ICON_STROKE} aria-hidden />
+          <p>No rotation yet. Put songs in your setlist (in the library), then use it here.</p>
+        </div>
+      ) : (
+        <ol className="admin-rows scroll">
+          {rotation.map((x, i) => (
+            <li key={x.id} className="admin-row">
+              <span className="admin-rank">{i + 1}</span>
+              <Cover title={x.title} className="admin-row-cover" />
+              <span className="admin-row-text">
+                <span className="admin-row-title">{x.title}</span>
+                <span className="admin-row-sub">{x.artist || 'Unknown artist'}</span>
+              </span>
+              <span className="admin-row-meta">{clock(x.duration)}</span>
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }
 
-/** What the owner and moderators did, newest first, with a search. */
+const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+
+/** What the owner and moderators did, newest first: a search, and each action as a line. */
 function ModLog({ log }: { log: LogEntry[] | null }) {
   const [query, setQuery] = useState('');
   const q = query.trim().toLowerCase();
   const shown = (log ?? []).filter((a) => !q || `${a.actor} ${a.action} ${a.target} ${a.reason}`.toLowerCase().includes(q));
   return (
-    <div className="admin-narrow">
-      <Search value={query} onChange={setQuery} label="Find a player or an action" />
-      <ol className="boards-lines admin-list admin-log">
-        {log === null && <li className="dim">Loading…</li>}
-        {log && !shown.length && <li className="dim">Nothing{q ? ' like that' : ' yet'}.</li>}
-        {shown.map((a, i) => (
-          <li key={i} className="boards-line">
-            <span className="dim">{new Date(a.at).toLocaleString()}</span>
-            <span className="party-name">
-              {a.actor}: {a.action} {a.target}
-            </span>
-            <span className="dim">{a.reason}</span>
-          </li>
-        ))}
-      </ol>
+    <div className="admin-page-body">
+      <Search value={query} onChange={setQuery} label="Find a player, a moderator or an action" />
+      {log === null ? (
+        <p className="hint">Loading…</p>
+      ) : !shown.length ? (
+        <div className="admin-empty">
+          <ScrollText strokeWidth={ICON_STROKE} aria-hidden />
+          <p>{q ? 'Nothing like that in the log.' : 'Nothing yet. Bans, removals and role changes show here.'}</p>
+        </div>
+      ) : (
+        <ol className="admin-rows scroll">
+          {shown.map((a, i) => (
+            <li key={i} className="admin-row">
+              <span className={`admin-pill ${a.action.startsWith('ban') ? 'bad' : a.action === 'unban' ? 'good' : ''}`}>{a.action}</span>
+              <span className="admin-row-text">
+                <span className="admin-row-title">
+                  {a.target} <span className="dim">by {a.actor}</span>
+                </span>
+                {a.reason && <span className="admin-row-sub">“{a.reason}”</span>}
+              </span>
+              <span className="admin-row-meta" title={new Date(a.at).toLocaleString()}>
+                {timeAgo(a.at)}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }
 
-/** Songs players reported (a takedown, say), with removal from the server everywhere at once. */
+/** Songs players reported (a takedown, say): each with why, kept or removed from the server. */
 function ReportedSongs({ reports, onChange }: { reports: Report[] | null; onChange(): void }) {
   const [note, setNote] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<Report | null>(null);
   return (
-    <div className="admin-narrow">
-      <ol className="boards-lines admin-list">
-        {reports === null && <li className="dim">Loading…</li>}
-        {reports?.length === 0 && <li className="dim">No song is reported.</li>}
-        {reports?.map((r) => (
-          <li key={r.id} className="boards-line">
-            <span className="party-name">
-              {r.title} · {r.artist}
-              <span className="dim"> · shared by {r.uploader ?? 'a removed account'}</span>
-            </span>
-            <span className="dim">
-              {r.by ?? 'Someone'}: {r.reason}
-            </span>
-            <button
-              type="button"
-              className="btn small danger"
-              onClick={() =>
-                void online.removeSong(r.songId, r.reason).then(
-                  () => (setNote(`"${r.title}" was removed from the server.`), onChange()),
-                  (e) => setNote((e as Error).message),
-                )
-              }
-            >
-              <Trash2 strokeWidth={ICON_STROKE} aria-hidden />
-              Remove
-            </button>
-          </li>
+    <div className="admin-page-body">
+      {note && (
+        <p className="hint admin-note" role="status">
+          {note}
+        </p>
+      )}
+      {reports === null ? (
+        <p className="hint">Loading…</p>
+      ) : !reports.length ? (
+        <div className="admin-empty good">
+          <Check strokeWidth={ICON_STROKE} aria-hidden />
+          <p>No song is reported. All clear.</p>
+        </div>
+      ) : (
+        <ol className="admin-rows scroll">
+          {reports.map((r) => (
+            <li key={r.id} className="admin-row report">
+              <Cover title={r.title} className="admin-row-cover" />
+              <span className="admin-row-text">
+                <span className="admin-row-title">
+                  {r.title} <span className="dim">· {r.artist}</span>
+                </span>
+                <span className="admin-row-sub">
+                  {r.by ?? 'Someone'}: “{r.reason}” · shared by {r.uploader ?? 'a removed account'}
+                </span>
+              </span>
+              <button type="button" className="btn small danger" onClick={() => setRemoving(r)}>
+                <Trash2 strokeWidth={ICON_STROKE} aria-hidden />
+                Remove
+              </button>
+            </li>
+          ))}
+        </ol>
+      )}
+      {removing && (
+        <Dialog title="Remove the song" variant="card" closeLabel="Keep it" onClose={() => setRemoving(null)}>
+          {(close) => (
+            <div className="pause-card">
+              <h2 className="display">Remove “{removing.title}”?</h2>
+              <p className="hint">It leaves the server’s library, for everyone on the server.</p>
+              <button type="button" className="btn wide" data-autofocus data-sfx="back" onClick={close}>
+                Keep it
+              </button>
+              <button
+                type="button"
+                className="btn primary wide danger"
+                onClick={() => {
+                  const r = removing;
+                  close();
+                  void online.removeSong(r.songId, r.reason).then(
+                    () => (setNote(`“${r.title}” was removed from the server.`), onChange()),
+                    (e) => setNote((e as Error).message),
+                  );
+                }}
+              >
+                Remove
+              </button>
+            </div>
+          )}
+        </Dialog>
+      )}
+    </div>
+  );
+}
+
+/** Kinds of invite link, as the owner and moderators make them. */
+const INVITE_KINDS: { id: string; label: string; about: string; uses: number | null; days: number | null }[] = [
+  { id: 'one', label: 'One person', about: 'Works once, for a week.', uses: 1, days: 7 },
+  { id: 'group', label: 'A group', about: '10 accounts, for a week.', uses: 10, days: 7 },
+  { id: 'open', label: 'A community', about: 'No limit, and it never runs out.', uses: null, days: null },
+];
+
+/** Invite links: a kind to choose, the link to copy, and the links made this time. */
+function AdminInvites() {
+  const [kind, setKind] = useState(INVITE_KINDS[0].id);
+  const [made, setMade] = useState<Invite[]>([]);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const k = INVITE_KINDS.find((x) => x.id === kind)!;
+  const make = () =>
+    void online.makeInvite(k.uses, k.days === null ? null : k.days * 24).then(
+      (i) => (setMade((m) => [i, ...m]), setProblem(null)),
+      (e) => setProblem((e as Error).message),
+    );
+  const copy = (link: string) => void navigator.clipboard?.writeText(link).then(() => setCopied(link));
+  return (
+    <div className="admin-page-body">
+      <div className="admin-kinds" role="radiogroup" aria-label="What kind of invite">
+        {INVITE_KINDS.map((x) => (
+          <button
+            key={x.id}
+            type="button"
+            role="radio"
+            aria-checked={kind === x.id}
+            className={`admin-kind ${kind === x.id ? 'on' : ''}`}
+            data-autofocus={x.id === kind ? '' : undefined}
+            onClick={() => setKind(x.id)}
+          >
+            <span className="admin-kind-label">{x.label}</span>
+            <span className="admin-kind-about">{x.about}</span>
+          </button>
         ))}
-      </ol>
-      {note && <p className="hint">{note}</p>}
+      </div>
+      <div className="admin-toolbar">
+        <button type="button" className="btn primary" onClick={make}>
+          <UserPlus strokeWidth={ICON_STROKE} aria-hidden />
+          Make an invite link
+        </button>
+      </div>
+      {problem && <p className="party-error">{problem}</p>}
+      {made.length > 0 && (
+        <ol className="admin-rows">
+          {made.map((i) => (
+            <li key={i.link} className="admin-row invite">
+              <span className="admin-row-text">
+                <code className="admin-link-text">{i.link}</code>
+                <span className="admin-row-sub">
+                  {i.uses === null ? 'No limit' : i.uses === 1 ? 'Works once' : `${i.uses} accounts`}
+                  {i.expires === null ? ', always' : `, until ${new Date(i.expires).toLocaleDateString()}`}
+                </span>
+              </span>
+              <button type="button" className={`btn small ${copied === i.link ? 'is-on' : ''}`} onClick={() => copy(i.link)}>
+                {copied === i.link ? <Check strokeWidth={ICON_STROKE} aria-hidden /> : <Copy strokeWidth={ICON_STROKE} aria-hidden />}
+                {copied === i.link ? 'Copied' : 'Copy'}
+              </button>
+            </li>
+          ))}
+        </ol>
+      )}
+      {!made.length && (
+        <div className="admin-empty">
+          <UserPlus strokeWidth={ICON_STROKE} aria-hidden />
+          <p>Pick who it is for, then make the link and send it. It opens Soundwave on this server, ready to make an account.</p>
+        </div>
+      )}
     </div>
   );
 }
