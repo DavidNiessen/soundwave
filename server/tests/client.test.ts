@@ -18,7 +18,7 @@ Object.assign(globalThis, {
     removeItem: (k: string) => void storage.delete(k),
   },
 });
-const { joinSecret, online, parseInvite, parseJoinSecret, serverAddress } = await import('../../src/net/client.ts');
+const { joinSecret, online, parseInvite, parseJoinSecret, partyId, serverAddress } = await import('../../src/net/client.ts');
 
 const SONG = 'c'.repeat(64);
 const chart: WireChart = {
@@ -85,6 +85,11 @@ describe('server addresses', () => {
     expect(parseJoinSecret('WAVE-60 http://play.example.com')).toBeNull();
     expect(parseJoinSecret('not a party')).toBeNull();
     expect(parseJoinSecret('WAVE-60')).toBeNull();
+    // Discord refuses a party whose id is its join secret; the id names the party on its server.
+    const id = partyId('https://play.example.com', 'WAVE-60');
+    expect(id).not.toBe(secret);
+    expect(id).toMatch(/^WAVE-60-[0-9a-z]+$/);
+    expect(partyId('https://other.example.com', 'WAVE-60')).not.toBe(id);
   });
 });
 

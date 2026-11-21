@@ -10,9 +10,13 @@
 //!
 //! Join from Discord (docs/specs/online-play.md, 5.4): while the player is in a party they let friends
 //! join, the status carries the party's size and a join secret (the server and the party's code).
-//! A friend's Join button starts their game (Discord opens `discord-<id>://`, registered at start)
-//! and Discord hands the secret to that game, which a second connection here listens for and
-//! passes to the page as the `discord-join` event.
+//! A friend's Join button (on the status, or on an invite card posted in a chat with the chat box's
+//! +) starts their game (Discord opens `discord-<id>://`, registered at start) and Discord hands the
+//! secret to that game, which a second connection here listens for from the start (whether the
+//! player shows a status or not). The secret is kept until the page takes it (`discord_take_join`),
+//! so a Join that comes before the page is ready is not lost; the `discord-join` event says one came.
+//! A friend's "Ask to Join" reaches the player as the `discord-join-request` event, and the page
+//! answers it (`discord_answer`).
 
 use discord_rich_presence::activity::{
     Activity, ActivityType, Assets, Button, Party, Secrets, Timestamps,
@@ -108,6 +112,28 @@ pub struct Discord {
     wanted: Arc<(Mutex<Wanted>, Condvar)>,
     /// The listener for friends joining from Discord has been started.
     listening: Mutex<bool>,
+    /// The secret of a Join the page has not taken yet.
+    pending: Arc<Mutex<Option<String>>>,
+}
+
+/// A friend asking to join the player's party, for the page to answer.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct JoinRequest {
+    /// Their Discord user id, for the answer.
+    id: String,
+    /// The name Discord shows for them.
+    name: String,
+}
+
+/// A command's nonce: Discord answers with it.
+fn nonce(what: &str) -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    format!(
+        "{what}-{}-{}",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 /// The application id: the one the build was given, or one set where a development build starts.
@@ -201,8 +227,12 @@ fn send(
         Some(p) => client.set_activity(activity(p))?,
     }
     // Discord answers every command; reading the answer keeps the pipe from filling up and shows
-    // straight away when Discord has gone.
-    client.recv()?;
+    // straight away when Discord has gone. A status it refuses (a party it finds wrong, say) is
+    // answered with an error, which is logged: the connection itself is fine.
+    let (_, answer) = client.recv()?;
+    if answer["evt"] == "ERROR" {
+        log::warn!("discord: the status was refused: {}", answer["data"]);
+    }
     Ok(())
 }
 
@@ -215,22 +245,57 @@ fn join_secret(message: &serde_json::Value) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Listens, on a connection of its own, for a friend's Join pressed on Discord, and hands its secret
-/// to the page. Discord sends it to a game it started for the purpose, or to one already running.
-fn listen(app: AppHandle, id: String) {
+/// A friend's "Ask to Join", from one of Discord's messages, if it is one.
+fn join_request(message: &serde_json::Value) -> Option<JoinRequest> {
+    if message["evt"] != "ACTIVITY_JOIN_REQUEST" {
+        return None;
+    }
+    let user = &message["data"]["user"];
+    let id = user["id"].as_str().filter(|id| is_user_id(id))?;
+    let name = user["global_name"]
+        .as_str()
+        .or_else(|| user["username"].as_str())
+        .unwrap_or("A friend");
+    Some(JoinRequest {
+        id: id.to_owned(),
+        name: name.chars().take(40).collect(),
+    })
+}
+
+/// A Discord user id: a snowflake, digits only.
+fn is_user_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 24 && id.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Listens, on a connection of its own, for a friend's Join pressed on Discord, and keeps its secret
+/// for the page; and for a friend asking to join, which the page is told of. Discord sends a Join to
+/// a game it started for the purpose, or to one already running.
+fn listen(app: AppHandle, id: String, pending: Arc<Mutex<Option<String>>>) {
     loop {
         let mut client = DiscordIpcClient::new(&id);
         if client.connect().is_ok() {
-            let subscribe = serde_json::json!({
-                "cmd": "SUBSCRIBE",
-                "evt": "ACTIVITY_JOIN",
-                "nonce": format!("join-{}", std::process::id()),
-            });
-            if client.send(subscribe, 1).is_ok() {
+            let subscribed = ["ACTIVITY_JOIN", "ACTIVITY_JOIN_REQUEST"]
+                .iter()
+                .all(|evt| {
+                    let subscribe = serde_json::json!({
+                        "cmd": "SUBSCRIBE",
+                        "evt": evt,
+                        "nonce": nonce("subscribe"),
+                    });
+                    client.send(subscribe, 1).is_ok()
+                });
+            if subscribed {
+                log::info!("discord: listening for friends joining");
                 while let Ok((_, message)) = client.recv() {
                     if let Some(secret) = join_secret(&message) {
                         log::info!("discord: a friend joins");
-                        let _ = app.emit("discord-join", secret);
+                        *pending.lock().unwrap() = Some(secret);
+                        let _ = app.emit("discord-join", ());
+                    } else if let Some(request) = join_request(&message) {
+                        log::info!("discord: a friend asks to join");
+                        let _ = app.emit("discord-join-request", request);
+                    } else if message["evt"] == "ERROR" {
+                        log::warn!("discord: {}", message["data"]);
                     }
                 }
             }
@@ -238,6 +303,27 @@ fn listen(app: AppHandle, id: String) {
         }
         std::thread::sleep(RETRY);
     }
+}
+
+/// Answers a friend's "Ask to Join": lets them in (Discord sends them the Join) or turns them down.
+fn answer(id: &str, user: &str, accept: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let mut client = DiscordIpcClient::new(id);
+    client.connect()?;
+    let cmd = if accept {
+        "SEND_ACTIVITY_JOIN_INVITE"
+    } else {
+        "CLOSE_ACTIVITY_REQUEST"
+    };
+    client.send(
+        serde_json::json!({ "cmd": cmd, "args": { "user_id": user }, "nonce": nonce("answer") }),
+        1,
+    )?;
+    let (_, reply) = client.recv()?;
+    let _ = client.close();
+    if reply["evt"] == "ERROR" {
+        return Err(format!("Discord refused the answer: {}", reply["data"]).into());
+    }
+    Ok(())
 }
 
 fn run(wanted: Arc<(Mutex<Wanted>, Condvar)>, id: String) {
@@ -306,9 +392,10 @@ fn run(wanted: Arc<(Mutex<Wanted>, Condvar)>, id: String) {
 }
 
 impl Discord {
-    /// Starts listening for friends joining from Discord, once, as soon as Discord is used at all
-    /// (a game Discord started for a Join has nothing to show yet, but must hear the secret).
-    fn listen(&self, app: &AppHandle) {
+    /// Starts listening for friends joining from Discord, once, as the game starts (a game Discord
+    /// started for a Join has nothing to show yet, and a player may keep their status off, but
+    /// either must hear the secret).
+    pub fn listen(&self, app: &AppHandle) {
         let mut listening = self.listening.lock().unwrap();
         let Some(id) = client_id() else { return };
         if *listening {
@@ -316,9 +403,10 @@ impl Discord {
         }
         *listening = true;
         let app = app.clone();
+        let pending = self.pending.clone();
         let _ = std::thread::Builder::new()
             .name("discord-join".into())
-            .spawn(move || listen(app, id));
+            .spawn(move || listen(app, id, pending));
     }
 
     fn show(&self, presence: Option<Presence>) {
@@ -358,6 +446,28 @@ pub fn discord_presence(
         discord.listen(&app);
     }
     discord.show(presence);
+}
+
+/// The secret of a friend's Join that has come and not been taken yet (taken once).
+#[tauri::command]
+pub fn discord_take_join(discord: tauri::State<'_, Discord>) -> Option<String> {
+    discord.pending.lock().unwrap().take()
+}
+
+/// Answers a friend's "Ask to Join" (`discord-join-request`): in, or not.
+#[tauri::command]
+pub async fn discord_answer(user: String, accept: bool) -> Result<(), String> {
+    if !is_user_id(&user) {
+        return Err("That is not a Discord user.".into());
+    }
+    let Some(id) = client_id() else {
+        return Err("Discord is not set up in this build.".into());
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        answer(&id, &user, accept).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// The URL scheme Discord opens to start the game for a Join (`discord-<application id>`), if there is an id.
@@ -418,6 +528,20 @@ mod tests {
         );
         let other = serde_json::json!({"cmd":"DISPATCH","evt":"READY","data":{}});
         assert_eq!(join_secret(&other), None);
+    }
+
+    #[test]
+    fn a_join_request_names_the_friend() {
+        let ask = serde_json::json!({"cmd":"DISPATCH","evt":"ACTIVITY_JOIN_REQUEST","data":{"user":{"id":"80351110224678912","username":"nelly","global_name":"Nelly"}}});
+        assert_eq!(
+            join_request(&ask),
+            Some(JoinRequest {
+                id: "80351110224678912".into(),
+                name: "Nelly".into()
+            })
+        );
+        let bad = serde_json::json!({"cmd":"DISPATCH","evt":"ACTIVITY_JOIN_REQUEST","data":{"user":{"id":"../x","username":"x"}}});
+        assert_eq!(join_request(&bad), None);
     }
 
     #[test]

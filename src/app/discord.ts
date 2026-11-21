@@ -99,16 +99,50 @@ export function setDiscordJoin(j: Presence['join']) {
   update();
 }
 
-/** Calls `fn` with the secret when a friend presses Join on this player's Discord status (desktop app only). */
+/**
+ * Calls `fn` with the secret when this player pressed Join on a friend's Discord status or invite
+ * (desktop app only). A Join that came before the page was listening (Discord started the game for
+ * it) is kept by the app and handed over now.
+ */
 export function onDiscordJoin(fn: (secret: string) => void): () => void {
   if (!inDesktopApp()) return () => {};
   let stop = () => {};
   let gone = false;
-  void listen<string>('discord-join', (e) => fn(e.payload)).then((un) => (gone ? un() : (stop = un)));
+  const take = () =>
+    void invoke<string | null>('discord_take_join').then(
+      (secret) => secret && !gone && fn(secret),
+      () => {},
+    );
+  void listen('discord-join', take).then((un) => (gone ? un() : (stop = un)));
+  take();
   return () => {
     gone = true;
     stop();
   };
+}
+
+/** A friend asking on Discord to join this player's party. */
+export interface JoinRequest {
+  /** Their Discord user id, for the answer. */
+  id: string;
+  name: string;
+}
+
+/** Calls `fn` when a friend asks on Discord to join this player's party (desktop app only). */
+export function onDiscordJoinRequest(fn: (r: JoinRequest) => void): () => void {
+  if (!inDesktopApp()) return () => {};
+  let stop = () => {};
+  let gone = false;
+  void listen<JoinRequest>('discord-join-request', (e) => fn(e.payload)).then((un) => (gone ? un() : (stop = un)));
+  return () => {
+    gone = true;
+    stop();
+  };
+}
+
+/** Answers a friend's ask to join: let in (Discord sends them the Join) or not. */
+export function answerDiscordJoin(user: string, accept: boolean): Promise<void> {
+  return invoke('discord_answer', { user, accept });
 }
 
 /** Where the player is: a screen, or the song being played. */

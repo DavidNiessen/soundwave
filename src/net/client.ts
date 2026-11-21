@@ -120,6 +120,12 @@ export function serverAddress(typed: string): string {
  * handed when they press Join. Discord takes up to 128 characters.
  */
 export const joinSecret = (server: string, code: string) => `${code} ${server}`;
+/** Names a party for Discord (which wants it different from the join secret): its code and a hash of its server. */
+export function partyId(server: string, code: string) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < server.length; i++) h = Math.imul(h ^ server.charCodeAt(i), 0x01000193);
+  return `${code}-${(h >>> 0).toString(36)}`;
+}
 
 /** The party a join secret names, or null when it names none. */
 export function parseJoinSecret(secret: string): { server: string; code: string } | null {

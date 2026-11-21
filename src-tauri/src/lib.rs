@@ -79,6 +79,8 @@ pub fn run() {
             audio_out::audio_devices,
             audio_out::audio_set_device,
             discord::discord_presence,
+            discord::discord_take_join,
+            discord::discord_answer,
             haptics::haptics_available,
             haptics::haptics_play,
             haptics::haptics_update,
@@ -92,6 +94,8 @@ pub fn run() {
             song_files::save_file_end
         ])
         .setup(|app| {
+            // Friends joining from Discord are listened for from the start (see discord.rs).
+            app.state::<discord::Discord>().listen(app.handle());
             // A song file double-clicked in Explorer starts the game with its path.
             let cwd = std::env::current_dir().unwrap_or_default();
             song_files::open(app.handle(), song_files::song_files(std::env::args(), &cwd));

@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { onDiscordJoin, setDiscordEnabled, setDiscordJoin, showScene } from '../app/discord';
+import {
+  answerDiscordJoin,
+  onDiscordJoin,
+  onDiscordJoinRequest,
+  setDiscordEnabled,
+  setDiscordJoin,
+  showScene,
+  type JoinRequest,
+} from '../app/discord';
 import { analysisManager, canPlay } from '../analysis/manager';
 import { stemModel } from '../analysis/separation/model';
 import { analysisDevice, type AnalysisDevice } from '../analysis/separation/support';
@@ -91,7 +99,7 @@ import { BoardsScreen } from './Boards';
 import { AdminScreen } from './ServerAdmin';
 import { decodeRun, encodeRun } from '../net/runs';
 import { replayResults } from '../game/replay';
-import { joinSecret, online, parseInvite, parseJoinSecret, type PartyStart } from '../net/client';
+import { joinSecret, online, partyId, parseInvite, parseJoinSecret, type PartyStart } from '../net/client';
 import { partySongs } from '../net/partySongs';
 import { serverSongs } from '../net/serverSongs';
 import { PARTY_MAX, type SharedSong, type WireChart } from '../net/protocol';
@@ -1394,7 +1402,8 @@ export function App() {
   useEffect(() => {
     if (!joinable || !partyCode || !onlineState.server) return setDiscordJoin(undefined);
     const secret = joinSecret(onlineState.server, partyCode);
-    setDiscordJoin({ secret, id: secret, size: partySize, max: PARTY_MAX });
+    // Discord refuses a status whose party id is its join secret: the id only names the party.
+    setDiscordJoin({ secret, id: partyId(onlineState.server, partyCode), size: partySize, max: PARTY_MAX });
   }, [joinable, partyCode, partySize, onlineState.server]);
   // A friend's party, joined from their Discord status: Play together opens, signed in or to sign in.
   useEffect(
@@ -1407,6 +1416,28 @@ export function App() {
       }),
     [],
   );
+  // A friend asks on Discord to join: the player lets them in or not, outside a song. While the
+  // party cannot be joined from Discord (none, or private), the ask is turned down by itself.
+  const [joinAsks, setJoinAsks] = useState<JoinRequest[]>([]);
+  const joinableRef = useRef(joinable);
+  joinableRef.current = joinable;
+  useEffect(
+    () =>
+      onDiscordJoinRequest((r) => {
+        if (!joinableRef.current) return void answerDiscordJoin(r.id, false).catch(() => {});
+        setJoinAsks((asks) => [...asks.filter((a) => a.id !== r.id), r]);
+      }),
+    [],
+  );
+  const answerAsk = (ask: JoinRequest, accept: boolean) => {
+    setJoinAsks((asks) => asks.filter((a) => a.id !== ask.id));
+    void answerDiscordJoin(ask.id, accept && joinableRef.current).then(
+      () => accept && toast(`${ask.name} is on their way.`),
+      (e) => toast((e as Error).message),
+    );
+  };
+  const joinAsk = !['play', 'replay', 'export', 'editor'].includes(view.name) ? joinAsks[0] : undefined;
+
   // The server's other players see the same line in their menus (only while signed in).
   useEffect(() => {
     const what =
@@ -1857,6 +1888,22 @@ export function App() {
               </button>
               <button type="button" className="btn primary wide" onClick={() => void exitApp()}>
                 Close the game
+              </button>
+            </div>
+          )}
+        </Dialog>
+      )}
+      {joinAsk && !exitAsk && (
+        <Dialog key={joinAsk.id} title="Asks to join" variant="card" closeLabel="Not now" onClose={() => answerAsk(joinAsk, false)}>
+          {() => (
+            <div className="pause-card">
+              <h2 className="display">{joinAsk.name} asks to join</h2>
+              <p className="hint">They asked on Discord to join your party. Let them in, and their game joins it.</p>
+              <button type="button" className="btn wide" data-sfx="back" onClick={() => answerAsk(joinAsk, false)}>
+                Not now
+              </button>
+              <button type="button" className="btn primary wide" data-autofocus onClick={() => answerAsk(joinAsk, true)}>
+                Let them in
               </button>
             </div>
           )}
