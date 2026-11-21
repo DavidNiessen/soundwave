@@ -121,6 +121,8 @@ export function PlayScreen({
   const pauseRef = useRef<HTMLDivElement>(null);
   const ctrlRef = useRef<PlayController | null>(null);
   const [phase, setPhase] = useState<PlayPhase>('countdown');
+  /** The menu is open over a party's song, which plays on (see PlayController.pause). */
+  const [menuOpen, setMenuOpen] = useState(false);
   const [count, setCount] = useState(3);
   const [run, setRun] = useState(0);
   const [hit, setHit] = useState<HitNote | null>(null);
@@ -147,6 +149,11 @@ export function PlayScreen({
     // countdown and the song count down alike; the time left is taken once the song plays again.
     let shown: PlayPhase | null = null;
     let shownCount = -1;
+    ctrl.onMenu = (open) => {
+      playSfx(open ? 'pause' : 'resume');
+      menuPulse(open ? 'back' : 'select');
+      setMenuOpen(open);
+    };
     ctrl.onPhase = (p, n) => {
       if (p !== shown) {
         shown = p;
@@ -187,8 +194,9 @@ export function PlayScreen({
         }, BOARD_INTERVAL_MS)
       : 0;
     const unShowdown = party?.showdown ? showdown(ctrl, party.showdown) : party ? cheers() : () => {};
-    // A song that loses the window (a call, another app) pauses instead of running on unseen.
-    const hidden = () => document.hidden && ctrl.pause();
+    // A song that loses the window (a call, another app) pauses instead of running on unseen; a
+    // party's song plays on with everyone, so it is left to run.
+    const hidden = () => document.hidden && !party && ctrl.pause();
     document.addEventListener('visibilitychange', hidden);
     return () => {
       document.removeEventListener('visibilitychange', hidden);
@@ -289,7 +297,8 @@ export function PlayScreen({
     ctrlRef.current?.relayout();
   }, [mode]);
 
-  const paused = phase === 'paused';
+  // A party's song never pauses: its menu opens over the song, which plays on underneath.
+  const paused = phase === 'paused' || (menuOpen && phase !== 'finished');
   // The pause menu stays a moment after resuming, to fade out rather than vanish in one frame.
   const [pauseLeaving, setPauseLeaving] = useState(false);
   const wasPaused = useRef(paused);
@@ -396,12 +405,12 @@ export function PlayScreen({
       {(paused || pauseLeaving || wasPaused.current) && (
         <div className={`overlay card ${paused ? '' : 'leaving'}`} data-modal={paused ? '' : undefined} inert={!paused} ref={pauseRef}>
           <div className="dialog pause-card" role="dialog" aria-modal="true" aria-label="Paused">
-            <h2 className="display pause-title">Paused</h2>
+            <h2 className="display pause-title">{together ? 'Playing on' : 'Paused'}</h2>
             <p className="pause-song">
               {title}
               {total > 1 && ` · song ${position} of ${total}`}
             </p>
-            {together && <p className="hint">The song plays on for the rest of the party.</p>}
+            {together && <p className="hint">The song plays on underneath, for you as for the rest of the party.</p>}
             <button
               type="button"
               className="btn primary wide"
@@ -410,7 +419,7 @@ export function PlayScreen({
               onClick={() => void ctrlRef.current?.resume()}
             >
               <Play strokeWidth={ICON_STROKE} aria-hidden />
-              Resume
+              {together ? 'Back to the song' : 'Resume'}
             </button>
             {/* The party plays on: a song is not restarted for one player. */}
             {!together && (

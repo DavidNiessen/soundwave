@@ -142,6 +142,14 @@ export class PlayController {
 
   /** Keeps the song paused whatever is pressed (while the settings are open over the pause menu). */
   holdPause = false;
+  /**
+   * A party's song is played live with everyone, so it never stops: pausing only opens the menu
+   * over it (`menuOpen`), while the music, the notes and the hits carry on underneath.
+   */
+  private live = false;
+  private menu = false;
+  /** The menu over a live song opened or closed (a live song's phase never becomes paused). */
+  onMenu: (open: boolean) => void = () => {};
   private isFrozen = false;
   private frozenFrame = 0;
 
@@ -185,6 +193,11 @@ export class PlayController {
 
   get currentPhase() {
     return this.phase;
+  }
+
+  /** The menu is open over a live (party) song. */
+  get menuOpen() {
+    return this.menu;
   }
 
   onPhase: (p: PlayPhase, countdown?: number) => void = () => {};
@@ -281,7 +294,7 @@ export class PlayController {
     const keys = chart.lanes === 5 ? settings.keys5 : settings.keys4;
     const handlers: InputHandlers = {
       press: (lane, ts) => {
-        if (this.phase !== 'playing') return;
+        if (this.phase !== 'playing' || this.menu) return;
         recorder.press(lane, this.engine.time(ts));
       },
       release: (lane, ts) => {
@@ -292,7 +305,7 @@ export class PlayController {
       pause: () => {
         // With the settings open over the pause menu, Esc and the pause button belong to them.
         if (this.holdPause) return;
-        void (this.phase === 'paused' ? this.resume() : this.pause());
+        void (this.phase === 'paused' || this.menu ? this.resume() : this.pause());
       },
     };
     this.input = new KeyboardInput(keys, settings.overdriveKey, handlers);
@@ -301,7 +314,7 @@ export class PlayController {
       padBindings,
       settings.padOverdrive,
       handlers,
-      () => this.phase === 'playing' || this.phase === 'countdown',
+      () => (this.phase === 'playing' || this.phase === 'countdown') && !this.menu,
     );
 
     // Touch: a finger anywhere in a lane's column plays that lane (the highway lights the lane).
@@ -365,7 +378,7 @@ export class PlayController {
 
   /** The overdrive button: overdrive, or in a Showdown a Strike when there is someone to strike. */
   private pressOverdrive() {
-    if (this.phase !== 'playing' || !this.recorder) return;
+    if (this.phase !== 'playing' || !this.recorder || this.menu) return;
     const s = this.session;
     if (this.strike && !s.overdriveActive && s.overdrive >= PHRASE_REWARD && this.strike(s.overdrive)) return;
     this.recorder.overdrive(this.engine.time());
@@ -565,6 +578,7 @@ export class PlayController {
    */
   async startTogether(at: number) {
     if (this.playback) return this.start();
+    this.live = true;
     if (this.engine.ctx.state !== 'running') await this.engine.ctx.resume();
     const wait = (at - performance.now()) / 1000;
     const from = -LEAD_IN + Math.max(0, -wait);
@@ -578,6 +592,12 @@ export class PlayController {
 
   pause() {
     if (this.phase !== 'playing' && this.phase !== 'countdown') return;
+    if (this.live) {
+      if (this.menu) return;
+      this.menu = true;
+      this.onMenu(true);
+      return;
+    }
     this.engine.pause(this.now());
     for (let l = 0; l < this.chart.lanes; l++) this.rumble.sustainEnd(l);
     this.rumble.overdriveEnd(true);
@@ -590,6 +610,12 @@ export class PlayController {
       else if (this.phase !== 'paused') return;
       this.setPhase('playing');
       await this.engine.play(this.now(), 0.05, this.rate);
+      return;
+    }
+    if (this.live) {
+      if (!this.menu) return;
+      this.menu = false;
+      this.onMenu(false);
       return;
     }
     if (this.phase !== 'paused') return;
