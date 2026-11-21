@@ -36,6 +36,7 @@ import type { SongMeta } from '../storage/db';
 import { songFile } from '../storage/songFile';
 import { Hint, useActions, useHints } from './actions';
 import { Dialog } from './Dialog';
+import { Dropdown } from './Dropdown';
 import { ICON_STROKE } from './icons';
 
 /** Saves text as a file the player keeps (their data from the server). */
@@ -626,15 +627,15 @@ function ServerLibrary({ library, list, onChange }: { library: SongMeta[]; list:
     <div className="admin-narrow">
       <p className="hint">Songs here show in the library of everyone on the server, to stream or download.</p>
       <div className="party-row">
-        <select className="boards-select" value={pick} onChange={(e) => setPick(e.target.value)} aria-label="A song from your library">
-          <option value="">{addable.length ? 'Add a song from your library…' : 'Every song of yours is on the server'}</option>
-          {addable.map((x) => (
-            <option key={x.id} value={x.id}>
-              {x.title}
-              {x.artist ? ` · ${x.artist}` : ''}
-            </option>
-          ))}
-        </select>
+        <Dropdown
+          className="admin-add"
+          value={pick}
+          options={addable.map((x) => ({ value: x.id, label: x.title, hint: x.artist || undefined }))}
+          onChange={setPick}
+          label="A song from your library"
+          placeholder="Add a song from your library…"
+          empty="Every song of yours is on the server"
+        />
         <button type="button" className="btn small primary" disabled={!pick || busy} onClick={() => add(pick)}>
           <Plus strokeWidth={ICON_STROKE} aria-hidden />
           Add

@@ -6660,20 +6660,6 @@ a.btn {
   grid-template-columns: 1fr 1fr;
   gap: 0.6rem;
 }
-.boards-select {
-  min-height: var(--target);
-  padding: 0 0.7rem;
-  border: 0;
-  border-radius: var(--r-m);
-  background: var(--well);
-  color: var(--ink);
-  color-scheme: dark;
-  font-weight: 700;
-}
-.boards-select:focus-visible {
-  outline: 2px solid var(--mint);
-  outline-offset: 2px;
-}
 .boards-lines {
   display: flex;
   flex-direction: column;
@@ -10782,4 +10768,173 @@ a.btn {
   .look-slots {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* A dropdown in the game's look (ui/Dropdown.tsx): a well like the other fields, its list a panel
+   of the menus' glass under it, the choice ticked and the focused option lit. */
+.dropdown {
+  position: relative;
+  min-width: 0;
+}
+.dropdown-trigger {
+  width: 100%;
+  min-height: var(--target);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0 0.8rem 0 0.95rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+  color: var(--ink);
+  font-weight: 700;
+  text-align: left;
+  box-shadow: inset 0 0 0 1.5px transparent;
+  transition:
+    background 0.15s,
+    box-shadow 0.15s;
+}
+.dropdown-trigger:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.08);
+}
+.dropdown.open .dropdown-trigger {
+  box-shadow: inset 0 0 0 2px var(--pink);
+}
+.dropdown-trigger:disabled {
+  cursor: default;
+}
+.dropdown-trigger:disabled :is(.dropdown-value, .dropdown-chevron) {
+  color: var(--ink-3);
+}
+.dropdown-value {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dropdown-value.placeholder {
+  color: var(--ink-2);
+}
+.dropdown-chevron {
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--ink-2);
+  transition: rotate 0.2s var(--ease);
+}
+.dropdown.open .dropdown-chevron {
+  rotate: 180deg;
+}
+.dropdown-panel {
+  /* Laid over the page at the button (Dropdown.tsx places it). */
+  position: fixed;
+  z-index: 200;
+  max-width: calc(100vw - 1rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.4rem;
+  border-radius: var(--r-l);
+  background: var(--panel-solid);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-edge),
+    0 1.2rem 2.6rem -0.6rem rgb(0 0 0 / 0.7);
+  transform-origin: top center;
+  animation: dropdown-in 0.18s var(--ease) backwards;
+}
+@keyframes dropdown-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.4rem) scale(0.98);
+  }
+}
+.dropdown-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.6rem;
+  padding: 0 0.7rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+  color: var(--ink-2);
+}
+.dropdown-search:focus-within {
+  box-shadow: inset 0 0 0 2px var(--pink);
+}
+.dropdown-search svg {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+}
+.dropdown-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-weight: 700;
+}
+.dropdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-height: min(20rem, 45vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.dropdown-option {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.6rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--r-m);
+  color: var(--ink);
+  text-align: left;
+  font-weight: 700;
+}
+.dropdown-option:hover,
+.dropdown-option:focus-visible {
+  background: rgb(255 255 255 / 0.08);
+  outline: none;
+}
+.dropdown-option:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--mint);
+}
+.dropdown-option.on {
+  background: rgb(255 77 157 / 0.16);
+  color: #fff;
+}
+.dropdown-option > svg {
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--pink-2);
+}
+.dropdown-option-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.dropdown-option-label,
+.dropdown-option-hint {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dropdown-option-hint {
+  color: var(--ink-2);
+  font-size: 0.85rem;
+}
+.dropdown-none {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  color: var(--ink-3);
+}
+.admin-add {
+  flex: 1;
+  max-width: 28rem;
 }
