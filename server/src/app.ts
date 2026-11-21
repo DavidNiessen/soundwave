@@ -18,7 +18,7 @@ import { zip } from './zip.ts';
 import { Rotation } from './rotation.ts';
 import { Scores } from './scores.ts';
 import { joinPage } from './joinPage.ts';
-import { donePage, LoginCodes, loginPage, readRequest, stopPage, validRequest } from './browserLogin.ts';
+import { donePage, inviteCode, LoginCodes, loginPage, readRequest, stopPage, validRequest } from './browserLogin.ts';
 import { Songs } from './songs.ts';
 import { PartySongs } from './partySongs.ts';
 import { clientMessage } from './validate.ts';
@@ -473,7 +473,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
           ? await accounts.signUp({
               name,
               password,
-              ...(params.get('invite')?.trim() ? { invite: params.get('invite')!.trim() } : {}),
+              ...(params.get('invite')?.trim() ? { invite: inviteCode(params.get('invite')!) } : {}),
               ...(params.get('serverPassword') ? { serverPassword: params.get('serverPassword')! } : {}),
             })
           : await accounts.signIn(name, password);

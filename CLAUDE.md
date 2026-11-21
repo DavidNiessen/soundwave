@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Soundwave is a rhythm game for the player's own music: a song is separated into stems, analyzed and charted (Lead, Bass, Drums, Vocals at four difficulties), then played on a 3D note highway in front of a 3D festival stage. It runs in the browser (React + Vite) and as a desktop app (Tauri 2, `src-tauri/`). README.md, DESIGN.md (the design reference: visual language, sounds, motion) and PRODUCT.md (what the game is for) are the longer references.
+Soundwave is a rhythm game for the player's own music: a song is separated into stems, analyzed and charted (Lead, Bass, Drums, Vocals at four difficulties), then played on a 3D note highway in front of a 3D festival stage. It runs in the browser (React + Vite) and as a desktop app (Tauri 2, `src-tauri/`). README.md, DESIGN.md (the design reference: visual language, sounds, motion) and PRODUCT.md (what the game is for) are the longer references; docs/server-setup.md is the guide to running a server, server/README.md its reference (keep both in step with the server's settings and API). README badges come from shieldcn.dev, in the light/dark `<picture>` form.
 
 ## Commands
 

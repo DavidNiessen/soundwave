@@ -55,6 +55,16 @@ export function redirectAllowed(redirect: string, config: Config): boolean {
   }
 }
 
+/** An invite as it is typed: a code, or a whole invite link (`…/join?invite=…`), which holds one. */
+export function inviteCode(typed: string): string {
+  const t = typed.trim();
+  try {
+    return new URL(t).searchParams.get('invite')?.trim() || t;
+  } catch {
+    return t;
+  }
+}
+
 /** Reads the game's question from a query string or a form. */
 export function readRequest(p: URLSearchParams): LoginRequest {
   return {
@@ -176,7 +186,8 @@ export function loginPage(config: Config, r: LoginRequest, error: string | null 
       ${
         r.invite
           ? `<input type="hidden" name="invite" value="${esc(r.invite)}"><p class="note">Your invite lets you in.</p>`
-          : `<label>${config.mode === 'invite' ? 'Your invite code' : 'An invite code (if you have one)'}<input name="invite" autocomplete="off" spellcheck="false"${config.mode === 'invite' ? ' required' : ''}></label>`
+          : `<label>${config.mode === 'invite' ? 'Your invite link or code' : 'An invite link or code (if you have one)'}<input name="invite" autocomplete="off" spellcheck="false"${config.mode === 'invite' ? ' required' : ''}></label>
+             <p class="note">Setting up this server? Enter the set-up code it printed when it first started: it makes you its owner.</p>`
       }`
     : '';
   const body = `

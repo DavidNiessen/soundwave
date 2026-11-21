@@ -1,14 +1,32 @@
 # Soundwave
 
-[![CI](https://github.com/DavidNiessen/soundwave/actions/workflows/ci.yml/badge.svg)](https://github.com/DavidNiessen/soundwave/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/DavidNiessen/soundwave)](https://github.com/DavidNiessen/soundwave/releases/latest)
-[![Licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue)](LICENSE)
+**A rhythm game for your own music.** Drop in any song, and Soundwave separates it into stems,
+charts Lead, Bass, Drums and Vocals at four difficulties, and puts you on a 3D note highway in
+front of a live festival stage. Play alone, or with friends on a server of your own.
 
-**[Play in your browser](https://soundwave.niessen.dev)** · **[Download the app](https://github.com/DavidNiessen/soundwave/releases/latest)** for Windows, macOS and Linux
+<a href="https://github.com/DavidNiessen/soundwave/releases/latest"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/DavidNiessen/soundwave/release.svg?mode=dark"><img alt="Latest release" src="https://shieldcn.dev/github/DavidNiessen/soundwave/release.svg?mode=light"></picture></a>
+<a href="https://github.com/DavidNiessen/soundwave/actions/workflows/ci.yml"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/DavidNiessen/soundwave/ci.svg?mode=dark"><img alt="CI" src="https://shieldcn.dev/github/DavidNiessen/soundwave/ci.svg?mode=light"></picture></a>
+<a href="LICENSE"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/DavidNiessen/soundwave/license.svg?mode=dark"><img alt="Licence: Apache-2.0" src="https://shieldcn.dev/github/DavidNiessen/soundwave/license.svg?mode=light"></picture></a>
+<a href="https://github.com/DavidNiessen/soundwave/releases/latest"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/runs_on-Windows_%7C_macOS_%7C_Linux_%7C_Web-blue.svg?logo=tauri&amp;mode=dark"><img alt="Windows, macOS, Linux and the web" src="https://shieldcn.dev/badge/runs_on-Windows_%7C_macOS_%7C_Linux_%7C_Web-blue.svg?logo=tauri&amp;mode=light"></picture></a>
+<a href="docs/server-setup.md"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/servers-self--hosted-violet.svg?logo=docker&amp;mode=dark"><img alt="Servers: self-hosted" src="https://shieldcn.dev/badge/servers-self--hosted-violet.svg?logo=docker&amp;mode=light"></picture></a>
+<a href="https://github.com/DavidNiessen/soundwave"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/DavidNiessen/soundwave/stars.svg?mode=dark"><img alt="Stars" src="https://shieldcn.dev/github/DavidNiessen/soundwave/stars.svg?mode=light"></picture></a>
+
+**[Play in your browser](https://soundwave.niessen.dev)** · **[Download the app](https://github.com/DavidNiessen/soundwave/releases/latest)** for Windows, macOS and Linux · **[Run a server](docs/server-setup.md)** for you and your friends
 
 ![Soundwave in play: the note highway in front of the night-time stage, with the crowd, the lights and the score](docs/screenshot.webp)
 
-A rhythm game for your own music. Drop in a song (MP3, WAV, FLAC, OGG, M4A). The game analyzes its percussive, melodic and harmonic content and generates **Lead**, **Bass**, **Drums** and **Vocals** charts at four difficulties:
+|                       |                                                                                                            |
+| --------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Your music**        | MP3, WAV, FLAC, OGG or M4A, analysed on your own device.                                                   |
+| **Four parts**        | Lead, Bass, Drums and Vocals, each charted from its own separated stem, at four difficulties.              |
+| **Any input**         | Keyboard, controller (with DualSense haptics in the app) or touchscreen, every control rebindable.         |
+| **Track editor**      | Change any chart, or write one from nothing, with a keyboard, a mouse, a controller or touch.              |
+| **Replays and video** | Every song you finish is saved; watch it back or export it as an MP4.                                      |
+| **Play together**     | Parties, Showdowns and leaderboards on servers players run themselves. [Set one up](docs/server-setup.md). |
+
+**Contents:** [Development](#development) · [Playing](#playing) · [Replays](#replays) · [Playing together](#playing-together) · [Running a server](#running-a-server) · [Track editor](#track-editor) · [Desktop app](#desktop-app) · [How analysis works](#how-analysis-works) · [Licence](#licence)
+
+Drop in a song (MP3, WAV, FLAC, OGG, M4A). The game analyzes its percussive, melodic and harmonic content and generates **Lead**, **Bass**, **Drums** and **Vocals** charts at four difficulties:
 
 | Difficulty | Lanes | Feel                                     |
 | ---------- | ----- | ---------------------------------------- |
@@ -19,7 +37,7 @@ A rhythm game for your own music. Drop in a song (MP3, WAV, FLAC, OGG, M4A). The
 
 You play them on a 3D note highway with the keyboard, a controller or a touchscreen, in front of a live 3D festival stage that follows the music: a band, a crowd of thousands, beams, screens and pyro. The game opens behind a loading screen that stays until the library and the stage are ready. Features: sustains, streak multiplier (up to ×6), overdrive phrases (Space doubles the multiplier, up to ×12), Perfect/Great/Good timing, star rating measured against a flawless run without overdrive (one to five stars at 3.5%, 8%, 15%, 46% and 77% of it, and gold stars beyond it, which takes overdrive), best scores, tap calibration and key rebinding.
 
-You pick up to four songs as a setlist, choose a part and a difficulty for the set and play the songs back to back, with a result after each and a total at the end. A part a song hardly has compared with the rest of it (almost no vocals, say) is switched off for that song; writing a chart for it in the track editor switches it back on. The main menu has two tabs: **Play**, with your setlist and a few sets dealt from your library (a shuffle, your newest songs, songs without a score), and **Edit**, with your tracks to open in the track editor. `Q` and `E`, or a controller's shoulder buttons, switch between them.
+You pick up to four songs as a setlist, choose a part and a difficulty for the set and play the songs back to back, with a result after each and a total at the end. A part a song hardly has compared with the rest of it (almost no vocals, say) is switched off for that song; writing a chart for it in the track editor switches it back on. The main menu has four tabs: **Play**, with your setlist and a few sets dealt from your library (a shuffle, your newest songs, songs without a score); **Online**, for playing together (see [Playing together](#playing-together)); **Edit**, with your tracks to open in the track editor; and **Replays**. `Q` and `E`, or a controller's shoulder buttons, switch between them.
 
 A song previews by itself: stay on its row in the music library or on the Edit tab (or point at it with the mouse), or open its page, and after a moment it plays from a third of the way in (at the songs' volume, with the menu music making way). It stops as soon as you are on something else, such as the search field. Previews can be switched off under Settings → Audio.
 
@@ -65,13 +83,28 @@ A replay can be kept (`K`, or from its options with `O` or the left face button)
 
 ## Playing together
 
-**Play together** on the Play tab (`T`, Back/View on a controller) plays a set with friends on a Soundwave server: anyone can run one ([server/README.md](server/README.md)). Every server is self-hosted by someone, and none is run by the project. Open the invite link you were sent (it opens the game, in the app or the browser) or enter the server's address, then sign in or make an account. Then start a party, or join one with its code (like `KITE-42`).
+The **Online** tab of the main menu plays with friends on a Soundwave server. Anyone can run one ([docs/server-setup.md](docs/server-setup.md)); every server is self-hosted by someone, and none is run by the project. Type the server's address or paste the invite link you were sent (an invite link also opens the game by itself, in the app or the browser), then sign in: the game opens the server's own sign-in page in your browser, where your password manager works, and brings you back signed in. (The in-game form is there too.)
 
-In the party's lobby the host plays their setlist (`U`), and everyone picks their own part (`P`) and difficulty (`F`) and says they are ready (`R`). Songs are matched by their audio, so a song you don't have shows as Missing and you sit it out. When the host starts a song (hold Enter), every player gets the host's chart for their part, so everyone plays the same notes, and the song starts at the same moment for all: each game measures its clock against the server's. Your hits are judged on your own machine, so the connection's delay never touches your timing; only scores travel, and a board beside the highway shows everyone's ten times a second. After each song everyone sees the same results, and after the last one, the set's standings with its winner.
+Signed in, the Online tab is your place on the server: start a party (`C`) or join one with its code (like `B7KQX`, `J`), the leaderboards (`G`), your look on stage (`V`, edited right there on your band member), invites, and for the server's owner and moderators the **Admin** page (`M`). Your character stands beside it under your nametag.
 
-While you are signed in, every song you finish goes to the server's leaderboards with its run, and the server judges the run again before it takes the score (Settings → Online can switch this off). **Leaderboards** (`G`) shows each song's board for any part and difficulty, with **Watch** on every run; your own run can be shared to the server's list of replays.
+A party picks a mode:
 
-Pausing pauses only your own song. A dropped connection is tried again in the background: your place in the party is kept for 30 seconds, and a score you finish meanwhile is sent once you are back. Nothing is sent anywhere until you connect to a server; it keeps your name, a hash of your password and what its features need, and **Save my data** downloads all of it.
+- **Versus**: everyone plays the same set at the same moment, each on their own part and difficulty, with a live board beside the highway and the set's standings at the end.
+- **Showdown**: scores count as a share of each chart's par, the lowest players go out after each song, and the overdrive button **strikes** the player above you (their highway fogs and their multiplier is held down for a while). The last one standing wins. It plays on a ring of podiums, one per player in their look.
+
+Songs are matched by their audio. A song a player lacks reaches them by itself through the server, and the server's own library shows in everyone's music library, to stream or download. When the host starts a song, every player gets the host's chart for their part, and the song starts at the same moment for all: each game measures its clock against the server's. Your hits are judged on your own machine, so the connection's delay never touches your timing; only scores travel.
+
+A party's song is played live with everyone, so it never pauses: the pause menu opens over it while it plays on. A dropped connection is tried again in the background: your place in the party is kept for 30 seconds, and a score you finish meanwhile is sent once you are back.
+
+While you are signed in, every song you finish goes to the server's leaderboards with its run, and the server judges the run again before it takes the score (Settings → Online can switch this off). **Leaderboards** shows each song's board for any part and difficulty, with **Watch** on every run; your own run can be shared to the server's list of replays.
+
+In the desktop app, Discord friends can join your party from your status, from an invite you post in a chat, or by asking to join (see [Discord status and Join from Discord](#discord-status-and-join-from-discord)).
+
+Nothing is sent anywhere until you connect to a server. It keeps your name, a hash of your password and what its features need, and **Save my data** downloads all of it.
+
+## Running a server
+
+A server is one small Node program with everything in one folder: on Coolify, with Docker Compose behind HTTPS, or on your own PC for your own network. **[docs/server-setup.md](docs/server-setup.md)** walks through it step by step: installing it, becoming its owner with the set-up code it prints, inviting friends, its settings, updates, backups and troubleshooting. [server/README.md](server/README.md) is the reference for every setting and the API.
 
 ## Track editor
 
@@ -143,11 +176,17 @@ Discord application the build names. Without one both are off.
 2. Give the build the id as `SOUNDWAVE_DISCORD_CLIENT_ID`: for the release workflows a repository variable (Settings →
    Secrets and variables → Actions → Variables), for a development build an environment variable where it starts
    (`$env:SOUNDWAVE_DISCORD_CLIENT_ID = "…"; pnpm tauri dev`).
-3. In the game: the Discord status on (Settings → Advanced) and **Friends can join from Discord** on (Settings → Online). A party's Join button
-   then shows on the profile while the party is not **Private** (`T` in its lobby), greyed out once it is full.
+3. In the game: the Discord status on (Settings → Advanced) and **Let Discord friends join** on (in the party's lobby, or
+   **Friends can join from Discord** under Settings → Online). While the party is not **Private** (`T` in its lobby), your
+   profile then carries it:
+   - a **Join** button on your status, greyed out once the party is full;
+   - **Invite to play Soundwave** in the chat box's **+**, which posts an invite card with Join;
+   - **Ask to Join**, which shows a card in your game to let the friend in or not.
 
-A friend who presses Join needs the desktop app, started once (it registers the `discord-<id>` link Discord opens to start
-it; on macOS the game has to be running already), and an account on the party's server, or a way to make one there.
+A friend who joins needs the desktop app, started once (it registers the `discord-<id>` link Discord opens to start it; on
+macOS the game has to be running already), a build with the same application id, and an account on the party's server, or a
+way to make one there. A game that is already running takes the join itself rather than opening a second window. To run two
+development builds side by side on one computer, start the second with `SOUNDWAVE_SECOND_INSTANCE=1`.
 
 ## Production web build
 
