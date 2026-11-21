@@ -19,6 +19,7 @@ import {
   type Run,
   type ScoreSubmission,
   type SharedSong,
+  type UserEntry,
   type Online,
   type ClientMessage,
   type Difficulty,
@@ -476,6 +477,10 @@ class OnlineClient {
 
   moderate(action: 'kick' | 'ban' | 'unban' | 'role' | 'reset-password', body: Record<string, unknown>) {
     return this.request<{ ok?: boolean; password?: string }>(`/mod/${action}`, { body, auth: true });
+  }
+  /** Every player on the server, for the admin's list (owner and moderators). */
+  users() {
+    return this.request<UserEntry[]>('/mod/users', { auth: true });
   }
   auditLog() {
     return this.request<{ at: number; actor: string; action: string; target: string; reason: string }[]>('/mod/audit', { auth: true });

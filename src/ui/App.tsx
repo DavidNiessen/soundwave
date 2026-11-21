@@ -88,6 +88,7 @@ import { setMenuAvatars, setMenuRing } from '../render/aurora/menuStage';
 import type { Avatars } from '../render/aurora/AuroraStage';
 import type { RingSeat } from '../render/aurora/ring';
 import { BoardsScreen } from './Boards';
+import { AdminScreen } from './ServerAdmin';
 import { decodeRun, encodeRun } from '../net/runs';
 import { replayResults } from '../game/replay';
 import { joinSecret, online, parseInvite, parseJoinSecret, type PartyStart } from '../net/client';
@@ -128,6 +129,7 @@ type View =
   /** The server's leaderboards and shared replays. */
   /** `from`: where Back returns to (Play together, unless opened from the main menu). */
   | { name: 'boards'; from?: 'home' }
+  | { name: 'admin' }
   /** The player's look on the stage. */
   | { name: 'avatar' }
   | { name: 'settings'; back: View }
@@ -164,6 +166,7 @@ const DEPTH: Record<View['name'], number> = {
   lobby: 2,
   party: 2,
   boards: 3,
+  admin: 3,
   avatar: 3,
   editor: 2,
   play: 3,
@@ -1434,6 +1437,8 @@ export function App() {
         return showScene({ details: 'Playing together' });
       case 'boards':
         return showScene({ details: 'Looking at the leaderboards' });
+      case 'admin':
+        return showScene({ details: 'Running a server' });
       case 'avatar':
         return showScene({ details: 'Choosing a look' });
       case 'editor':
@@ -1648,6 +1653,8 @@ export function App() {
       );
     } else if (view.name === 'avatar') {
       screen = <AvatarScreen part={pick.part} settings={settings} onBack={goOnline} />;
+    } else if (view.name === 'admin') {
+      screen = <AdminScreen setlist={setSongs_} library={songs} settings={settings} onBack={goOnline} />;
     } else if (view.name === 'boards') {
       screen = (
         <BoardsScreen
@@ -1702,6 +1709,7 @@ export function App() {
           online={{
             onParty: () => setView({ name: 'party' }),
             onBoards: () => setView({ name: 'boards' }),
+            onAdmin: () => setView({ name: 'admin' }),
             onAvatar: () => setView({ name: 'avatar' }),
             part: pick.part,
           }}

@@ -137,6 +137,11 @@ export class Store {
     this.db.prepare('DELETE FROM users WHERE id = ?').run(id);
   }
 
+  /** Every account, oldest first. */
+  users(): UserRow[] {
+    return this.db.prepare('SELECT * FROM users ORDER BY created').all() as unknown as UserRow[];
+  }
+
   countUsers(): number {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
   }

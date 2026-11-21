@@ -9068,9 +9068,6 @@ a.btn {
 .overlay.card.wide-card .dialog {
   width: min(40rem, 100%);
 }
-.overlay.sheet.admin-sheet .dialog {
-  width: min(46rem, 100%);
-}
 .window-body {
   display: flex;
   flex-direction: column;
@@ -10086,7 +10083,7 @@ a.btn {
   box-shadow: inset 0 0 0 2px var(--mint);
 }
 
-/* The Admin window's server library: a song renamed in place. */
+/* The admin page's server library: a song renamed in place. */
 .admin-edit {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto auto;
@@ -10359,4 +10356,228 @@ a.btn {
   text-overflow: ellipsis;
   white-space: nowrap;
   text-shadow: 0 1px 4px rgb(0 0 0 / 0.8);
+}
+
+/* The admin page: a bento of what the owner and moderators look after, each tile opening a page of
+   its own. The server's library and its players lead, the larger tiles; the rest stand beside them. */
+.admin-page {
+  gap: 0.6rem;
+}
+.admin-bento {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: clamp(0.8rem, 1.5vw, 1.5rem);
+  max-height: 34rem;
+  padding-bottom: 1rem;
+}
+.admin-tile {
+  max-width: none;
+  flex-direction: row;
+  align-items: flex-start;
+  padding-top: clamp(0.8rem, 1.2vw, 1.1rem);
+}
+.admin-tile.library,
+.admin-tile.players {
+  grid-row: span 2;
+  flex-direction: column;
+}
+.admin-tile.library .tile-title,
+.admin-tile.players .tile-title {
+  font-size: clamp(1.4rem, 2.2vw, 2.1rem);
+}
+.admin-tile .tile-text {
+  flex: 1;
+  align-self: stretch;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.admin-tile-list {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.7rem;
+  min-height: 0;
+}
+.admin-tile-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.8rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.admin-tile.alert .tile-icon {
+  background: var(--danger);
+  color: var(--pink-ink);
+}
+.admin-tile.alert .tile-cap {
+  color: var(--danger-2);
+  font-weight: 700;
+}
+@media (max-width: 900px) {
+  .admin-bento {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: none;
+    grid-auto-rows: minmax(8rem, auto);
+    align-content: start;
+    max-height: none;
+    overflow-y: auto;
+  }
+  .admin-tile.library,
+  .admin-tile.players {
+    grid-row: auto;
+  }
+}
+
+/* A section of the admin page: a list to search and, for players, the one picked beside it. */
+.admin-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  animation: rise-in 0.3s var(--ease) backwards;
+}
+.admin-narrow {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  width: min(52rem, 100%);
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 1rem;
+}
+.admin-narrow > .btn {
+  align-self: flex-start;
+}
+.admin-search {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: var(--target);
+  padding: 0 0.9rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+  color: var(--ink-2);
+}
+.admin-search:focus-within {
+  box-shadow: inset 0 0 0 2px var(--pink);
+}
+.admin-search svg {
+  flex: none;
+  width: 1.15rem;
+  height: 1.15rem;
+}
+.admin-search input {
+  flex: 1;
+  min-width: 0;
+  min-height: 2.4rem;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+}
+.admin-list {
+  min-height: 0;
+}
+.admin-players {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(16rem, 0.8fr) minmax(0, 1.2fr);
+  gap: clamp(1rem, 2.6vw, 2.6rem);
+}
+.admin-list-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 0;
+}
+.admin-list-side .admin-list {
+  overflow-y: auto;
+  padding-bottom: 1rem;
+}
+.admin-user {
+  width: 100%;
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+  font-weight: 700;
+}
+.admin-user:hover {
+  background: rgb(255 255 255 / 0.08);
+}
+.admin-user.on {
+  outline: 2px solid var(--pink);
+  outline-offset: -2px;
+}
+.admin-role {
+  flex: none;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink-2);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.admin-role.owner {
+  color: var(--gold);
+}
+.admin-role.moderator {
+  color: var(--pink-2);
+}
+.admin-role.banned {
+  background: var(--danger);
+  color: var(--pink-ink);
+}
+.admin-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  min-height: 0;
+  overflow-y: auto;
+  padding: clamp(1rem, 1.7vw, 1.7rem);
+  border-radius: var(--r-l);
+  background: var(--panel);
+  align-self: start;
+}
+.admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.admin-ban .choice-pair {
+  grid-template-columns: repeat(4, auto);
+}
+.admin-ban {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+}
+.admin-note {
+  color: var(--ink);
+  font-weight: 700;
+  user-select: text;
+}
+@media (max-width: 760px) {
+  .admin-players {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+    overflow-y: auto;
+  }
 }

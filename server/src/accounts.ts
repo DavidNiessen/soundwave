@@ -3,7 +3,7 @@
  * invites, and what owners and moderators can do (docs/specs/online-play.md, 3.2).
  */
 import { randomBytes, randomUUID } from 'node:crypto';
-import type { Account, Invite, Role, Session, SignUp } from '../../src/net/protocol.ts';
+import type { Account, Invite, Role, Session, SignUp, UserEntry } from '../../src/net/protocol.ts';
 import {
   ACCESS_TTL_MS,
   checkPassword,
@@ -219,6 +219,23 @@ export class Accounts {
     this.store.dropRefreshes(user.id);
     this.store.log({ at: this.now(), actor: actor.id, action: 'reset password', target: user.id, reason: '' });
     return password;
+  }
+
+  /** Every account, for the admin's list of players (bans still running shown as such). */
+  users(actor: UserRow, online: (id: string) => boolean): UserEntry[] {
+    if (!canModerate(actor.role)) throw new Refusal(403, 'Only the owner and moderators can see the players.');
+    const now = this.now();
+    return this.store.users().map((u) => {
+      const banned = u.banned_until !== null && u.banned_until > now;
+      return {
+        name: u.name,
+        role: u.role,
+        created: u.created,
+        bannedUntil: banned ? u.banned_until : null,
+        banReason: banned ? u.ban_reason : null,
+        online: online(u.id),
+      };
+    });
   }
 
   audit(actor: UserRow) {

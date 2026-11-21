@@ -245,6 +245,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     },
     'POST /mod/reset-password': async (req, body) => ({ password: await accounts.resetPassword(me(req), body.name) }),
     'GET /mod/audit': (req) => accounts.audit(me(req)),
+    'GET /mod/users': (req) => accounts.users(me(req), (id) => sockets.has(id)),
   };
 
   const ID = '([0-9a-f-]{36})';

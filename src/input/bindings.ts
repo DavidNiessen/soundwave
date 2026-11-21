@@ -13,7 +13,8 @@
 import type { PadInput } from './pads';
 
 /** Where a shortcut works. */
-export type Area = 'menus' | 'home' | 'library' | 'lobby' | 'results' | 'party' | 'boards' | 'settings' | 'song' | 'replay' | 'editor';
+export type Area =
+  'menus' | 'home' | 'library' | 'lobby' | 'results' | 'party' | 'boards' | 'admin' | 'settings' | 'song' | 'replay' | 'editor';
 
 export const AREAS: { id: Area; label: string }[] = [
   { id: 'menus', label: 'Every menu' },
@@ -23,6 +24,7 @@ export const AREAS: { id: Area; label: string }[] = [
   { id: 'results', label: 'After a song' },
   { id: 'party', label: 'Playing together' },
   { id: 'boards', label: 'Leaderboards' },
+  { id: 'admin', label: 'Running a server' },
   { id: 'settings', label: 'Settings' },
   { id: 'song', label: 'Playing a song' },
   { id: 'replay', label: 'Watching a replay' },
@@ -133,6 +135,15 @@ export const COMMANDS: Command[] = [
     { id: 'boards.difficulty', label: 'Next difficulty', key: 'KeyF', pad: 'b2' },
     { id: 'boards.week', label: 'This week, or all time', key: 'KeyW', pad: 'b3' },
     { id: 'boards.replays', label: 'Song boards, or shared replays', key: 'KeyR', pad: 'b8' },
+  ]),
+  // The admin page's sections, by number, as its tiles stand.
+  ...cmd('admin', [
+    { id: 'admin.library', label: 'Server library', key: 'Digit1' },
+    { id: 'admin.players', label: 'Players', key: 'Digit2' },
+    { id: 'admin.invites', label: 'Invites', key: 'Digit3' },
+    { id: 'admin.rotation', label: 'Showdown rotation', key: 'Digit4' },
+    { id: 'admin.log', label: 'Moderation log', key: 'Digit5' },
+    { id: 'admin.reports', label: 'Reported songs', key: 'Digit6' },
   ]),
   ...cmd('settings', [{ id: 'settings.reset', label: 'Restore defaults', key: 'KeyR', pad: 'b3' }]),
   ...cmd('song', [{ id: 'song.pause', label: 'Pause', key: 'KeyP', pad: 'b9' }]),

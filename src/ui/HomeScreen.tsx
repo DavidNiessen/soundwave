@@ -55,7 +55,7 @@ interface Props {
   onSet(ids: string[]): void;
   onAdd(): void;
   /** What the Online tab needs: the party, the server's boards and songs, the player's look. */
-  online: Omit<OnlinePanelProps, 'base' | 'settings' | 'setlist' | 'library'>;
+  online: Omit<OnlinePanelProps, 'base' | 'settings'>;
   /** The player is in a party: the Online tab shows a dot. */
   inParty: boolean;
   /** What the Edit tab's list of tracks needs to bring songs in and open them in the editor. */
@@ -320,7 +320,7 @@ export function HomeScreen({
         ) : tab === 'online' ? (
           <>
             <h2 className="page-title">Play online</h2>
-            <OnlinePanel {...online} settings={settings} setlist={setlist} library={songs} base={common} />
+            <OnlinePanel {...online} settings={settings} base={common} />
           </>
         ) : tab === 'play' ? (
           <>

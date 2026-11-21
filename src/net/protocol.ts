@@ -101,6 +101,19 @@ export interface Account {
   role: Role;
 }
 
+/** A player as the owner and moderators see them, in the admin's list of players (`GET /mod/users`). */
+export interface UserEntry {
+  name: string;
+  role: Role;
+  /** When the account was made (ms since 1970). */
+  created: number;
+  /** Banned until then (ms; far in the future for good), or null. */
+  bannedUntil: number | null;
+  banReason: string | null;
+  /** Connected to the server now. */
+  online: boolean;
+}
+
 /** What signing up or in, or refreshing, gives back. */
 export interface Session {
   user: Account;

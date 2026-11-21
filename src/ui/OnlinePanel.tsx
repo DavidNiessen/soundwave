@@ -23,7 +23,6 @@ import type { Settings } from '../game/settings';
 import { keysOf } from '../input/bindings';
 import { online } from '../net/client';
 import { PARTY_MAX, type Role } from '../net/protocol';
-import type { SongMeta } from '../storage/db';
 import { Hint, useActions, useHints, type Action } from './actions';
 import type { Part } from '../chart/types';
 import { AvatarPortrait } from './AvatarPortrait';
@@ -31,20 +30,18 @@ import { Dialog } from './Dialog';
 import { ICON_STROKE } from './icons';
 import { OnlineSidebar } from './OnlineSidebar';
 import { MODES } from './PartyScreen';
-import { AdminPanel, download, InvitePanel } from './ServerAdmin';
+import { download, InvitePanel } from './ServerAdmin';
 
 /** A role as players read it: the server's owner is its admin. */
 const ROLE_LABEL: Record<Role, string> = { owner: 'Admin', moderator: 'Moderator', player: 'Player' };
 
 export interface OnlinePanelProps {
   settings: Settings;
-  /** The player's setlist (the server tools can make it the Showdown rotation). */
-  setlist: SongMeta[];
-  /** The player's library (the admin adds songs from it to the server). */
-  library: SongMeta[];
   /** Opens the Play together screen: signing in, or the party's lobby. */
   onParty(): void;
   onBoards(): void;
+  /** Opens the admin page (the owner and moderators). */
+  onAdmin(): void;
   /** The part the player plays: their band member stands under the nametag. */
   part: Part;
   onAvatar(): void;
@@ -104,11 +101,11 @@ function SignedOut({ settings, onParty, base }: OnlinePanelProps) {
 }
 
 /** Signed in: the party, the server's boards and songs, who is online, and the account. */
-function SignedIn({ settings, setlist, library, onParty, onBoards, onAvatar, base, part }: OnlinePanelProps) {
+function SignedIn({ settings, onParty, onBoards, onAdmin, onAvatar, base, part }: OnlinePanelProps) {
   const s = useSyncExternalStore(online.subscribe, online.snapshot);
   const hints = useHints(settings);
   /** The window open over the tab: the account, an invite, or the server's tools. */
-  const [modal, setModal] = useState<'account' | 'forget' | 'invite' | 'admin' | null>(null);
+  const [modal, setModal] = useState<'account' | 'forget' | 'invite' | null>(null);
   const [deleting, setDeleting] = useState(false);
   const mod = s.account!.role !== 'player';
   const party = s.party;
@@ -166,7 +163,7 @@ function SignedIn({ settings, setlist, library, onParty, onBoards, onAvatar, bas
     { id: 'party-invite', label: 'Invite', icon: Send, ...keysOf('party.invite'), run: () => setModal('invite') },
     { id: 'party-boards', label: 'Leaderboards', icon: Trophy, ...keysOf('party.boards'), bar: false, run: onBoards },
     { id: 'party-avatar', label: 'Your look', icon: Shirt, ...keysOf('party.avatar'), bar: false, run: onAvatar },
-    ...(mod ? [{ id: 'party-admin', label: 'Admin', icon: Gavel, ...keysOf('party.admin'), run: () => setModal('admin') }] : []),
+    ...(mod ? [{ id: 'party-admin', label: 'Admin', icon: Gavel, ...keysOf('party.admin'), run: onAdmin }] : []),
   ]);
 
   const more: [string, string, LucideIcon, string, string, () => void][] = [
@@ -374,16 +371,6 @@ function SignedIn({ settings, setlist, library, onParty, onBoards, onAvatar, bas
               <button type="button" className="btn primary wide" onClick={close}>
                 Done
               </button>
-            </div>
-          )}
-        </Dialog>
-      )}
-      {modal === 'admin' && mod && (
-        <Dialog title="Admin" className="admin-sheet" onClose={() => setModal(null)}>
-          {() => (
-            <div className="window-body">
-              <h2 className="display">Admin</h2>
-              <AdminPanel owner={s.account!.role === 'owner'} setlist={setlist} library={library} />
             </div>
           )}
         </Dialog>

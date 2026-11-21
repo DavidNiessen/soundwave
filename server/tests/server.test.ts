@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
-import { PROTOCOL_VERSION, RECONNECT_GRACE_MS, type ServerMessage, type Session, type WireChart } from '../../src/net/protocol.ts';
+import {
+  PROTOCOL_VERSION,
+  RECONNECT_GRACE_MS,
+  type ServerMessage,
+  type Session,
+  type UserEntry,
+  type WireChart,
+} from '../../src/net/protocol.ts';
 import { startServer, type RunningServer } from '../src/app.ts';
 import { DEFAULTS, type Config } from '../src/config.ts';
 import { Store } from '../src/db.ts';
@@ -193,6 +200,14 @@ describe('accounts', () => {
     expect((await api('POST', '/mod/ban', { name: 'Owner' }, modAgain.access)).status).toBe(403);
     const log = await api<{ action: string; target: string; reason: string }[]>('GET', '/mod/audit', undefined, owner.access);
     expect(log.body[0]).toMatchObject({ action: 'ban 2 h', target: 'Player', reason: 'Cheating' });
+    const users = await api<UserEntry[]>('GET', '/mod/users', undefined, modAgain.access);
+    expect(users.body.map((u) => [u.name, u.role, u.bannedUntil !== null])).toEqual([
+      ['Owner', 'owner', false],
+      ['Mod', 'moderator', false],
+      ['Player', 'player', true],
+    ]);
+    expect(users.body[2].banReason).toBe('Cheating');
+    expect((await api('GET', '/mod/users', undefined, player.access)).status).not.toBe(200);
     const exp = await exported(owner.access);
     expect(Object.keys(exp).sort()).toEqual(['README.txt', 'account.json', 'avatar.json', 'runs.json', 'songs-shared.json']);
     expect(JSON.parse(exp['account.json']).account.name).toBe('Owner');
