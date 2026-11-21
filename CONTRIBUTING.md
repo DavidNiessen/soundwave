@@ -53,7 +53,7 @@ New behaviour comes with tests (`tests/`, run with Vitest). The existing ones sh
 3. Fill in the template: what changes, why, and how you checked it (with a screenshot for anything visible).
 4. Make sure the checks pass.
 
-Every push to `main` builds a pre-release for Windows, macOS and Linux; full releases are made by hand (see [Releases](README.md#releases)).
+Every push to `main` builds a pre-release for Windows, macOS and Linux; full releases are made by hand (see [Releases](docs/guide.md#releases)).
 
 ## Licence
 
