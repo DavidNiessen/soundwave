@@ -210,4 +210,31 @@ describe('Showdown', () => {
     say(0, { type: 'set', songs: [SET[0]] });
     expect(last(0, 'error')?.message).toMatch(/rotation/);
   });
+
+  it('takes a player who drops mid-song back into the song, and tells one who comes back too late where the party is', () => {
+    const { parties, say, start, last, advance, state } = showdown(3);
+    start(0);
+    // p1 drops and comes back while the song plays: the party is still in that song, and their score counts.
+    parties.disconnected('p1');
+    advance(5000);
+    parties.reconnected('p1');
+    expect(last(1, 'party')?.party).toMatchObject({ phase: 'playing', songIndex: 0 });
+    say(0, { type: 'finish', songIndex: 0, result: result(500) });
+    say(1, { type: 'finish', songIndex: 0, result: result(400) });
+    say(2, { type: 'finish', songIndex: 0, result: result(300) });
+    expect(state().phase).toBe('results');
+    expect(state().results[0].lines.find((l) => l.id === 'p1')?.result?.score).toBe(400);
+
+    // In the next song p2 drops, and the song ends without them: back, they are told it is over.
+    start(1);
+    parties.disconnected('p2');
+    say(0, { type: 'finish', songIndex: 1, result: result(500) });
+    say(1, { type: 'finish', songIndex: 1, result: result(400) });
+    expect(state().phase).toBe('playing');
+    advance(60_000 * 10);
+    parties.reconnected('p2');
+    const back = last(2, 'party')?.party;
+    // Either still in the party at its results, or out of it after the grace: never in the song.
+    expect(back === null || back?.phase !== 'playing').toBe(true);
+  });
 });

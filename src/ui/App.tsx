@@ -1059,7 +1059,10 @@ export function App() {
     if (!start.chart || !song) return;
     const meta = byId.get(song.id) ?? partySongs.songs()[song.id]?.meta;
     const chart = cleanChart(start.chart);
-    const busy = ['play', 'replay', 'export', 'editor'].includes(viewRef.current.name);
+    // A party song still open from before (the party moved on without this player) gives way to the new one.
+    const v = viewRef.current;
+    const stale = v.name === 'play' && !!v.run.party && v.run.party.songIndex !== start.songIndex;
+    const busy = !stale && ['play', 'replay', 'export', 'editor'].includes(v.name);
     if (!meta || !chart || busy) {
       online.quit(start.songIndex);
       return toast(
@@ -1088,6 +1091,24 @@ export function App() {
     }, true);
   };
   useEffect(() => online.onStart((s) => partyStartRef.current(s)), []);
+  // The server decides where the party is. A party song still playing here once the party is
+  // elsewhere (the song was ended without this player, after a dropped connection, or the party
+  // is gone) is left for the party's own screen, which follows its phase.
+  const partyAt = onlineState.party ? `${onlineState.party.code}:${onlineState.party.phase}:${onlineState.party.songIndex}` : null;
+  const playingParty = view.name === 'play' ? view.run.party : undefined;
+  const leaveStale = useRef(() => {});
+  leaveStale.current = () => {
+    const party = online.snapshot().party;
+    if (party) setView({ name: 'party' });
+    else goOnline();
+    toast(party ? 'The party moved on without you, so you are back with it.' : 'The party is over.');
+  };
+  useEffect(() => {
+    if (!playingParty || onlineState.status !== 'online') return;
+    const party = online.snapshot().party;
+    if (party && party.phase === 'playing' && party.songIndex === playingParty.songIndex) return;
+    leaveStale.current();
+  }, [partyAt, playingParty, onlineState.status]);
   // The party's next song is loaded ahead, so it starts on time.
   const partyNext = onlineState.party ? onlineState.party.set[onlineState.party.songIndex + 1]?.id : undefined;
   useEffect(() => {
