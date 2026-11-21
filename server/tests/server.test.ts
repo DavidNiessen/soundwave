@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import {
@@ -160,6 +161,55 @@ describe('accounts', () => {
     expect(html).toContain('Our &lt;server&gt;');
     const spent = await (await fetch(`${server.url}/join?invite=nope`)).text();
     expect(spent).toContain('has run out or was used up');
+  });
+
+  it('signs in through the browser: its own form, a one-time code to the game, traded with the game’s secret', async () => {
+    await start();
+    await signUp('Ana');
+    const verifier = randomBytes(32).toString('base64url');
+    const challenge = createHash('sha256').update(verifier).digest('base64url');
+    const ask = { redirect: 'http://localhost:5173/', challenge, state: 'state-123' };
+    // The page is a plain form a password manager knows.
+    const page = await fetch(`${server.url}/login?${new URLSearchParams(ask)}`);
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain('autocomplete="current-password"');
+    expect(page.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
+    // A page that would send the code elsewhere is refused.
+    expect((await fetch(`${server.url}/login?${new URLSearchParams({ ...ask, redirect: 'https://evil.example/' })}`)).status).toBe(400);
+    const form = (fields: Record<string, string>) =>
+      fetch(`${server.url}/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ ...ask, mode: 'signin', ...fields }),
+        redirect: 'manual',
+      });
+    // A wrong password comes back to the form, with why.
+    const wrong = await form({ name: 'Ana', password: 'nope nope' });
+    expect(wrong.status).toBe(401);
+    expect(await wrong.text()).toContain('role="alert"');
+    const ok = await form({ name: 'Ana', password: 'correct horse' });
+    expect(ok.status).toBe(303);
+    const back = new URL(ok.headers.get('location')!);
+    expect(back.origin).toBe('http://localhost:5173');
+    expect(back.searchParams.get('state')).toBe('state-123');
+    const code = back.searchParams.get('code')!;
+    // Without the secret the code is worth nothing; with it, once.
+    expect((await api('POST', '/auth/exchange', { code, verifier: 'x'.repeat(43) })).status).toBe(400);
+    const ok2 = await form({ name: 'Ana', password: 'correct horse' });
+    const code2 = new URL(ok2.headers.get('location')!).searchParams.get('code')!;
+    const session = await api<Session>('POST', '/auth/exchange', { code: code2, verifier });
+    expect(session.status).toBe(200);
+    expect(session.body.user.name).toBe('Ana');
+    expect((await api('POST', '/auth/exchange', { code: code2, verifier })).status).toBe(400);
+    // The desktop app gets a page that opens it by its link.
+    const app = await fetch(`${server.url}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ ...ask, redirect: 'soundwave://auth', mode: 'signin', name: 'Ana', password: 'correct horse' }),
+    });
+    expect(app.status).toBe(200);
+    expect(await app.text()).toMatch(/soundwave:\/\/auth\?code=/);
   });
 
   it('asks for the server password in password mode', async () => {

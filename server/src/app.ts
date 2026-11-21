@@ -18,6 +18,7 @@ import { zip } from './zip.ts';
 import { Rotation } from './rotation.ts';
 import { Scores } from './scores.ts';
 import { joinPage } from './joinPage.ts';
+import { donePage, LoginCodes, loginPage, readRequest, stopPage, validRequest } from './browserLogin.ts';
 import { Songs } from './songs.ts';
 import { PartySongs } from './partySongs.ts';
 import { clientMessage } from './validate.ts';
@@ -117,6 +118,8 @@ export async function startServer(config: Config, store: Store, log: (line: stri
   /** What each player online says they are doing. */
   const activity = new Map<string, string>();
   const authLimit = new RateLimit(10, 10);
+  /** Sign-ins done in the browser, waiting for the game to trade their code (browserLogin.ts). */
+  const loginCodes = new LoginCodes();
   const writeLimit = new RateLimit(30, 30);
 
   /** Closes a player's connection, telling them why. */
@@ -150,6 +153,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       sharing: config.songSharing,
       publicCovers: config.publicCovers,
       partySongs: config.partySongs,
+      browserLogin: true,
     }),
     'POST /songs': async (req, _body, ip, _p, raw) => {
       if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many songs at once. Wait a minute.');
@@ -173,6 +177,11 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       return accounts.signIn(body.name, body.password);
     },
     'POST /auth/refresh': (_req, body) => accounts.refresh(body.refresh),
+    // The game trades the code a browser sign-in handed it, with the secret it started with.
+    'POST /auth/exchange': (_req, body, ip) => {
+      if (!authLimit.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
+      return loginCodes.exchange(body.code, body.verifier);
+    },
     'GET /me': (req) => {
       const u = me(req);
       return { id: u.id, name: u.name, role: u.role };
@@ -363,6 +372,8 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       });
       return void res.end(joinPage(config, code, code.length <= 64 && accounts.inviteValid(code)));
     }
+    // Signing in through the browser: the server's own page, a plain form (browserLogin.ts).
+    if (path === '/login' && (req.method === 'GET' || req.method === 'POST')) return void browserSignIn(req, res);
     let params: string[] = [];
     let route = routes[`${req.method} ${path}`];
     if (!route)
@@ -415,6 +426,72 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       reply(res, 500, { error: 'Something went wrong on the server.' });
     }
   });
+
+  /** The sign-in page, and the form sent from it: signed in, the game gets its code. */
+  const browserSignIn = async (req: IncomingMessage, res: ServerResponse) => {
+    // Where a form may send the player on to: this server, and the web game (the desktop app's
+    // soundwave:// link is opened from the page itself).
+    let game = '';
+    try {
+      game = new URL(config.webGameUrl).origin;
+    } catch {
+      /* none */
+    }
+    const html = (status: number, body: string, extra: Record<string, string> = {}) => {
+      res.writeHead(status, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${game} http://localhost:* http://127.0.0.1:*; frame-ancestors 'none'`,
+        'Cache-Control': 'no-store',
+        'X-Frame-Options': 'DENY',
+        ...extra,
+      });
+      res.end(body);
+    };
+    let params: URLSearchParams;
+    if (req.method === 'GET') params = new URL(req.url ?? '/', 'http://x').searchParams;
+    else {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      for await (const c of req) {
+        size += (c as Buffer).length;
+        if (size > BODY_MAX) return html(413, stopPage('That is too much to send.'));
+        chunks.push(c as Buffer);
+      }
+      params = new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
+    }
+    const r = readRequest(params);
+    const wrong = validRequest(r, config);
+    if (wrong) return html(400, stopPage(wrong));
+    if (req.method === 'GET') return html(200, loginPage(config, r));
+
+    const name = params.get('name') ?? '';
+    const password = params.get('password') ?? '';
+    try {
+      if (!authLimit.take(addressOf(req))) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
+      const session =
+        r.mode === 'signup'
+          ? await accounts.signUp({
+              name,
+              password,
+              ...(params.get('invite')?.trim() ? { invite: params.get('invite')!.trim() } : {}),
+              ...(params.get('serverPassword') ? { serverPassword: params.get('serverPassword')! } : {}),
+            })
+          : await accounts.signIn(name, password);
+      const code = loginCodes.issue(session, r.challenge);
+      const to = `${r.redirect}${r.redirect.includes('?') ? '&' : '?'}${new URLSearchParams({ code, state: r.state, server: config.publicUrl })}`;
+      // The desktop app is opened by its own link from a page that says what happened; the web
+      // game is simply gone back to.
+      if (to.startsWith('soundwave:')) return html(200, donePage(config, session.user.name, to));
+      res.writeHead(303, { Location: to, 'Cache-Control': 'no-store' });
+      return void res.end();
+    } catch (e) {
+      if (!(e instanceof Refusal)) {
+        log(`Error on POST /login: ${(e as Error).stack ?? e}`);
+        return html(500, loginPage(config, r, 'Something went wrong on the server. Try again.', name));
+      }
+      return html(e.status, loginPage(config, r, e.message, name));
+    }
+  };
 
   /* Parties, over WebSocket ----------------------------------------------------------------- */
 

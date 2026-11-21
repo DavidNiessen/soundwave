@@ -1,4 +1,5 @@
 mod audio_out;
+mod browser;
 mod discord;
 mod haptics;
 mod song_files;
@@ -81,6 +82,7 @@ pub fn run() {
             discord::discord_presence,
             discord::discord_take_join,
             discord::discord_answer,
+            browser::open_in_browser,
             haptics::haptics_available,
             haptics::haptics_play,
             haptics::haptics_update,

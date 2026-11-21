@@ -20,6 +20,7 @@ import {
   Scissors,
   Crown,
   Download,
+  ExternalLink,
   KeyRound,
   Link as LinkIcon,
   LoaderCircle,
@@ -255,6 +256,15 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
   const [problem, setProblem] = useState<string | null>(null);
   /** The player chose to type another address while one is known. */
   const [changing, setChanging] = useState(false);
+  /** Signing in here, in the game, rather than on the server's page in the browser. */
+  const [inGame, setInGame] = useState(false);
+  /** The browser was opened for signing in (desktop): the game waits for it to come back. */
+  const [waiting, setWaiting] = useState<'signin' | 'signup' | null>(null);
+  const browser = (how: 'signin' | 'signup') =>
+    run('account', async () => {
+      await online.signInWithBrowser(how);
+      setWaiting(how);
+    });
   const info = changing ? null : s.info;
 
   const run = async (what: 'connect' | 'account', task: () => Promise<unknown>) => {
@@ -383,97 +393,160 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
                 Change
               </button>
             </div>
-            <div className="choice-pair" role="radiogroup" aria-label="Sign in or make an account">
-              <button
-                type="button"
-                role="radio"
-                aria-checked={how === 'in'}
-                className={`choice ${how === 'in' ? 'on' : ''}`}
-                onClick={() => setHow('in')}
-              >
-                I have an account
-              </button>
-              <button
-                type="button"
-                role="radio"
-                aria-checked={how === 'up'}
-                className={`choice ${how === 'up' ? 'on' : ''}`}
-                onClick={() => setHow('up')}
-              >
-                I’m new here
-              </button>
-            </div>
-            {how === 'up' && (
-              <p className="hint connect-note">
-                {s.invite
-                  ? 'Your invite lets you in.'
-                  : {
-                      public: 'Anyone can make an account here.',
-                      password: 'Making an account here needs the server’s password, or an invite.',
-                      invite: 'Making an account here needs an invite from someone on it.',
-                    }[info.mode]}
-              </p>
+            {info.browserLogin && !inGame ? (
+              <div className="connect-browser">
+                {waiting ? (
+                  <>
+                    <p className="connect-wait">
+                      <LoaderCircle className="spin" strokeWidth={ICON_STROKE} aria-hidden />
+                      {waiting === 'signin' ? 'Sign in' : 'Make your account'} in your browser. The game picks it up by itself.
+                    </p>
+                    <button type="button" className="btn wide" onClick={() => void browser(waiting)}>
+                      <ExternalLink strokeWidth={ICON_STROKE} aria-hidden />
+                      Open the page again
+                    </button>
+                    <button type="button" className="btn quiet wide" onClick={() => setWaiting(null)}>
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p className="hint">
+                      You sign in on {info.name}’s own page, in your browser, where your password manager can fill it in. Then you come
+                      straight back here.
+                    </p>
+                    <button
+                      type="button"
+                      className="btn primary wide connect-go"
+                      data-autofocus
+                      disabled={!!busy}
+                      onClick={() => void browser(s.invite ? 'signup' : 'signin')}
+                    >
+                      {busy === 'account' ? (
+                        <LoaderCircle className="spin" strokeWidth={ICON_STROKE} aria-hidden />
+                      ) : (
+                        <ExternalLink strokeWidth={ICON_STROKE} aria-hidden />
+                      )}
+                      {s.invite ? 'Make my account in the browser' : 'Sign in with your browser'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn wide"
+                      disabled={!!busy}
+                      onClick={() => void browser(s.invite ? 'signin' : 'signup')}
+                    >
+                      <UserPlus strokeWidth={ICON_STROKE} aria-hidden />
+                      {s.invite ? 'I already have an account' : 'I’m new here: make an account'}
+                    </button>
+                  </>
+                )}
+                <button type="button" className="btn quiet wide" onClick={() => (setInGame(true), setWaiting(null))}>
+                  Sign in here in the game instead
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="choice-pair" role="radiogroup" aria-label="Sign in or make an account">
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={how === 'in'}
+                    className={`choice ${how === 'in' ? 'on' : ''}`}
+                    onClick={() => setHow('in')}
+                  >
+                    I have an account
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={how === 'up'}
+                    className={`choice ${how === 'up' ? 'on' : ''}`}
+                    onClick={() => setHow('up')}
+                  >
+                    I’m new here
+                  </button>
+                </div>
+                {how === 'up' && (
+                  <p className="hint connect-note">
+                    {s.invite
+                      ? 'Your invite lets you in.'
+                      : {
+                          public: 'Anyone can make an account here.',
+                          password: 'Making an account here needs the server’s password, or an invite.',
+                          invite: 'Making an account here needs an invite from someone on it.',
+                        }[info.mode]}
+                  </p>
+                )}
+                <label className="meta-field">
+                  <span className="dim">Name</span>
+                  <span className="connect-input" data-ring-box>
+                    <UserRound strokeWidth={ICON_STROKE} aria-hidden />
+                    <input
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      maxLength={24}
+                      autoComplete="username"
+                      spellCheck={false}
+                      data-autofocus
+                    />
+                  </span>
+                </label>
+                <label className="meta-field">
+                  <span className="dim">Password</span>
+                  <span className="connect-input" data-ring-box>
+                    <KeyRound strokeWidth={ICON_STROKE} aria-hidden />
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      maxLength={200}
+                      autoComplete={how === 'up' ? 'new-password' : 'current-password'}
+                      aria-invalid={short}
+                    />
+                  </span>
+                  {how === 'up' && <span className={short ? 'warn' : 'dim'}>At least 8 characters</span>}
+                </label>
+                {how === 'up' && mode === 'password' && !invite && (
+                  <label className="meta-field">
+                    <span className="dim">The server’s password</span>
+                    <span className="connect-input" data-ring-box>
+                      <ShieldCheck strokeWidth={ICON_STROKE} aria-hidden />
+                      <input type="password" value={serverPassword} onChange={(e) => setServerPassword(e.target.value)} />
+                    </span>
+                  </label>
+                )}
+                {how === 'up' && !s.invite && (
+                  <label className="meta-field">
+                    <span className="dim">
+                      {mode === 'invite' ? 'Your invite link or code' : 'An invite link or code (if you have one)'}
+                    </span>
+                    <span className="connect-input" data-ring-box>
+                      <LinkIcon strokeWidth={ICON_STROKE} aria-hidden />
+                      <input value={code} onChange={(e) => setCode(e.target.value)} spellCheck={false} />
+                    </span>
+                    <span className="dim">Owner: use the set-up code your server printed.</span>
+                  </label>
+                )}
+                <button
+                  type="submit"
+                  className="btn primary wide connect-go"
+                  disabled={!!busy || !name.trim() || !password || short || needsCode}
+                >
+                  {busy === 'account' ? (
+                    <LoaderCircle className="spin" strokeWidth={ICON_STROKE} aria-hidden />
+                  ) : (
+                    <LogIn strokeWidth={ICON_STROKE} aria-hidden />
+                  )}
+                  {busy === 'account' ? 'One moment…' : how === 'in' ? 'Sign in' : 'Make my account'}
+                </button>
+                {info.browserLogin && (
+                  <button type="button" className="btn quiet wide" onClick={() => setInGame(false)}>
+                    <ExternalLink strokeWidth={ICON_STROKE} aria-hidden />
+                    Use my browser instead
+                  </button>
+                )}
+              </>
             )}
-            <label className="meta-field">
-              <span className="dim">Name</span>
-              <span className="connect-input" data-ring-box>
-                <UserRound strokeWidth={ICON_STROKE} aria-hidden />
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  maxLength={24}
-                  autoComplete="username"
-                  spellCheck={false}
-                  data-autofocus
-                />
-              </span>
-            </label>
-            <label className="meta-field">
-              <span className="dim">Password</span>
-              <span className="connect-input" data-ring-box>
-                <KeyRound strokeWidth={ICON_STROKE} aria-hidden />
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  maxLength={200}
-                  autoComplete={how === 'up' ? 'new-password' : 'current-password'}
-                  aria-invalid={short}
-                />
-              </span>
-              {how === 'up' && <span className={short ? 'warn' : 'dim'}>At least 8 characters</span>}
-            </label>
-            {how === 'up' && mode === 'password' && !invite && (
-              <label className="meta-field">
-                <span className="dim">The server’s password</span>
-                <span className="connect-input" data-ring-box>
-                  <ShieldCheck strokeWidth={ICON_STROKE} aria-hidden />
-                  <input type="password" value={serverPassword} onChange={(e) => setServerPassword(e.target.value)} />
-                </span>
-              </label>
-            )}
-            {how === 'up' && !s.invite && (
-              <label className="meta-field">
-                <span className="dim">{mode === 'invite' ? 'Your invite link or code' : 'An invite link or code (if you have one)'}</span>
-                <span className="connect-input" data-ring-box>
-                  <LinkIcon strokeWidth={ICON_STROKE} aria-hidden />
-                  <input value={code} onChange={(e) => setCode(e.target.value)} spellCheck={false} />
-                </span>
-                <span className="dim">Owner: use the set-up code your server printed.</span>
-              </label>
-            )}
-            <button
-              type="submit"
-              className="btn primary wide connect-go"
-              disabled={!!busy || !name.trim() || !password || short || needsCode}
-            >
-              {busy === 'account' ? (
-                <LoaderCircle className="spin" strokeWidth={ICON_STROKE} aria-hidden />
-              ) : (
-                <LogIn strokeWidth={ICON_STROKE} aria-hidden />
-              )}
-              {busy === 'account' ? 'One moment…' : how === 'in' ? 'Sign in' : 'Make my account'}
-            </button>
           </form>
         )}
         {problem && (

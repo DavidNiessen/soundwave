@@ -64,6 +64,11 @@ export interface ServerInfo {
    * the server keeps it for a while, and the player's game downloads it by itself.
    */
   partySongs: boolean;
+  /**
+   * The server has a sign-in page of its own (`GET /login`) the game opens in the browser, so the
+   * browser's password manager works; the game trades the code it hands back (`POST /auth/exchange`).
+   */
+  browserLogin?: boolean;
 }
 
 export type SongSharing = 'off' | 'charts' | 'songs';

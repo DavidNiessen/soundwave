@@ -11604,3 +11604,29 @@ a.btn {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Signing in through the browser (Connect, PartyScreen.tsx): the way in, and waiting for it. */
+.connect-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.connect-browser .hint {
+  margin: 0 0 0.2rem;
+}
+.connect-wait {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.8rem 0.9rem;
+  border-radius: var(--r-m);
+  background: rgb(255 77 157 / 0.12);
+  font-weight: 700;
+}
+.connect-wait svg {
+  flex: none;
+  width: 1.2rem;
+  height: 1.2rem;
+  color: var(--pink-2);
+}
