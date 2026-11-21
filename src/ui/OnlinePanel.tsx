@@ -108,7 +108,7 @@ function SignedIn({ settings, setlist, library, onParty, onBoards, onAvatar, bas
   const s = useSyncExternalStore(online.subscribe, online.snapshot);
   const hints = useHints(settings);
   /** The window open over the tab: the account, an invite, or the server's tools. */
-  const [modal, setModal] = useState<'account' | 'invite' | 'admin' | null>(null);
+  const [modal, setModal] = useState<'account' | 'forget' | 'invite' | 'admin' | null>(null);
   const [deleting, setDeleting] = useState(false);
   const mod = s.account!.role !== 'player';
   const party = s.party;
@@ -323,7 +323,7 @@ function SignedIn({ settings, setlist, library, onParty, onBoards, onAvatar, bas
                 <LogOut strokeWidth={ICON_STROKE} aria-hidden />
                 Sign out
               </button>
-              <button type="button" className="btn wide quiet" data-sfx="back" onClick={() => online.forget()}>
+              <button type="button" className="btn wide quiet" data-sfx="back" onClick={() => setModal('forget')}>
                 Forget this server
               </button>
               {s.account!.role !== 'owner' &&
@@ -342,6 +342,25 @@ function SignedIn({ settings, setlist, library, onParty, onBoards, onAvatar, bas
                 ))}
               <button type="button" className="btn primary wide" onClick={close}>
                 Done
+              </button>
+            </div>
+          )}
+        </Dialog>
+      )}
+      {modal === 'forget' && (
+        <Dialog title="Forget this server" variant="card" closeLabel="Keep it" onClose={() => setModal('account')}>
+          {(close) => (
+            <div className="pause-card">
+              <h2 className="display">Forget this server?</h2>
+              <p className="hint">
+                You are signed out and the game no longer knows {s.info?.name ?? s.server}. Your account and scores stay on it; to come back
+                you need its address or an invite again.
+              </p>
+              <button type="button" className="btn wide" data-autofocus data-sfx="back" onClick={close}>
+                Keep it
+              </button>
+              <button type="button" className="btn primary wide danger" onClick={() => online.forget()}>
+                Forget it
               </button>
             </div>
           )}
