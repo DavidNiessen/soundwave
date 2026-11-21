@@ -10938,3 +10938,283 @@ a.btn {
   flex: 1;
   max-width: 28rem;
 }
+
+/* The server library (ui/ServerLibrary.tsx): a bar of counts, search, sort and Add; the list with
+   covers; the song picked beside it. */
+.srvlib {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+.srvlib-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.7rem 1rem;
+}
+.srvlib-stats {
+  margin: 0;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.srvlib-stats strong {
+  font-size: 1.25rem;
+  font-weight: 900;
+}
+.srvlib-search {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+.srvlib-clear {
+  display: grid;
+  place-items: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 50%;
+  color: var(--ink-2);
+}
+.srvlib-clear:hover {
+  background: rgb(255 255 255 / 0.08);
+}
+.srvlib-clear svg {
+  width: 1rem;
+  height: 1rem;
+}
+.srvlib-sort {
+  grid-template-columns: repeat(3, auto);
+}
+.srvlib-note {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 700;
+}
+.srvlib-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(17rem, 22rem);
+  gap: clamp(1rem, 2vw, 2rem);
+}
+.srvlib-list {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0 0.3rem 1rem 0;
+  list-style: none;
+}
+.srvlib-empty {
+  padding: 1.2rem;
+  border-radius: var(--r-l);
+  background: var(--well);
+}
+.srvlib-row,
+.srvlib-add-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.4rem 0.9rem 0.4rem 0.4rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+  color: var(--ink);
+  text-align: left;
+  box-shadow: inset 0 0 0 1.5px transparent;
+  transition:
+    background 0.15s,
+    box-shadow 0.15s;
+}
+.srvlib-row:hover,
+.srvlib-add-row:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.08);
+}
+.srvlib-row.on,
+.srvlib-add-row.on {
+  background: rgb(255 77 157 / 0.14);
+  box-shadow: inset 0 0 0 2px var(--pink);
+}
+.srvlib-cover {
+  width: 2.9rem;
+  height: 2.9rem;
+}
+.srvlib-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+.srvlib-title,
+.srvlib-artist {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.srvlib-title {
+  font-weight: 800;
+}
+.srvlib-artist {
+  color: var(--ink-2);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+.srvlib-by {
+  flex: none;
+  max-width: 9rem;
+  color: var(--ink-3);
+  font-size: 0.85rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.srvlib-len {
+  flex: none;
+  min-width: 2.8rem;
+  text-align: right;
+  color: var(--ink-2);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+/* The song picked: cover large, its facts, renaming, removing. */
+.srvlib-detail {
+  align-self: start;
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 1rem;
+  border-radius: var(--r-l);
+  background: var(--panel);
+  animation: rise-in 0.25s var(--ease) backwards;
+}
+.srvlib-detail.empty {
+  min-height: 10rem;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  border: 2px dashed var(--line);
+  background: transparent;
+  animation: none;
+}
+.srvlib-detail-cover {
+  width: min(100%, 12rem, 26vh);
+  height: auto;
+  border-radius: var(--r-m);
+  box-shadow: 0 1rem 2rem -1rem rgb(0 0 0 / 0.7);
+}
+.srvlib-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  color: var(--ink-2);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+.srvlib-facts span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.srvlib-facts svg {
+  width: 1rem;
+  height: 1rem;
+}
+.srvlib-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.srvlib-edit-row {
+  display: flex;
+  gap: 0.5rem;
+}
+.srvlib-remove {
+  align-self: flex-start;
+}
+/* Adding songs: a list to tick, with All, and the songs going up one after another. */
+.srvlib-add {
+  max-height: min(42rem, 82vh);
+}
+.srvlib-add-bar {
+  display: flex;
+  gap: 0.6rem;
+}
+.srvlib-add-bar .admin-search {
+  flex: 1;
+}
+.srvlib-add-list {
+  min-height: 0;
+  max-height: min(24rem, 46vh);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0 0.3rem 0 0;
+  list-style: none;
+}
+.srvlib-tick {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-left: 0.4rem;
+  border-radius: 0.45rem;
+  box-shadow: inset 0 0 0 2px var(--ink-3);
+  color: var(--pink-ink);
+}
+.srvlib-add-row.on .srvlib-tick {
+  background: var(--pink);
+  box-shadow: none;
+}
+.srvlib-tick svg {
+  width: 1rem;
+  height: 1rem;
+}
+.srvlib-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-weight: 700;
+}
+.srvlib-progress-bar {
+  height: 0.4rem;
+  border-radius: 1rem;
+  background: linear-gradient(90deg, var(--pink) calc(var(--p, 0) * 100%), var(--well) 0);
+  transition: background 0.3s;
+}
+.srvlib-add-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+@media (max-width: 900px) {
+  .srvlib-body {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+  }
+  .srvlib-list {
+    overflow: visible;
+  }
+  .srvlib-detail {
+    order: -1;
+    max-height: none;
+    overflow: visible;
+  }
+  .srvlib-detail.empty {
+    display: none;
+  }
+  .srvlib-detail-cover {
+    width: 8rem;
+  }
+  .srvlib-by {
+    display: none;
+  }
+}

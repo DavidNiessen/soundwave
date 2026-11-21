@@ -420,6 +420,10 @@ class OnlineClient {
   downloadSong(id: string) {
     return this.request<Blob>(`/songs/${id}/file`, { auth: true, file: true });
   }
+  /** A shared song's cover picture. */
+  songCover(id: string) {
+    return this.request<Blob>(`/covers/${id}`, { auth: true, file: true });
+  }
   /** A shared song's details, analysis and hand-made charts (a charts-only server's whole share). */
   songCharts(id: string) {
     return this.request<{ meta: SoundwaveMeta; analysis: SoundwaveAnalysis | null; edits: SoundwaveEdits | null }>(`/songs/${id}/charts`, {

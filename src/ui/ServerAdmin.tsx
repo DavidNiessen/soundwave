@@ -14,8 +14,6 @@ import {
   Library,
   ListMusic,
   LogOut,
-  Pencil,
-  Plus,
   ScrollText,
   Search as SearchIcon,
   Shield,
@@ -23,7 +21,6 @@ import {
   Trash2,
   UserPlus,
   Users,
-  X,
   type LucideIcon,
 } from 'lucide-react';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
@@ -31,12 +28,10 @@ import type { Settings } from '../game/settings';
 import { keysOf } from '../input/bindings';
 import { online } from '../net/client';
 import type { Invite, Role, SetSong, SharedSong, UserEntry } from '../net/protocol';
-import { serverSongs } from '../net/serverSongs';
 import type { SongMeta } from '../storage/db';
-import { songFile } from '../storage/songFile';
 import { Hint, useActions, useHints } from './actions';
 import { Dialog } from './Dialog';
-import { Dropdown } from './Dropdown';
+import { ServerLibrary } from './ServerLibrary';
 import { ICON_STROKE } from './icons';
 
 /** Saves text as a file the player keeps (their data from the server). */
@@ -163,19 +158,22 @@ export function AdminScreen({
   useEffect(load, [load, section]);
 
   const back = () => (section ? setSection(null) : onBack());
-  useActions([
-    { id: 'back', label: section ? 'Admin' : 'Back', icon: ArrowLeft, kbd: 'Escape', sfx: 'back', run: back },
-    ...(section
-      ? []
-      : SECTIONS.map(({ id, binding, label, icon }) => ({
-          id: `admin-${id}`,
-          label,
-          icon,
-          ...keysOf(binding),
-          bar: false,
-          run: () => setSection(id),
-        }))),
-  ]);
+  useActions(
+    [
+      { id: 'back', label: section ? 'Admin' : 'Back', icon: ArrowLeft, kbd: 'Escape', sfx: 'back', run: back },
+      ...(section
+        ? []
+        : SECTIONS.map(({ id, binding, label, icon }) => ({
+            id: `admin-${id}`,
+            label,
+            icon,
+            ...keysOf(binding),
+            bar: false,
+            run: () => setSection(id),
+          }))),
+    ],
+    { passive: section === 'library' },
+  );
 
   if (!mod)
     return (
@@ -257,7 +255,9 @@ export function AdminScreen({
       )}
       {section && (
         <section className="admin-section" data-nav-group="admin-section">
-          {section === 'library' && <ServerLibrary library={library} list={songs ?? []} onChange={load} />}
+          {section === 'library' && (
+            <ServerLibrary library={library} list={songs ?? []} settings={settings} onChange={load} onBack={() => setSection(null)} />
+          )}
           {section === 'players' && <Players users={users} owner={owner} me={s.account!.name} onChange={load} />}
           {section === 'invites' && <InvitePanel mod />}
           {section === 'rotation' && <Rotation rotation={rotation} setlist={setlist} onChange={setRotation} />}
@@ -583,156 +583,6 @@ function ReportedSongs({ reports, onChange }: { reports: Report[] | null; onChan
         ))}
       </ol>
       {note && <p className="hint">{note}</p>}
-    </div>
-  );
-}
-
-/**
- * The server's own library, which the owner and moderators keep: songs added from their library
- * (whatever players may share), renamed (every downloaded copy follows: the game checks each
- * song's hash), or removed everywhere at once.
- */
-function ServerLibrary({ library, list, onChange }: { library: SongMeta[]; list: SharedSong[]; onChange(): void }) {
-  const [query, setQuery] = useState('');
-  const [pick, setPick] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
-  const [editing, setEditing] = useState<{ id: string; title: string; artist: string } | null>(null);
-  const [removing, setRemoving] = useState<SharedSong | null>(null);
-  const onServer = new Set(list.map((x) => x.id));
-  const addable = library.filter((x) => !onServer.has(x.id));
-  const q = query.trim().toLowerCase();
-  const shown = list.filter((x) => !q || `${x.title} ${x.artist} ${x.by ?? ''}`.toLowerCase().includes(q));
-  const run = async (what: () => Promise<unknown>, done: string) => {
-    setBusy(true);
-    setNote(null);
-    try {
-      await what();
-      setNote(done);
-      onChange();
-      void serverSongs.refresh();
-    } catch (e) {
-      setNote((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const add = (id: string) => {
-    const song = library.find((x) => x.id === id);
-    if (!song) return;
-    void run(async () => online.shareSong(await songFile(song.id)), `"${song.title}" is in the server's library.`);
-    setPick('');
-  };
-  return (
-    <div className="admin-narrow">
-      <p className="hint">Songs here show in the library of everyone on the server, to stream or download.</p>
-      <div className="party-row">
-        <Dropdown
-          className="admin-add"
-          value={pick}
-          options={addable.map((x) => ({ value: x.id, label: x.title, hint: x.artist || undefined }))}
-          onChange={setPick}
-          label="A song from your library"
-          placeholder="Add a song from your library…"
-          empty="Every song of yours is on the server"
-        />
-        <button type="button" className="btn small primary" disabled={!pick || busy} onClick={() => add(pick)}>
-          <Plus strokeWidth={ICON_STROKE} aria-hidden />
-          Add
-        </button>
-      </div>
-      <Search value={query} onChange={setQuery} label="Find a song" />
-      {note && <p className="hint">{note}</p>}
-      <ol className="boards-lines admin-list">
-        {list.length > 0 && !shown.length && <li className="dim">No song like that.</li>}
-        {shown.map((x) =>
-          editing?.id === x.id ? (
-            <li key={x.id} className="boards-line admin-edit">
-              <input
-                value={editing.title}
-                onChange={(e) => setEditing({ ...editing, title: e.target.value })}
-                aria-label="Title"
-                placeholder="Title"
-              />
-              <input
-                value={editing.artist}
-                onChange={(e) => setEditing({ ...editing, artist: e.target.value })}
-                aria-label="Artist"
-                placeholder="Artist"
-              />
-              <button
-                type="button"
-                className="btn small primary"
-                aria-label="Save"
-                disabled={busy || !editing.title.trim()}
-                onClick={() =>
-                  void run(
-                    () => online.editSong(x.id, editing.title, editing.artist),
-                    `Renamed. Every copy players downloaded follows.`,
-                  ).then(() => setEditing(null))
-                }
-              >
-                <Check strokeWidth={ICON_STROKE} aria-hidden />
-              </button>
-              <button type="button" className="btn small" aria-label="Cancel" onClick={() => setEditing(null)}>
-                <X strokeWidth={ICON_STROKE} aria-hidden />
-              </button>
-            </li>
-          ) : (
-            <li key={x.id} className="boards-line">
-              <span className="party-name">
-                {x.title}
-                <span className="dim">
-                  {' '}
-                  · {x.artist}
-                  {x.by ? ` · added by ${x.by}` : ''}
-                  {x.audio ? '' : ' · charts only'}
-                </span>
-              </span>
-              <button
-                type="button"
-                className="btn small"
-                aria-label={`Rename ${x.title}`}
-                onClick={() => setEditing({ id: x.id, title: x.title, artist: x.artist })}
-              >
-                <Pencil strokeWidth={ICON_STROKE} aria-hidden />
-              </button>
-              <button
-                type="button"
-                className="btn small danger"
-                aria-label={`Remove ${x.title} from the server`}
-                disabled={busy}
-                onClick={() => setRemoving(x)}
-              >
-                <Trash2 strokeWidth={ICON_STROKE} aria-hidden />
-              </button>
-            </li>
-          ),
-        )}
-      </ol>
-      {removing && (
-        <Dialog title="Remove the song" variant="card" closeLabel="Keep it" onClose={() => setRemoving(null)}>
-          {(close) => (
-            <div className="pause-card">
-              <h2 className="display">Remove “{removing.title}”?</h2>
-              <p className="hint">It leaves the server’s library, for everyone on the server.</p>
-              <button type="button" className="btn wide" data-autofocus data-sfx="back" onClick={close}>
-                Keep it
-              </button>
-              <button
-                type="button"
-                className="btn primary wide danger"
-                onClick={() => {
-                  void run(() => online.removeSong(removing.id, 'Removed by an admin'), `"${removing.title}" was removed from the server.`);
-                  close();
-                }}
-              >
-                Remove
-              </button>
-            </div>
-          )}
-        </Dialog>
-      )}
     </div>
   );
 }
