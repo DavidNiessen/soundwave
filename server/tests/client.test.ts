@@ -79,17 +79,18 @@ describe('server addresses', () => {
   });
 
   it('carry a party on Discord as its code and server, and read nothing else as one', () => {
-    const secret = joinSecret('https://play.example.com', 'WAVE-60');
+    const secret = joinSecret('https://play.example.com', 'B7KQX');
     expect(secret.length).toBeLessThanOrEqual(128);
-    expect(parseJoinSecret(secret)).toEqual({ server: 'https://play.example.com', code: 'WAVE-60' });
-    expect(parseJoinSecret('WAVE-60 http://play.example.com')).toBeNull();
+    expect(parseJoinSecret(secret)).toEqual({ server: 'https://play.example.com', code: 'B7KQX' });
+    expect(parseJoinSecret('B7KQX http://play.example.com')).toBeNull();
     expect(parseJoinSecret('not a party')).toBeNull();
-    expect(parseJoinSecret('WAVE-60')).toBeNull();
+    expect(parseJoinSecret('B7KQX')).toBeNull();
+    expect(parseJoinSecret('B7K Q https://play.example.com')).toBeNull();
     // Discord refuses a party whose id is its join secret; the id names the party on its server.
-    const id = partyId('https://play.example.com', 'WAVE-60');
+    const id = partyId('https://play.example.com', 'B7KQX');
     expect(id).not.toBe(secret);
-    expect(id).toMatch(/^WAVE-60-[0-9a-z]+$/);
-    expect(partyId('https://other.example.com', 'WAVE-60')).not.toBe(id);
+    expect(id).toMatch(/^B7KQX-[0-9a-z]+$/);
+    expect(partyId('https://other.example.com', 'B7KQX')).not.toBe(id);
   });
 });
 

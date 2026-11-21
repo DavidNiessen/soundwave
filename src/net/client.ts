@@ -130,7 +130,8 @@ export function partyId(server: string, code: string) {
 /** The party a join secret names, or null when it names none. */
 export function parseJoinSecret(secret: string): { server: string; code: string } | null {
   const [code, server, ...rest] = secret.trim().split(' ');
-  if (!code || !server || rest.length || !/^[A-Z]{4}-\d{2}$/.test(code)) return null;
+  // A party's code as the server makes it (five letters and digits, server/src/parties.ts).
+  if (!code || !server || rest.length || !/^[A-Z0-9]{4,12}$/.test(code)) return null;
   try {
     return { server: serverAddress(server), code };
   } catch {

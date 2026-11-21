@@ -451,7 +451,11 @@ pub fn discord_presence(
 /// The secret of a friend's Join that has come and not been taken yet (taken once).
 #[tauri::command]
 pub fn discord_take_join(discord: tauri::State<'_, Discord>) -> Option<String> {
-    discord.pending.lock().unwrap().take()
+    let secret = discord.pending.lock().unwrap().take();
+    if secret.is_some() {
+        log::info!("discord: the game took the join");
+    }
+    secret
 }
 
 /// Answers a friend's "Ask to Join" (`discord-join-request`): in, or not.
@@ -511,13 +515,13 @@ mod tests {
     #[test]
     fn a_joinable_party_carries_its_size_and_secret_instead_of_the_button() {
         let p: Presence = serde_json::from_str(
-            r#"{"details":"Playing together","join":{"secret":"WAVE-60 https://play.example.com","id":"abc","size":3,"max":16}}"#,
+            r#"{"details":"Playing together","join":{"secret":"B7KQX https://play.example.com","id":"abc","size":3,"max":16}}"#,
         )
         .unwrap();
         let a = serde_json::to_value(activity(&p)).unwrap();
         assert_eq!(a["party"]["id"], "abc");
         assert_eq!(a["party"]["size"], serde_json::json!([3, 16]));
-        assert_eq!(a["secrets"]["join"], "WAVE-60 https://play.example.com");
+        assert_eq!(a["secrets"]["join"], "B7KQX https://play.example.com");
         assert!(a.get("buttons").is_none());
         let plain: Presence = serde_json::from_str(r#"{"details":"In the main menu"}"#).unwrap();
         let a = serde_json::to_value(activity(&plain)).unwrap();
@@ -527,10 +531,10 @@ mod tests {
 
     #[test]
     fn a_join_secret_is_read_only_from_a_join() {
-        let join = serde_json::json!({"cmd":"DISPATCH","evt":"ACTIVITY_JOIN","data":{"secret":"WAVE-60 https://play.example.com"}});
+        let join = serde_json::json!({"cmd":"DISPATCH","evt":"ACTIVITY_JOIN","data":{"secret":"B7KQX https://play.example.com"}});
         assert_eq!(
             join_secret(&join).as_deref(),
-            Some("WAVE-60 https://play.example.com")
+            Some("B7KQX https://play.example.com")
         );
         let other = serde_json::json!({"cmd":"DISPATCH","evt":"READY","data":{}});
         assert_eq!(join_secret(&other), None);

@@ -1427,12 +1427,25 @@ export function App() {
     () =>
       onDiscordJoin((secret) => {
         const party = parseJoinSecret(secret);
-        if (!party) return;
+        if (!party) return toastRef.current('Discord sent a party this game cannot read. Update Soundwave, or join with the party’s code.');
+        // The party screen opens once the party is there (signing in to its server may come first).
+        joiningRef.current = party.code;
         online.joinFrom(party.server, party.code);
-        if (!['play', 'replay', 'export', 'editor'].includes(viewRef.current.name)) setView({ name: 'party' });
+        if (!online.snapshot().account && !['play', 'replay', 'export', 'editor'].includes(viewRef.current.name))
+          setView({ name: 'party' });
       }),
     [],
   );
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+  // A party joined from Discord: its lobby opens as soon as the server has let this player in.
+  const joiningRef = useRef<string | null>(null);
+  useEffect(() => {
+    const code = onlineState.party?.code;
+    if (!code || code !== joiningRef.current) return;
+    joiningRef.current = null;
+    if (!['play', 'replay', 'export', 'editor'].includes(viewRef.current.name)) setView({ name: 'party' });
+  }, [onlineState.party?.code]);
   // A friend asks on Discord to join: the player lets them in or not, outside a song. While the
   // party cannot be joined from Discord (none, or private), the ask is turned down by itself.
   const [joinAsks, setJoinAsks] = useState<JoinRequest[]>([]);
