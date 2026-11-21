@@ -41,18 +41,18 @@ once. (`docker logs soundwave` shows it.)
 
 `soundwave-server.json` in the data folder, or environment variables (which win):
 
-| Setting       | Variable                | Default             | What it is                                                                |
-| ------------- | ----------------------- | ------------------- | ------------------------------------------------------------------------- |
-| `name`        | `SOUNDWAVE_NAME`        | `Soundwave server`  | Shown in the game.                                                        |
-| `description` | `SOUNDWAVE_DESCRIPTION` |                     | One line about the server.                                                |
-| `port`        | `PORT`                  | `7420`              |                                                                           |
-| `host`        | `HOST`                  | `0.0.0.0`           |                                                                           |
-| `mode`        | `SOUNDWAVE_MODE`        | `invite`            | Who can make an account: `public`, `password` or `invite`.                |
-| `password`    | `SOUNDWAVE_PASSWORD`    |                     | The password making an account needs, in `password` mode.                 |
-| `publicUrl`   | `SOUNDWAVE_PUBLIC_URL`  | `http://localhost…` | The address players use, written into invite links. Set it.               |
-| `webGameUrl`  | `SOUNDWAVE_WEB_GAME`    | the game's website  | The web game an invite link offers, for your own copy of it.              |
-| `trustProxy`  | `SOUNDWAVE_TRUST_PROXY` | `false`             | Behind a proxy: take players' addresses (for rate limits) from the proxy. |
-| (data folder) | `SOUNDWAVE_DATA`        | `./data`            | Where the database and the server's signing secret live. Back this up.    |
+| Setting       | Variable                | Default             | What it is                                                                                       |
+| ------------- | ----------------------- | ------------------- | ------------------------------------------------------------------------------------------------ |
+| `name`        | `SOUNDWAVE_NAME`        | `Soundwave server`  | Shown in the game.                                                                               |
+| `description` | `SOUNDWAVE_DESCRIPTION` |                     | One line about the server.                                                                       |
+| `port`        | `PORT`                  | `7420`              |                                                                                                  |
+| `host`        | `HOST`                  | `0.0.0.0`           |                                                                                                  |
+| `mode`        | `SOUNDWAVE_MODE`        | `invite`            | Who can make an account: `public`, `password` or `invite`.                                       |
+| `password`    | `SOUNDWAVE_PASSWORD`    |                     | The password making an account needs, in `password` mode.                                        |
+| `publicUrl`   | `SOUNDWAVE_PUBLIC_URL`  | `http://localhost…` | The address players use, written into invite links. Set it.                                      |
+| `webGameUrl`  | `SOUNDWAVE_WEB_GAME`    | the game's website  | The web game an invite link offers, and the only website the sign-in page sends players back to. |
+| `trustProxy`  | `SOUNDWAVE_TRUST_PROXY` | `false`             | Behind a proxy: take players' addresses (for rate limits) from the proxy.                        |
+| (data folder) | `SOUNDWAVE_DATA`        | `./data`            | Where the database and the server's signing secret live. Back this up.                           |
 
 The modes:
 
