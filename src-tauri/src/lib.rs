@@ -40,9 +40,13 @@ fn exit_app(app: tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default();
-    // One game at a time: opening a song file while it runs hands the file to the running game
-    // instead of starting another. Not in development builds, so a second dev build can run beside one.
-    if !cfg!(debug_assertions) {
+    // One game at a time: opening a song file or a link (a soundwave:// link, a browser sign-in
+    // coming back, Discord's Join) while it runs hands it to the running game instead of starting
+    // another. A development build can be run beside one on purpose, to play two players on one
+    // computer, with SOUNDWAVE_SECOND_INSTANCE=1.
+    let second = cfg!(debug_assertions)
+        && std::env::var("SOUNDWAVE_SECOND_INSTANCE").is_ok_and(|v| v == "1");
+    if !second {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             song_files::open(
                 app,
