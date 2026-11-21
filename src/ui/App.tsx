@@ -91,7 +91,6 @@ import { SongSheet } from './SongSheet';
 import { MetadataSheet } from './MetadataSheet';
 import { Toasts, useToasts } from './Toasts';
 import { PartyBoard, PartyScreen, type LastRun } from './PartyScreen';
-import { AvatarScreen } from './AvatarScreen';
 import { setMenuAvatars, setMenuRing } from '../render/aurora/menuStage';
 import type { Avatars } from '../render/aurora/AuroraStage';
 import type { RingSeat } from '../render/aurora/ring';
@@ -139,7 +138,6 @@ type View =
   | { name: 'boards'; from?: 'home' }
   | { name: 'admin' }
   /** The player's look on the stage. */
-  | { name: 'avatar' }
   | { name: 'settings'; back: View }
   | EditorView
   | { name: 'play'; run: Run; buffer: AudioBuffer; key: number }
@@ -175,7 +173,6 @@ const DEPTH: Record<View['name'], number> = {
   party: 2,
   boards: 3,
   admin: 3,
-  avatar: 3,
   editor: 2,
   play: 3,
   replay: 3,
@@ -1153,10 +1150,8 @@ export function App() {
       );
   };
   const menuLook = JSON.stringify(avatarsFor(pick.part));
-  // The menu's band is dressed the same way; the look editor dresses it itself while it is open.
-  useEffect(() => {
-    if (view.name !== 'avatar') setMenuAvatars(JSON.parse(menuLook) as Avatars);
-  }, [menuLook, view.name]);
+  // The menu's band is dressed the same way.
+  useEffect(() => setMenuAvatars(JSON.parse(menuLook) as Avatars), [menuLook]);
   // A Showdown's lobby, and the time between its songs, stand the players still in on the ring behind the screen.
   const lobbyParty = view.name === 'party' && onlineState.party?.mode === 'showdown' ? onlineState.party : null;
   const lobbyRing = JSON.stringify(
@@ -1470,8 +1465,6 @@ export function App() {
         return showScene({ details: 'Looking at the leaderboards' });
       case 'admin':
         return showScene({ details: 'Running a server' });
-      case 'avatar':
-        return showScene({ details: 'Choosing a look' });
       case 'editor':
         return showScene({ details: named(view.song), state: 'Editing the chart' });
       case 'play': {
@@ -1682,8 +1675,6 @@ export function App() {
           onSettings={(patch) => updateSettings({ ...settings, ...patch })}
         />
       );
-    } else if (view.name === 'avatar') {
-      screen = <AvatarScreen part={pick.part} settings={settings} onBack={goOnline} />;
     } else if (view.name === 'admin') {
       screen = <AdminScreen setlist={setSongs_} library={songs} settings={settings} onBack={goOnline} />;
     } else if (view.name === 'boards') {
@@ -1741,7 +1732,6 @@ export function App() {
             onParty: () => setView({ name: 'party' }),
             onBoards: () => setView({ name: 'boards' }),
             onAdmin: () => setView({ name: 'admin' }),
-            onAvatar: () => setView({ name: 'avatar' }),
             part: pick.part,
           }}
           inParty={!!onlineState.party}

@@ -10624,3 +10624,162 @@ a.btn {
     animation: none;
   }
 }
+
+/* Your look, edited in place on the Online tab: the editor takes the tiles' place and the character
+   beside it wears each choice at once. */
+.online-bento[hidden] {
+  display: none;
+}
+.look-editor {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.9rem, 2vh, 1.4rem);
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: clamp(1rem, 1.8vw, 1.6rem);
+  border-radius: var(--r-l);
+  background: var(--panel);
+  animation: rise-in 0.3s var(--ease) backwards;
+}
+.look-head .display {
+  font-size: clamp(1.6rem, 2.4vw, 2.3rem);
+}
+.look-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+.look-group > .label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.look-parts {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.look-parts .choice {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+}
+.look-parts .choice svg {
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+}
+/* What to colour: three cards, each with the colour it has now. */
+.look-slots {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+.look-slot {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: calc(var(--target) + 0.8rem);
+  padding: 0.5rem 0.8rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+  box-shadow: inset 0 0 0 1.5px transparent;
+  transition:
+    background 0.15s,
+    box-shadow 0.15s;
+}
+.look-slot:hover {
+  background: rgb(255 255 255 / 0.08);
+}
+.look-slot.on {
+  background: rgb(255 77 157 / 0.14);
+  box-shadow: inset 0 0 0 2px var(--pink);
+}
+.look-chip {
+  flex: none;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 50%;
+  background: var(--swatch);
+  box-shadow: inset 0 0 0 2px rgb(255 255 255 / 0.2);
+}
+/* The band member's own look: no colour of the player's. */
+.look-chip.own {
+  background: repeating-linear-gradient(135deg, rgb(255 255 255 / 0.18) 0 4px, transparent 4px 8px);
+}
+.look-slot-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.look-slot-label {
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.look-slot-value {
+  color: var(--ink-2);
+  font-size: 0.88rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.look-what {
+  margin: 0.1rem 0 0;
+}
+.look-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(2.6rem, 3.3rem));
+  gap: 0.6rem;
+}
+.look-swatches .avatar-swatch {
+  width: auto;
+  height: auto;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  color: #fff;
+}
+/* The tick shows on every colour, light or dark. */
+.look-swatches .avatar-swatch svg {
+  width: 45%;
+  height: 45%;
+  filter: drop-shadow(0 0 1.5px rgb(0 0 0 / 0.9)) drop-shadow(0 0 3px rgb(0 0 0 / 0.5));
+}
+.look-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: auto;
+}
+.look-note {
+  color: var(--ink);
+  font-weight: 700;
+}
+/* A narrow window shows the character while the look is edited, above the editor. */
+@media (max-width: 1000px) {
+  .online-panel.editing .online-me {
+    min-height: min(22rem, 42vh);
+  }
+  .online-panel.editing .online-me .nametag {
+    position: absolute;
+    top: 0.5rem;
+    left: 50%;
+    translate: -50% 0;
+  }
+  .online-panel.editing .online-me :is(.avatar-portrait, .lobby-light, .lobby-shadow) {
+    display: block;
+  }
+  .online-panel.editing .online-me .avatar-portrait {
+    inset: 3.5rem auto 0 50%;
+    height: calc(100% - 3.5rem);
+  }
+  .look-slots {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

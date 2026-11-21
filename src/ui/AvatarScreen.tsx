@@ -1,20 +1,21 @@
 /**
- * The player's look on the stage (docs/specs/online-play.md, 4.2): at the part they play stands
- * that part's band member, in their colours. Each choice shows at once on the stage behind the
- * screen; Keep stores it on the server, where their party sees it too.
+ * The player's look (docs/specs/online-play.md, 4.2), edited in place on the Online tab: the tab's
+ * tiles give way to this editor while the character under the nametag wears every choice at once.
+ * At every part stands that part's band member; the player chooses what they wear and the finish of
+ * their instrument, tries it on at each part, and saves it to the server, where their party sees it.
  */
-import { ArrowLeft, Check, RotateCcw } from 'lucide-react';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { Check, Dices, Palette, RotateCcw, Undo2, X } from 'lucide-react';
+import { useState, useSyncExternalStore } from 'react';
 import { PARTS, type Part } from '../chart/types';
 import type { Settings } from '../game/settings';
 import { keysOf } from '../input/bindings';
 import { online } from '../net/client';
 import type { Avatar } from '../net/protocol';
-import { setMenuAvatars, setMenuLook } from '../render/aurora/menuStage';
 import { Hint, useActions, useHints } from './actions';
+import { Dialog } from './Dialog';
 import { ICON_STROKE, PART_ICON, PART_LABEL } from './icons';
 
-/** The colours to choose from, by name (for screen readers and the label under the row). */
+/** The colours to choose from, by name (for screen readers and the name under each choice). */
 const PALETTE: [string, string][] = [
   ['#f4f1ff', 'White'],
   ['#1b1530', 'Black'],
@@ -27,119 +28,228 @@ const PALETTE: [string, string][] = [
   ['#2a8cff', 'Blue'],
   ['#6b5bd6', 'Violet'],
 ];
+/** What a first choice starts the other two from. */
 const START: Avatar = { top: '#ff4f9a', bottom: '#1b1530', finish: '#5df2d6' };
-const SLOTS: [keyof Avatar, string][] = [
-  ['top', 'Top'],
-  ['bottom', 'Trousers and skirt'],
-  ['finish', 'Instrument finish'],
+type Slot = keyof Avatar;
+const SLOTS: { id: Slot; label: string; what: string }[] = [
+  { id: 'top', label: 'Top', what: 'Shirt, jacket or dress' },
+  { id: 'bottom', label: 'Bottom', what: 'Trousers or skirt' },
+  { id: 'finish', label: 'Instrument', what: 'The finish of their instrument' },
 ];
+const nameOf = (color: string | undefined) => PALETTE.find(([c]) => c === color)?.[1] ?? 'Their own';
+const same = (a: Avatar | null, b: Avatar | null) => JSON.stringify(a) === JSON.stringify(b);
 
-export function AvatarScreen({ part, settings, onBack }: { part: Part; settings: Settings; onBack(): void }) {
+export interface LookPreview {
+  part: Part;
+  look: Avatar | null;
+}
+
+/**
+ * The look editor. `onPreview` gets each change (the character beside it wears it); `onClose` ends
+ * the editing, after asking about changes not saved.
+ */
+export function LookEditor({
+  part,
+  settings,
+  onPreview,
+  onClose,
+}: {
+  part: Part;
+  settings: Settings;
+  onPreview(p: LookPreview): void;
+  onClose(): void;
+}) {
   const s = useSyncExternalStore(online.subscribe, online.snapshot);
   const hints = useHints(settings);
-  const [look, setLook] = useState<Avatar>(() => s.avatar ?? START);
+  const saved = s.avatar;
+  // null: the band member's own look (nothing chosen).
+  const [look, setLookState] = useState<Avatar | null>(saved);
+  const [shown, setShownState] = useState(part);
+  const [slot, setSlot] = useState<Slot>('top');
   const [note, setNote] = useState<string | null>(null);
-  // Which part's band member shows the look: the player's own part to begin with.
-  const [shown, setShown] = useState(part);
-  const nextPart = () => setShown(PARTS[(PARTS.indexOf(shown) + 1) % PARTS.length]);
+  const [busy, setBusy] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const dirty = !same(look, saved);
 
-  // The stage behind shows the look as it is chosen, at the player's part.
-  useEffect(() => setMenuAvatars({ [shown]: look }), [shown, look]);
-  // …with the camera on them, until the screen is left.
-  useEffect(() => {
-    setMenuLook(shown);
-    return () => setMenuLook(null);
-  }, [shown]);
+  const setLook = (l: Avatar | null) => {
+    setLookState(l);
+    setNote(null);
+    onPreview({ part: shown, look: l });
+  };
+  const setShown = (p: Part) => {
+    setShownState(p);
+    onPreview({ part: p, look });
+  };
+  const pick = (color: string) => setLook({ ...(look ?? START), [slot]: color });
+  const step = <T,>(list: T[], at: T, by: number) => list[(list.indexOf(at) + by + list.length) % list.length];
+  const nextSlot = () =>
+    setSlot(
+      step(
+        SLOTS,
+        SLOTS.find((x) => x.id === slot)!,
+        1,
+      ).id,
+    );
+  const surprise = () => {
+    const any = () => PALETTE[Math.floor(Math.random() * PALETTE.length)][0];
+    setLook({ top: any(), bottom: any(), finish: any() });
+  };
 
-  const keep = () =>
-    void online.saveAvatar(look).then(
-      () => setNote('Kept. Your party sees it at your part.'),
-      (e: Error) => setNote(e.message),
-    );
-  const reset = () =>
-    void online.saveAvatar(null).then(
-      () => (setLook(START), setNote('The band member plays in their own look again.')),
-      (e: Error) => setNote(e.message),
-    );
+  const save = async () => {
+    setBusy(true);
+    try {
+      await online.saveAvatar(look);
+      setNote(look ? 'Saved. Your party sees it at your part.' : 'Saved. Your band member plays in their own look.');
+      return true;
+    } catch (e) {
+      setNote((e as Error).message);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const leave = () => (dirty ? setAsking(true) : onClose());
 
   useActions([
-    { id: 'back', label: 'Back', icon: ArrowLeft, kbd: 'Escape', sfx: 'back', run: onBack },
-    { id: 'avatar-part', label: 'Show at the next part', icon: PART_ICON[shown], ...keysOf('party.part'), bar: false, run: nextPart },
-    { id: 'avatar-reset', label: 'Their own look', icon: RotateCcw, ...keysOf('party.avatarReset'), bar: false, run: reset },
-    { id: 'avatar-keep', label: 'Keep this look', icon: Check, ...keysOf('party.avatarSave'), bar: false, run: keep },
+    { id: 'back', label: dirty ? 'Done' : 'Back', icon: X, kbd: 'Escape', sfx: 'back', run: leave },
+    { id: 'look-save', label: 'Save', icon: Check, ...keysOf('look.save'), bar: false, run: () => void save() },
+    {
+      id: 'look-part',
+      label: 'Try it on at the next part',
+      icon: PART_ICON[shown],
+      ...keysOf('look.part'),
+      bar: false,
+      run: () => setShown(step(PARTS, shown, 1)),
+    },
+    { id: 'look-slot', label: 'Colour the next thing', icon: Palette, ...keysOf('look.slot'), bar: false, run: nextSlot },
+    { id: 'look-random', label: 'Surprise me', icon: Dices, ...keysOf('look.random'), bar: false, run: surprise },
+    { id: 'look-undo', label: 'Undo changes', icon: Undo2, ...keysOf('look.undo'), bar: false, run: () => setLook(saved) },
   ]);
 
+  const current = SLOTS.find((x) => x.id === slot)!;
+  const noFinish = slot === 'finish' && shown === 'vocals';
   return (
-    <div className="page avatar">
-      <header className="page-head">
-        <h1 className="page-title">Your look</h1>
-        <p className="head-count">Your look goes wherever you play{s.info ? `, on ${s.info.name}` : ''}</p>
+    <section className="look-editor" aria-label="Your look">
+      <header className="look-head">
+        <h2 className="display">Your look</h2>
+        <p className="hint">Dress your band member. Everyone sees it wherever you play{s.info ? `, on ${s.info.name}` : ''}.</p>
       </header>
-      <div className="avatar-body">
-        <section className="ready-panel" aria-label="Your colours">
-          <h2 className="label">Shown at</h2>
-          <div className="part-row" role="radiogroup" aria-label="Shown at">
-            {PARTS.map((p) => {
-              const Icon = PART_ICON[p];
-              return (
-                <button
-                  key={p}
-                  type="button"
-                  role="radio"
-                  aria-checked={shown === p}
-                  className={`choice part ${shown === p ? 'on' : ''}`}
-                  onClick={() => setShown(p)}
-                >
-                  <Icon strokeWidth={ICON_STROKE} aria-hidden />
-                  <span>{PART_LABEL[p]}</span>
-                </button>
-              );
-            })}
-          </div>
-          {SLOTS.map(([slot, label]) => (
-            <div key={slot} className="avatar-slot">
-              <h2 className="label">
-                {label} · {PALETTE.find(([c]) => c === look[slot])?.[1] ?? 'Own'}
-              </h2>
-              <div className="avatar-swatches" role="radiogroup" aria-label={label}>
-                {PALETTE.map(([color, name]) => (
-                  <button
-                    key={color}
-                    type="button"
-                    role="radio"
-                    aria-checked={look[slot] === color}
-                    aria-label={name}
-                    className={`avatar-swatch ${look[slot] === color ? 'on' : ''}`}
-                    style={{ ['--swatch' as string]: color }}
-                    onClick={() => setLook({ ...look, [slot]: color })}
-                  />
-                ))}
-              </div>
-            </div>
-          ))}
-          <p className="hint">
-            At every part stands that part’s band member: you choose what they wear and the finish of their instrument
-            {shown === 'vocals' ? ' (a microphone has none to show).' : '.'}
-          </p>
-          {note && (
-            <p className="hint" role="status">
-              {note}
-            </p>
-          )}
-          <div className="party-row">
-            <button type="button" className="btn primary" data-action="avatar-keep" onClick={keep}>
-              <Hint {...keysOf('party.avatarSave')} {...hints} />
-              <Check strokeWidth={ICON_STROKE} aria-hidden />
-              Keep this look
-            </button>
-            <button type="button" className="btn" data-action="avatar-reset" onClick={reset}>
-              <Hint {...keysOf('party.avatarReset')} {...hints} />
-              <RotateCcw strokeWidth={ICON_STROKE} aria-hidden />
-              Their own look
-            </button>
-          </div>
-        </section>
+
+      <div className="look-group">
+        <span className="label">
+          Try it on
+          <Hint {...keysOf('look.part')} {...hints} />
+        </span>
+        <div className="choice-pair look-parts" role="radiogroup" aria-label="Try it on at">
+          {PARTS.map((p) => {
+            const Icon = PART_ICON[p];
+            return (
+              <button
+                key={p}
+                type="button"
+                role="radio"
+                aria-checked={shown === p}
+                className={`choice ${shown === p ? 'on' : ''}`}
+                onClick={() => setShown(p)}
+              >
+                <Icon strokeWidth={ICON_STROKE} aria-hidden />
+                {PART_LABEL[p]}
+              </button>
+            );
+          })}
+        </div>
       </div>
-    </div>
+
+      <div className="look-group">
+        <span className="label">
+          Colour
+          <Hint {...keysOf('look.slot')} {...hints} />
+        </span>
+        <div className="look-slots" role="tablist" aria-label="What to colour">
+          {SLOTS.map((x) => (
+            <button
+              key={x.id}
+              type="button"
+              role="tab"
+              aria-selected={slot === x.id}
+              className={`look-slot ${slot === x.id ? 'on' : ''}`}
+              data-autofocus={x.id === 'top' ? '' : undefined}
+              onClick={() => setSlot(x.id)}
+            >
+              <span className={`look-chip ${look ? '' : 'own'}`} style={{ ['--swatch' as string]: look?.[x.id] }} aria-hidden />
+              <span className="look-slot-text">
+                <span className="look-slot-label">{x.label}</span>
+                <span className="look-slot-value">{look ? nameOf(look[x.id]) : 'Their own'}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+        <p className="hint look-what">{noFinish ? 'A microphone has no finish to show: try it on at another part.' : current.what}</p>
+        <div className="look-swatches" role="radiogroup" aria-label={current.label}>
+          {PALETTE.map(([color, name]) => (
+            <button
+              key={color}
+              type="button"
+              role="radio"
+              aria-checked={look?.[slot] === color}
+              aria-label={name}
+              title={name}
+              className={`avatar-swatch ${look?.[slot] === color ? 'on' : ''}`}
+              style={{ ['--swatch' as string]: color }}
+              onClick={() => pick(color)}
+            >
+              {look?.[slot] === color && <Check strokeWidth={3} aria-hidden />}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="look-actions">
+        <button type="button" className="btn primary" data-action="look-save" disabled={!dirty || busy} onClick={() => void save()}>
+          <Check strokeWidth={ICON_STROKE} aria-hidden />
+          {dirty ? 'Save' : 'Saved'}
+          <Hint {...keysOf('look.save')} {...hints} />
+        </button>
+        <button type="button" className="btn" data-action="look-random" onClick={surprise}>
+          <Dices strokeWidth={ICON_STROKE} aria-hidden />
+          Surprise me
+          <Hint {...keysOf('look.random')} {...hints} />
+        </button>
+        <button type="button" className="btn" data-action="look-undo" disabled={!dirty} onClick={() => setLook(saved)}>
+          <Undo2 strokeWidth={ICON_STROKE} aria-hidden />
+          Undo changes
+          <Hint {...keysOf('look.undo')} {...hints} />
+        </button>
+        <button type="button" className="btn quiet" disabled={!look} onClick={() => setLook(null)}>
+          <RotateCcw strokeWidth={ICON_STROKE} aria-hidden />
+          Their own look
+        </button>
+      </div>
+      {note && (
+        <p className="hint look-note" role="status">
+          {note}
+        </p>
+      )}
+
+      {asking && (
+        <Dialog title="Save your look" variant="card" closeLabel="Keep editing" onClose={() => setAsking(false)}>
+          {(close) => (
+            <div className="pause-card">
+              <h2 className="display">Save your look?</h2>
+              <p className="hint">You changed it and have not saved it yet.</p>
+              <button type="button" className="btn primary wide" data-autofocus onClick={() => void save().then((ok) => ok && onClose())}>
+                Save
+              </button>
+              <button type="button" className="btn wide" data-sfx="back" onClick={onClose}>
+                Leave it as it was
+              </button>
+              <button type="button" className="btn wide quiet" onClick={close}>
+                Keep editing
+              </button>
+            </div>
+          )}
+        </Dialog>
+      )}
+    </section>
   );
 }

@@ -26,6 +26,7 @@ import { PARTY_MAX, type Role } from '../net/protocol';
 import { Hint, useActions, useHints, type Action } from './actions';
 import type { Part } from '../chart/types';
 import { AvatarPortrait } from './AvatarPortrait';
+import { LookEditor, type LookPreview } from './AvatarScreen';
 import { Dialog } from './Dialog';
 import { ICON_STROKE } from './icons';
 import { OnlineSidebar } from './OnlineSidebar';
@@ -44,7 +45,6 @@ export interface OnlinePanelProps {
   onAdmin(): void;
   /** The part the player plays: their band member stands under the nametag. */
   part: Part;
-  onAvatar(): void;
   /** The main menu's own actions (settings, exit…), kept while this tab declares its own. */
   base: Action[];
 }
@@ -101,12 +101,15 @@ function SignedOut({ settings, onParty, base }: OnlinePanelProps) {
 }
 
 /** Signed in: the party, the server's boards and songs, who is online, and the account. */
-function SignedIn({ settings, onParty, onBoards, onAdmin, onAvatar, base, part }: OnlinePanelProps) {
+function SignedIn({ settings, onParty, onBoards, onAdmin, base, part }: OnlinePanelProps) {
   const s = useSyncExternalStore(online.subscribe, online.snapshot);
   const hints = useHints(settings);
   /** The window open over the tab: the account, an invite, or the server's tools. */
   const [modal, setModal] = useState<'account' | 'forget' | 'invite' | null>(null);
   const [deleting, setDeleting] = useState(false);
+  /** Editing the look in place (the tiles give way to the editor): what the character wears meanwhile. */
+  const [look, setLook] = useState<LookPreview | null>(null);
+  const onAvatar = () => setLook({ part, look: s.avatar });
   const mod = s.account!.role !== 'player';
   const party = s.party;
   const [code, setCode] = useState('');
@@ -141,30 +144,40 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, onAvatar, base, part }
     if (s.error) asked.current = false;
   }, [s.error]);
 
-  useActions([
-    ...base,
-    {
-      id: 'party-create',
-      label: party ? 'Your party' : 'Start a party',
-      icon: PartyPopper,
-      ...keysOf('party.create'),
-      bar: false,
-      run: start,
-    },
-    {
-      id: 'party-join',
-      label: 'Join a party',
-      icon: UserPlus,
-      ...keysOf('party.join'),
-      bar: false,
-      run: () => (code.trim() ? join() : codeInput.current?.focus()),
-    },
-    { id: 'party-account', label: 'Your account', icon: UserRound, ...keysOf('party.signOut'), bar: false, run: () => setModal('account') },
-    { id: 'party-invite', label: 'Invite', icon: Send, ...keysOf('party.invite'), run: () => setModal('invite') },
-    { id: 'party-boards', label: 'Leaderboards', icon: Trophy, ...keysOf('party.boards'), bar: false, run: onBoards },
-    { id: 'party-avatar', label: 'Your look', icon: Shirt, ...keysOf('party.avatar'), bar: false, run: onAvatar },
-    ...(mod ? [{ id: 'party-admin', label: 'Admin', icon: Gavel, ...keysOf('party.admin'), run: onAdmin }] : []),
-  ]);
+  useActions(
+    [
+      ...base,
+      {
+        id: 'party-create',
+        label: party ? 'Your party' : 'Start a party',
+        icon: PartyPopper,
+        ...keysOf('party.create'),
+        bar: false,
+        run: start,
+      },
+      {
+        id: 'party-join',
+        label: 'Join a party',
+        icon: UserPlus,
+        ...keysOf('party.join'),
+        bar: false,
+        run: () => (code.trim() ? join() : codeInput.current?.focus()),
+      },
+      {
+        id: 'party-account',
+        label: 'Your account',
+        icon: UserRound,
+        ...keysOf('party.signOut'),
+        bar: false,
+        run: () => setModal('account'),
+      },
+      { id: 'party-invite', label: 'Invite', icon: Send, ...keysOf('party.invite'), run: () => setModal('invite') },
+      { id: 'party-boards', label: 'Leaderboards', icon: Trophy, ...keysOf('party.boards'), bar: false, run: onBoards },
+      { id: 'party-avatar', label: 'Your look', icon: Shirt, ...keysOf('party.avatar'), bar: false, run: onAvatar },
+      ...(mod ? [{ id: 'party-admin', label: 'Admin', icon: Gavel, ...keysOf('party.admin'), run: onAdmin }] : []),
+    ],
+    { passive: !!look },
+  );
 
   const more: [string, string, LucideIcon, string, string, () => void][] = [
     ['party-boards', 'party.boards', Trophy, 'Leaderboards', 'The best runs of every song here.', onBoards],
@@ -173,7 +186,7 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, onAvatar, base, part }
   const players = party ? party.members.length : 0;
 
   return (
-    <div className="online-panel">
+    <div className={`online-panel ${look ? 'editing' : ''}`}>
       {s.error && (
         <p className="party-error" role="alert">
           {s.error}
@@ -183,8 +196,10 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, onAvatar, base, part }
         </p>
       )}
       <div className="online-stage">
-        {/* Left: the bento, playing together and the server's boards, with the week's best under it. */}
-        <div className="online-bento">
+        {/* Left: the bento, playing together and the server's boards, with the week's best under it;
+            or, while the look is edited, the editor. */}
+        {look && <LookEditor part={part} settings={settings} onPreview={setLook} onClose={() => setLook(null)} />}
+        <div className="online-bento" hidden={!!look}>
           <div className="tiles party-tiles" data-nav-group="tiles">
             <button
               type="button"
@@ -287,7 +302,7 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, onAvatar, base, part }
               shadow on the floor, and their nametag floating over their head. */}
           <span className="lobby-light" aria-hidden />
           <span className="lobby-shadow" aria-hidden />
-          <AvatarPortrait part={part} avatar={s.avatar} />
+          <AvatarPortrait part={look?.part ?? part} avatar={look ? look.look : s.avatar} />
           <button type="button" className="nametag" data-action="party-account" onClick={() => setModal('account')}>
             <span className="nametag-name">
               <span className={`online-dot ${s.status === 'online' ? 'on' : ''}`} aria-hidden />

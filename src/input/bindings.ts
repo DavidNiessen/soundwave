@@ -14,7 +14,7 @@ import type { PadInput } from './pads';
 
 /** Where a shortcut works. */
 export type Area =
-  'menus' | 'home' | 'library' | 'lobby' | 'results' | 'party' | 'boards' | 'admin' | 'settings' | 'song' | 'replay' | 'editor';
+  'menus' | 'home' | 'library' | 'lobby' | 'results' | 'party' | 'boards' | 'admin' | 'look' | 'settings' | 'song' | 'replay' | 'editor';
 
 export const AREAS: { id: Area; label: string }[] = [
   { id: 'menus', label: 'Every menu' },
@@ -25,6 +25,7 @@ export const AREAS: { id: Area; label: string }[] = [
   { id: 'party', label: 'Playing together' },
   { id: 'boards', label: 'Leaderboards' },
   { id: 'admin', label: 'Running a server' },
+  { id: 'look', label: 'Your look' },
   { id: 'settings', label: 'Settings' },
   { id: 'song', label: 'Playing a song' },
   { id: 'replay', label: 'Watching a replay' },
@@ -125,8 +126,6 @@ export const COMMANDS: Command[] = [
     { id: 'party.cheer', label: 'Cheer the players on', key: 'KeyY' },
     { id: 'party.private', label: 'Private party, or open to friends on Discord', key: 'KeyT' },
     { id: 'party.avatar', label: 'Your look on the stage', key: 'KeyV' },
-    { id: 'party.avatarSave', label: 'Keep this look', key: 'KeyK' },
-    { id: 'party.avatarReset', label: 'Use the band member’s own look', key: 'KeyZ' },
   ]),
   // The parts are the tab buttons (Q and E, the shoulder buttons), as the tabs of any menu.
   ...cmd('boards', [
@@ -135,6 +134,14 @@ export const COMMANDS: Command[] = [
     { id: 'boards.difficulty', label: 'Next difficulty', key: 'KeyF', pad: 'b2' },
     { id: 'boards.week', label: 'This week, or all time', key: 'KeyW', pad: 'b3' },
     { id: 'boards.replays', label: 'Song boards, or shared replays', key: 'KeyR', pad: 'b8' },
+  ]),
+  // Your look, edited on the Online tab.
+  ...cmd('look', [
+    { id: 'look.part', label: 'Try it on at the next part', key: 'KeyP', pad: 'b3' },
+    { id: 'look.slot', label: 'Colour the next thing (top, bottom, instrument)', key: 'KeyF', pad: 'b2' },
+    { id: 'look.random', label: 'Surprise me (random colours)', key: 'KeyX', pad: 'b8' },
+    { id: 'look.undo', label: 'Undo changes', key: 'KeyZ' },
+    { id: 'look.save', label: 'Save your look', key: 'KeyK', pad: 'b9' },
   ]),
   // The admin page's sections, by number, as its tiles stand.
   ...cmd('admin', [
