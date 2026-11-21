@@ -288,7 +288,7 @@ fn listen(app: AppHandle, id: String, pending: Arc<Mutex<Option<String>>>) {
                 log::info!("discord: listening for friends joining");
                 while let Ok((_, message)) = client.recv() {
                     if let Some(secret) = join_secret(&message) {
-                        log::info!("discord: a friend joins");
+                        log::info!("discord: joining a party from Discord");
                         *pending.lock().unwrap() = Some(secret);
                         let _ = app.emit("discord-join", ());
                     } else if let Some(request) = join_request(&message) {
