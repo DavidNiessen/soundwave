@@ -34,6 +34,7 @@ import {
   LockOpen,
   LogIn,
   LogOut,
+  MessageCircle,
   Megaphone,
   RefreshCw,
   SkipForward,
@@ -623,9 +624,26 @@ function usePartySounds(party: PartyState, me: string) {
   }, [party, me]);
 }
 
-/** The party's code, to invite friends with, and the switch that keeps it off Discord. */
-function PartyCode({ party, host, settings, hints }: { party: PartyState; host: boolean; settings: Settings; hints: Hints }) {
+/**
+ * The party's code, to invite friends with; the host's switch that keeps it off Discord; and, in the
+ * desktop app, each player's own switch for showing it on their Discord status (which Discord's
+ * Join, Ask to Join and chat invites need).
+ */
+function PartyCode({
+  party,
+  host,
+  settings,
+  hints,
+  onDiscord,
+}: {
+  party: PartyState;
+  host: boolean;
+  settings: Settings;
+  hints: Hints;
+  onDiscord(): void;
+}) {
   const toggle = () => online.setPrivate(!party.private);
+  const desktop = '__TAURI_INTERNALS__' in window;
   return (
     <section className="party-code" aria-label="Party code">
       <span className="label">Party code</span>
@@ -639,6 +657,17 @@ function PartyCode({ party, host, settings, hints }: { party: PartyState; host: 
           <Hint {...keysOf('party.private')} {...hints} />
           {party.private ? <Lock strokeWidth={ICON_STROKE} aria-hidden /> : <LockOpen strokeWidth={ICON_STROKE} aria-hidden />}
           {party.private ? 'Private' : 'Open to friends'}
+        </button>
+      )}
+      {desktop && !party.private && (
+        <button
+          type="button"
+          className={`btn small party-discord ${settings.discordJoin ? 'is-on' : ''}`}
+          aria-pressed={settings.discordJoin}
+          onClick={onDiscord}
+        >
+          <MessageCircle strokeWidth={ICON_STROKE} aria-hidden />
+          {settings.discordJoin ? 'On Discord: friends can join' : 'Let Discord friends join'}
         </button>
       )}
     </section>
@@ -805,7 +834,7 @@ const leaveAction = (host: boolean): Action[] =>
 
 /* The room: just the players, and the host picks a mode ------------------------------------ */
 
-function PartyRoom({ party, s, settings, onBack, me }: PartyProps & { me: Member }) {
+function PartyRoom({ party, s, settings, onBack, onSettings, me }: PartyProps & { me: Member }) {
   const hints = useHints(settings);
   const host = party.host === s.account!.id;
   const hostName = party.members.find((m) => m.id === party.host)?.name ?? 'The host';
@@ -894,7 +923,13 @@ function PartyRoom({ party, s, settings, onBack, me }: PartyProps & { me: Member
       </div>
 
       <section className="ready-panel" data-nav-group="ready" aria-label="The party">
-        <PartyCode party={party} host={host} settings={settings} hints={hints} />
+        <PartyCode
+          party={party}
+          host={host}
+          settings={settings}
+          hints={hints}
+          onDiscord={() => onSettings({ discordJoin: !settings.discordJoin })}
+        />
         <Players party={party} me={me} host={host} showReady={false} />
         <LeaveButton host={host} hints={hints} />
       </section>
