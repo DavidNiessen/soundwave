@@ -169,10 +169,17 @@ export function drawVideoHud(ctx: CanvasRenderingContext2D, width: number, heigh
   const [first, ...rest] = f.scoreLabel.toUpperCase().split(' ');
   ctx.fillText(first, left + 18 * u, scoreY + 32 * u);
   ctx.fillText(rest.join(' '), left + 18 * u, scoreY + 50 * u);
+  // A long score is set smaller, so it stays inside the panel beside its label.
+  const label = Math.max(ctx.measureText(first).width, ctx.measureText(rest.join(' ')).width);
+  const room = boxW - 18 * u - label - 14 * u - 22 * u;
+  const text = Math.round(f.score).toLocaleString();
   font(ctx, 46 * u, 900);
+  const size = Math.min(46 * u, (46 * u * room) / Math.max(1, ctx.measureText(text).width));
+  font(ctx, size, 900);
   ctx.fillStyle = '#f6f3ff';
   ctx.textAlign = 'right';
-  ctx.fillText(Math.round(f.score).toLocaleString(), left + boxW - 18 * u, scoreY + scoreH / 2 + 16 * u);
+  // Short of the panel's edge by the italic's lean.
+  ctx.fillText(text, left + boxW - 22 * u, scoreY + scoreH / 2 + 16 * u - (46 * u - size) * 0.35);
   ctx.textAlign = 'left';
 
   if (f.deck) {

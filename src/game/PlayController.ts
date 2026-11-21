@@ -127,7 +127,19 @@ export class PlayController {
   private lastBeat = -1;
   /** When the latest beat landed (performance.now ms), for the highway's swell of light. */
   private beatAt = -Infinity;
-  private hudCache = { score: -1, mult: -1, streak: -1, od: -1, stars: -1, starP: -1, odActive: false, breakSec: -1, songP: -1, left: -1 };
+  private hudCache = {
+    score: -1,
+    mult: -1,
+    streak: -1,
+    od: -1,
+    stars: -1,
+    starP: -1,
+    odActive: false,
+    breakSec: -1,
+    songP: -1,
+    left: -1,
+    scoreLen: -1,
+  };
   private readonly breaks: Break[];
   /** A beat fell in the frame being drawn, and how much bass there is right now (0..1). */
   private readonly barTimes: number[];
@@ -369,7 +381,24 @@ export class PlayController {
   private readonly resize = () => {
     this.highway.resize();
     this.placeKeys();
+    this.fitScore();
   };
+
+  /**
+   * Sets the score smaller when it would not fit beside its label in the panel (a long score, a
+   * small window): measured when it gains a digit and when the window changes size.
+   */
+  private fitScore() {
+    const el = this.hud.score;
+    const panel = el.parentElement;
+    const label = panel?.querySelector('.hud-part');
+    if (!panel || !label) return;
+    el.style.removeProperty('--fit');
+    const edge = panel.getBoundingClientRect().right - parseFloat(getComputedStyle(panel).paddingRight);
+    const room = edge - label.getBoundingClientRect().right - parseFloat(getComputedStyle(panel).columnGap || '0');
+    const width = el.getBoundingClientRect().width;
+    if (room > 0 && width > room) el.style.setProperty('--fit', (room / width).toFixed(3));
+  }
 
   private readonly overdrivePress = (e: Event) => {
     e.preventDefault();
@@ -867,7 +896,14 @@ export class PlayController {
     const s = this.session;
     const c = this.hudCache;
     const score = Math.round(s.score);
-    if (score !== c.score) this.hud.score.textContent = score.toLocaleString();
+    if (score !== c.score) {
+      const text = score.toLocaleString();
+      this.hud.score.textContent = text;
+      if (text.length !== c.scoreLen) {
+        c.scoreLen = text.length;
+        this.fitScore();
+      }
+    }
     const mult = s.multiplier;
     if (mult !== c.mult) {
       this.hud.multiplier.textContent = `×${mult}`;

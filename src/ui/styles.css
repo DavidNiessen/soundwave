@@ -3875,8 +3875,12 @@ input.text {
   margin-left: auto;
 }
 .hud-score {
-  font-size: clamp(26px, 2.3vw, 54px);
+  /* A score too long to fit beside its label is set smaller (--fit, see PlayController.fitScore),
+     with room on the right for the italic's lean. */
+  font-size: calc(clamp(26px, 2.3vw, 54px) * var(--fit, 1));
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding-inline-end: 0.08em;
 }
 
 /* Overdrive: its name and key beside the dial; pressing it starts overdrive. */
