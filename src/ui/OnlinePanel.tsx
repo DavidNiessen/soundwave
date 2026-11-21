@@ -5,6 +5,11 @@
  * songs) and signing in are on the Play together screen, which this opens.
  */
 import {
+  ExternalLink,
+  LoaderCircle,
+  Music,
+  Server as ServerIcon,
+  Swords,
   Download,
   Gavel,
   LogIn,
@@ -15,13 +20,13 @@ import {
   Trophy,
   UserPlus,
   UserRound,
-  Users,
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { Settings } from '../game/settings';
 import { keysOf } from '../input/bindings';
-import { online } from '../net/client';
+import { online, parseInvite } from '../net/client';
+import { REPOSITORY_URL } from '../app/release';
 import { PARTY_MAX, type Role } from '../net/protocol';
 import { Hint, useActions, useHints, type Action } from './actions';
 import type { Part } from '../chart/types';
@@ -56,45 +61,172 @@ export function OnlinePanel(props: OnlinePanelProps) {
   return s.account ? <SignedIn {...props} /> : <SignedOut {...props} />;
 }
 
-/** Not signed in: what playing online gives, and the way to a server. */
+/** Where to read how to run a server of one's own. */
+const SERVER_GUIDE_URL = `${REPOSITORY_URL}/tree/main/server#readme`;
+
+/** Opens a web page in the player's browser (the desktop app's window never leaves the game). */
+function openExternal(url: string) {
+  if ('__TAURI_INTERNALS__' in window)
+    void import('@tauri-apps/api/core').then(({ invoke }) => invoke('open_in_browser', { url })).catch(() => {});
+  else window.open(url, '_blank', 'noopener');
+}
+
+const FEATURES: { icon: LucideIcon; title: string; text: string }[] = [
+  { icon: PartyPopper, title: 'Parties', text: `Up to ${PARTY_MAX} friends play the same set at the same moment, each on their own part.` },
+  { icon: Swords, title: 'Showdown', text: 'Strike the players above you, survive the cuts, and be the last one standing.' },
+  { icon: Trophy, title: 'Leaderboards', text: 'Every song’s best runs on the server, checked from each run. Watch any of them.' },
+  { icon: Music, title: 'Shared songs', text: 'The server’s library plays for everyone, and a party’s songs reach whoever lacks them.' },
+];
+
+/**
+ * Signed out: the Online tab as a page of its own. The way in first (a server's address or an
+ * invite link, typed right here, or the server the player was on), what playing online brings
+ * beside it, and how to run a server of one's own.
+ */
 function SignedOut({ settings, onParty, base }: OnlinePanelProps) {
   const s = useSyncExternalStore(online.subscribe, online.snapshot);
   const hints = useHints(settings);
-  useActions([...base, { id: 'online-connect', label: 'Connect', icon: LogIn, ...keysOf('party.create'), bar: false, run: onParty }]);
+  const [address, setAddress] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  /** A server is known (the player was on it): the way back in, unless they chose to type another. */
+  const [other, setOther] = useState(false);
+  const field = useRef<HTMLInputElement>(null);
+  const known = !other && s.server ? s.server.replace(/^https?:\/\//, '') : null;
   const waiting = s.status === 'connecting' || s.status === 'reconnecting';
-  const features: [string, string][] = [
-    ['Parties', 'Up to 16 friends play a set at the same moment: Versus or Showdown.'],
-    ['Leaderboards', 'Every song’s best runs on the server, checked from each run, and Watch.'],
-    ['Shared songs', 'A party’s songs reach the players who lack them by themselves.'],
-  ];
+
+  const connect = async () => {
+    if (!address.trim()) return field.current?.focus();
+    setBusy(true);
+    setProblem(null);
+    try {
+      const invite = parseInvite(address);
+      if (invite) await online.useInvite(invite);
+      else await online.choose(address);
+      onParty();
+    } catch (e) {
+      setProblem((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  useActions([
+    ...base,
+    {
+      id: 'online-connect',
+      label: known ? 'Sign in' : 'Connect',
+      icon: LogIn,
+      ...keysOf('party.create'),
+      bar: false,
+      run: () => (known ? onParty() : void connect()),
+    },
+  ]);
+
   return (
     <div className="online-panel signed-out">
-      <div className="tiles party-tiles" data-nav-group="tiles">
-        <button type="button" className="tile hero" data-action="online-connect" data-autofocus onClick={onParty}>
-          <span className="mosaic blank" aria-hidden>
-            <Users strokeWidth={ICON_STROKE} />
-          </span>
-          <span className="tile-text">
-            <span className="tile-title">
-              {waiting ? 'Connecting…' : 'Connect to a server'}
-              {!waiting && <Hint {...keysOf('party.create')} {...hints} />}
-            </span>
-            <span className="tile-cap">
-              {waiting
-                ? `To ${s.server?.replace(/^https?:\/\//, '') ?? 'your server'}.`
-                : 'Soundwave servers are run by players, for their friends. Sign in with the address or the invite link you were sent.'}
-            </span>
-            <span className="hero-songs">
-              {features.map(([name, cap], i) => (
-                <span key={name} className="hero-song">
-                  <span className="hero-num">{i + 1}</span>
-                  <span className="hero-name">{name}</span>
-                  <span className="hero-by">{cap}</span>
+      <div className="online-landing">
+        <section className="landing-hero" aria-label="Play online">
+          <h2 className="landing-title">Play together</h2>
+          <p className="landing-lead">
+            Soundwave servers are run by players, for their friends. Join one with its address, or the invite link someone sent you.
+          </p>
+
+          {known ? (
+            <div className="landing-back">
+              <div className="landing-server">
+                <span className={`online-dot ${waiting ? '' : 'on'}`} aria-hidden />
+                <span className="landing-server-text">
+                  <span className="landing-server-name">{s.info?.name ?? known}</span>
+                  <span className="dim">{waiting ? 'Connecting…' : known}</span>
                 </span>
-              ))}
+              </div>
+              <button type="button" className="btn primary landing-go" data-action="online-connect" data-autofocus onClick={onParty}>
+                <LogIn strokeWidth={ICON_STROKE} aria-hidden />
+                Sign in
+                <Hint {...keysOf('party.create')} {...hints} />
+              </button>
+              <button type="button" className="btn quiet" onClick={() => setOther(true)}>
+                Use another server
+              </button>
+            </div>
+          ) : (
+            <form
+              className="landing-connect"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void connect();
+              }}
+            >
+              <label className="landing-field" data-ring-box>
+                <ServerIcon strokeWidth={ICON_STROKE} aria-hidden />
+                <input
+                  ref={field}
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder="Server address or invite link"
+                  aria-label="Server address or invite link"
+                  spellCheck={false}
+                  autoComplete="url"
+                  inputMode="url"
+                  data-autofocus
+                />
+              </label>
+              <button type="submit" className="btn primary landing-go" data-action="online-connect" disabled={busy}>
+                {busy ? (
+                  <LoaderCircle className="spin" strokeWidth={ICON_STROKE} aria-hidden />
+                ) : (
+                  <LogIn strokeWidth={ICON_STROKE} aria-hidden />
+                )}
+                {busy ? 'Connecting…' : 'Connect'}
+                {!busy && <Hint {...keysOf('party.create')} {...hints} />}
+              </button>
+              {other && (
+                <button type="button" className="btn quiet" onClick={() => setOther(false)}>
+                  Back to {s.info?.name ?? s.server?.replace(/^https?:\/\//, '')}
+                </button>
+              )}
+            </form>
+          )}
+          {problem && (
+            <p className="party-error" role="alert">
+              {problem}
+            </p>
+          )}
+          {!known && (
+            <p className="landing-small">
+              Looks like <code>play.example.com</code>, or a link ending in <code>/join?invite=…</code>. Nothing is sent anywhere until you
+              connect.
+            </p>
+          )}
+        </section>
+
+        <aside className="landing-side" aria-label="What playing online brings">
+          <ul className="landing-features">
+            {FEATURES.map(({ icon: Icon, title, text }, i) => (
+              <li key={title} className="landing-feature" style={{ ['--i' as string]: i }}>
+                <span className="landing-feature-icon" aria-hidden>
+                  <Icon strokeWidth={ICON_STROKE} />
+                </span>
+                <span className="landing-feature-text">
+                  <span className="landing-feature-title">{title}</span>
+                  <span className="landing-feature-cap">{text}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <button type="button" className="landing-own" onClick={() => openExternal(SERVER_GUIDE_URL)}>
+            <span className="landing-feature-icon" aria-hidden>
+              <ServerIcon strokeWidth={ICON_STROKE} />
             </span>
-          </span>
-        </button>
+            <span className="landing-feature-text">
+              <span className="landing-feature-title">Run your own server</span>
+              <span className="landing-feature-cap">
+                One small program for you and your friends, on a PC or any host. Your data stays yours.
+              </span>
+            </span>
+            <ExternalLink className="landing-own-out" strokeWidth={ICON_STROKE} aria-hidden />
+          </button>
+        </aside>
       </div>
     </div>
   );

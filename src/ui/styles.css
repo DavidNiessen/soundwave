@@ -8244,11 +8244,6 @@ a.btn {
 .tile.hero.in-party .party-code-text {
   margin: 0.3rem 0;
 }
-/* Signed out the Connect tile stands alone: it keeps a tile's height, and the menu's width. */
-.online-panel.signed-out .party-tiles {
-  height: min(26rem, 52vh);
-  max-width: 64rem;
-}
 .online-panel .tile-title .nowrap {
   white-space: nowrap;
 }
@@ -11629,4 +11624,225 @@ a.btn {
   width: 1.2rem;
   height: 1.2rem;
   color: var(--pink-2);
+}
+
+/* The Online tab signed out (OnlinePanel.tsx, SignedOut): the whole page, the way in on the left
+   with the address typed right there, what playing online brings on the right. */
+.online-panel.signed-out {
+  flex: 1;
+}
+.online-landing {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(18rem, 1fr);
+  gap: clamp(1.2rem, 3.5vw, 4rem);
+  align-items: center;
+  padding-bottom: 1rem;
+}
+.landing-hero {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.8rem, 1.8vh, 1.2rem);
+  max-width: 40rem;
+  animation: rise-in 0.4s var(--ease) backwards;
+}
+.landing-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--pink-2);
+  font-size: 0.85rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.landing-eyebrow svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+.landing-title {
+  margin: 0;
+  font-size: clamp(2.6rem, 6vw, 5.4rem);
+  font-weight: 900;
+  font-style: italic;
+  font-stretch: 112%;
+  text-transform: uppercase;
+  line-height: 0.92;
+  text-shadow: 0 0.06em 0.6em rgb(255 77 157 / 0.35);
+}
+.landing-lead {
+  margin: 0;
+  max-width: 34rem;
+  color: var(--ink-2);
+  font-size: clamp(1rem, 1.15vw, 1.15rem);
+  line-height: 1.5;
+}
+/* The address and Connect, as one bar. */
+.landing-connect,
+.landing-back {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
+}
+.landing-field {
+  flex: 1 1 18rem;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: calc(var(--target) + 0.5rem);
+  padding: 0 1rem;
+  border-radius: var(--r-m);
+  background: var(--panel-solid);
+  box-shadow: inset 0 0 0 1.5px var(--glass-edge);
+  color: var(--ink-2);
+}
+.landing-field:focus-within {
+  box-shadow: inset 0 0 0 2px var(--pink);
+}
+.landing-field svg {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+}
+.landing-field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+.landing-go {
+  min-height: calc(var(--target) + 0.5rem);
+  padding-inline: 1.4rem;
+}
+.landing-server {
+  flex: 1 1 16rem;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.6rem 1rem;
+  border-radius: var(--r-m);
+  background: var(--panel-solid);
+  box-shadow: inset 0 0 0 1.5px var(--glass-edge);
+}
+.landing-server-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.landing-server-name {
+  font-weight: 900;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.landing-small {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 0.9rem;
+}
+.landing-small code {
+  padding: 0.05rem 0.35rem;
+  border-radius: 0.35rem;
+  background: var(--well);
+  color: var(--ink-2);
+}
+/* What playing online brings, and running a server of one's own. */
+.landing-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-width: 0;
+}
+.landing-features {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.landing-feature,
+.landing-own {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--r-l);
+  background: var(--panel);
+  box-shadow: inset 0 0 0 1px var(--glass-edge);
+  animation:
+    tile-rise 0.5s var(--ease-soft) backwards,
+    tile-fade 0.25s ease-out backwards;
+  animation-delay: calc(var(--i, 0) * 60ms + 80ms);
+}
+.landing-feature-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2.8rem;
+  height: 2.8rem;
+  border-radius: var(--r-m);
+  background: linear-gradient(135deg, rgb(91 62 224 / 0.55), rgb(255 77 157 / 0.4));
+  color: #fff;
+}
+.landing-feature-icon svg {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+.landing-feature-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.landing-feature-title {
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+}
+.landing-feature-cap {
+  color: var(--ink-2);
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+.landing-own {
+  --i: 4;
+  width: 100%;
+  margin-top: 0.3rem;
+  color: var(--ink);
+  text-align: left;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--line);
+  border: 0;
+  transition: background 0.15s;
+}
+.landing-own:hover {
+  background: rgb(255 255 255 / 0.06);
+}
+.landing-own .landing-feature-icon {
+  background: var(--well);
+  color: var(--ink-2);
+}
+.landing-own-out {
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--ink-3);
+}
+@media (max-width: 1000px) {
+  .online-landing {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
 }
