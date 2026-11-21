@@ -142,7 +142,10 @@ export function onDiscordJoinRequest(fn: (r: JoinRequest) => void): () => void {
 
 /** Answers a friend's ask to join: let in (Discord sends them the Join) or not. */
 export function answerDiscordJoin(user: string, accept: boolean): Promise<void> {
-  return invoke('discord_answer', { user, accept });
+  // The app refuses with a sentence (a string), not an Error: it is turned into one to show.
+  return invoke<void>('discord_answer', { user, accept }).catch((e: unknown) => {
+    throw new Error(typeof e === 'string' ? e : e instanceof Error ? e.message : 'Discord did not take the answer.');
+  });
 }
 
 /** Where the player is: a screen, or the song being played. */

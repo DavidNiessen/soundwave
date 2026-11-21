@@ -464,7 +464,13 @@ pub async fn discord_answer(user: String, accept: bool) -> Result<(), String> {
         return Err("Discord is not set up in this build.".into());
     };
     tauri::async_runtime::spawn_blocking(move || {
-        answer(&id, &user, accept).map_err(|e| e.to_string())
+        let done = answer(&id, &user, accept).map_err(|e| e.to_string());
+        match &done {
+            Ok(()) if accept => log::info!("discord: let a friend in"),
+            Ok(()) => log::info!("discord: turned a friend down"),
+            Err(e) => log::warn!("discord: the answer to a friend failed: {e}"),
+        }
+        done
     })
     .await
     .map_err(|e| e.to_string())?

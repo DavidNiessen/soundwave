@@ -1449,8 +1449,12 @@ export function App() {
   const answerAsk = (ask: JoinRequest, accept: boolean) => {
     setJoinAsks((asks) => asks.filter((a) => a.id !== ask.id));
     void answerDiscordJoin(ask.id, accept && joinableRef.current).then(
-      () => accept && toast(`${ask.name} is on their way.`),
-      (e) => toast((e as Error).message),
+      () => accept && toast(`${ask.name} is on their way. Their game opens and joins your party.`),
+      (e: Error) => {
+        toast(`${ask.name} could not be let in: ${e.message}`);
+        // Letting them in failed: the ask stays, to try again.
+        if (accept) setJoinAsks((asks) => (asks.some((a) => a.id === ask.id) ? asks : [ask, ...asks]));
+      },
     );
   };
   const joinAsk = !['play', 'replay', 'export', 'editor'].includes(view.name) ? joinAsks[0] : undefined;
@@ -1906,7 +1910,14 @@ export function App() {
         </Dialog>
       )}
       {joinAsk && !exitAsk && (
-        <Dialog key={joinAsk.id} title="Asks to join" variant="card" closeLabel="Not now" onClose={() => answerAsk(joinAsk, false)}>
+        <Dialog
+          key={joinAsk.id}
+          title="Asks to join"
+          variant="card"
+          closeLabel="Not now"
+          outsideCloses={false}
+          onClose={() => answerAsk(joinAsk, false)}
+        >
           {() => (
             <div className="pause-card">
               <h2 className="display">{joinAsk.name} asks to join</h2>
