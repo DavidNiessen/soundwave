@@ -54,6 +54,7 @@ import {
   type BestScore,
   type SongMeta,
 } from '../storage/db';
+import { getMedia } from '../storage/stageMedia';
 import { newReplayId, type ReplayData, type ReplayMeta } from '../storage/replays';
 import { soundwaveFileName, isSoundwaveFile } from '../storage/soundwaveFile';
 import { chooseSaveTarget, saveSongFile, watchOpenedFiles, type SaveTarget } from '../storage/share';
@@ -157,11 +158,13 @@ const DEPTH: Record<View['name'], number> = {
 };
 
 /** What stands behind the highway in a replay's video: the player's stage, as far as a worker can draw it. */
-function videoBackdrop(def: StageDef): VideoJob['backdrop'] {
+async function videoBackdrop(def: StageDef): Promise<VideoJob['backdrop']> {
   const b = def.backdrop;
   if (b.kind === 'venue') return { kind: 'venue', venue: resolveVenue(def.venueId, Math.random() * 1e4), look: stageLook(def) };
-  if (b.kind === 'gradient') return { kind: 'gradient', colors: [b.from, b.to] };
-  return { kind: 'night' };
+  if (b.kind === 'gradient') return { kind: 'gradient', colors: [b.from, b.to], dim: def.dim };
+  // The player's file, read here: the worker has no way into the page's stage files.
+  const file = b.media ? await getMedia(b.media) : null;
+  return file ? { kind: b.kind, file: file.blob, dim: def.dim } : { kind: 'night' };
 }
 
 /** Silence the length of a song, for a replay whose song has left the library (a low rate keeps it small). */
@@ -727,7 +730,7 @@ export function App() {
                 music: video.music && !silent,
                 trackSpeed: settings.trackSpeed,
                 graphics: resolveGraphics(settings.graphics),
-                backdrop: videoBackdrop(findStage(settings.stage, settings.stage.active)),
+                backdrop: await videoBackdrop(findStage(settings.stage, settings.stage.active)),
                 video,
                 plan,
               },

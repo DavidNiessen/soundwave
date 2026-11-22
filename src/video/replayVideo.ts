@@ -14,6 +14,7 @@ import { startFrameEncoder } from '../game/videoRender';
 import { Stage } from '../render/stage/Stage';
 import { Highway, type HighwayLayout } from '../render/Highway';
 import { composeVideoFrame, videoHudFrame } from '../render/videoHud';
+import { drawBackdrop, gradientBackdrop, movingBackdrop, pictureBackdrop, type VideoBackdrop } from './backdrop';
 import type { VideoJob } from './protocol';
 
 /** Seconds of the finale after the last note. */
@@ -45,13 +46,18 @@ export async function makeReplayVideo(job: VideoJob, hooks: VideoHooks): Promise
   highway.resize();
 
   let stage: Stage | null = null;
-  // The 3D stage only where the player's stage is one: a gradient of their own is laid down
-  // instead, and a picture or video of theirs (kept on the page) leaves the plain night.
+  // The 3D stage only where the player's stage is one: their gradient, picture or video is laid
+  // down in its place instead.
   const backdrop = job.backdrop;
   const stageCanvas = video.stage && backdrop.kind === 'venue' ? new OffscreenCanvas(width, height) : null;
+  let own: VideoBackdrop | null = null;
+  const ownCanvas = new OffscreenCanvas(width, height);
+  const ownG = ownCanvas.getContext('2d', { alpha: false })!;
+  const dim = 'dim' in backdrop ? backdrop.dim : 0;
   const cleanUp = () => {
     highway.dispose();
     stage?.dispose();
+    own?.dispose();
   };
 
   try {
@@ -70,6 +76,20 @@ export async function makeReplayVideo(job: VideoJob, hooks: VideoHooks): Promise
         console.warn('The stage could not be built for the video', e);
         stage?.dispose();
         stage = null;
+      }
+    }
+    if (video.stage && backdrop.kind !== 'venue' && backdrop.kind !== 'night') {
+      try {
+        own =
+          backdrop.kind === 'gradient'
+            ? gradientBackdrop(backdrop.colors, width, height)
+            : backdrop.kind === 'image'
+              ? await pictureBackdrop(backdrop.file, width, height)
+              : await movingBackdrop(backdrop.file, width, height);
+      } catch (e) {
+        // Without it the video is made over the plain night.
+        console.warn('The stage’s picture or video could not be read for the video', e);
+        own = null;
       }
     }
     if (hooks.cancelled()) throw new VideoCancelled();
@@ -155,17 +175,13 @@ export async function makeReplayVideo(job: VideoJob, hooks: VideoHooks): Promise
           : null;
         // Handed over as pictures rather than read from the canvases: reading a WebGL canvas into a
         // 2D one in a worker can copy it through the processor, slowly.
-        const stagePicture = stage && stageCanvas ? stageCanvas.transferToImageBitmap() : null;
+        let stagePicture: ImageBitmap | null = stage && stageCanvas ? stageCanvas.transferToImageBitmap() : null;
+        if (own) {
+          drawBackdrop(ownG, width, height, await own.at(t - REPLAY_START), dim, f.bands.low);
+          stagePicture = ownCanvas.transferToImageBitmap();
+        }
         const highwayPicture = hwCanvas.transferToImageBitmap();
-        composeVideoFrame(
-          g,
-          width,
-          height,
-          stagePicture,
-          highwayPicture,
-          hud,
-          video.stage && backdrop.kind === 'gradient' ? backdrop.colors : undefined,
-        );
+        composeVideoFrame(g, width, height, stagePicture, highwayPicture, hud);
         stagePicture?.close();
         highwayPicture.close();
         await encoder.frame(i);

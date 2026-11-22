@@ -319,7 +319,8 @@ const NIGHT: [string, string] = ['#1a0f4c', '#05030f'];
  * canvas is drawn without a graphics card.
  */
 let night: { key: string; canvas: OffscreenCanvas | HTMLCanvasElement } | null = null;
-function nightSky(width: number, height: number, [from, to]: [string, string] = NIGHT) {
+function nightSky(width: number, height: number) {
+  const [from, to] = NIGHT;
   const key = `${width}x${height}:${from}:${to}`;
   if (night?.key === key) return night.canvas;
   const canvas = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(width, height) : document.createElement('canvas');
@@ -336,8 +337,8 @@ function nightSky(width: number, height: number, [from, to]: [string, string] = 
 }
 
 /**
- * Lays one frame of a replay's video onto `g`: the stage (or, without one, a gradient: the plain
- * night or `colors`), the highway over it, and the HUD over both when `hud` is given.
+ * Lays one frame of a replay's video onto `g`: the stage (or the player's own backdrop in its
+ * place; without either, the plain night), the highway over it, and the HUD over both when `hud` is given.
  */
 export function composeVideoFrame(
   g: Ctx2D,
@@ -346,9 +347,8 @@ export function composeVideoFrame(
   stage: CanvasImageSource | null,
   highway: CanvasImageSource,
   hud: VideoHudFrame | null,
-  colors?: [string, string],
 ) {
-  g.drawImage(stage ?? nightSky(width, height, colors), 0, 0, width, height);
+  g.drawImage(stage ?? nightSky(width, height), 0, 0, width, height);
   g.drawImage(highway, 0, 0, width, height);
   if (hud) drawVideoHud(g as CanvasRenderingContext2D, width, height, hud);
 }

@@ -22,9 +22,15 @@ export interface VideoJob {
   graphics: GraphicsSettings;
   /**
    * What stands behind the highway: the player's stage (its venue, picked already when it is
-   * Random, and its look), or the colours of a gradient of their own, or the plain night.
+   * Random, and its look), or a gradient, picture or video of their own, or the plain night.
    */
-  backdrop: { kind: 'venue'; venue: VenueId; look: StageLook } | { kind: 'gradient'; colors: [string, string] } | { kind: 'night' };
+  backdrop:
+    | { kind: 'venue'; venue: VenueId; look: StageLook }
+    /** `dim`: how much it is darkened, as behind the highway in the game. */
+    | { kind: 'gradient'; colors: [string, string]; dim: number }
+    /** The player's picture or video file (a Blob is handed to the worker without being copied). */
+    | { kind: 'image' | 'video'; file: Blob; dim: number }
+    | { kind: 'night' };
   video: VideoExportSettings;
   plan: Extract<VideoPlan, { kind: 'frames' }>;
 }
