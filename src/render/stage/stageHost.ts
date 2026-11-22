@@ -46,15 +46,17 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
   let frames = 0;
 
   // One loop for every stage held (only while one changes over to another are there two).
+  /** A stage being recorded draws even while hidden or covered: the video needs its frames. */
+  const capturing = () => [...slots.values()].some((s) => s.capture);
   const loop = () => {
     looping = false;
-    if (!visible || !slots.size) return;
+    if (!slots.size || (!visible && !capturing())) return;
     looping = true;
     nextFrame(loop);
     frames++;
     const now = performance.now();
     for (const [id, slot] of slots) {
-      if (!slot.stage || slot.stepped) continue;
+      if (!slot.stage || slot.stepped || (!visible && !slot.capture)) continue;
       if (slot.rate === 'frozen') {
         if (now - slot.lastFrozen < FROZEN_MS) continue;
         slot.lastFrozen = now;
@@ -63,7 +65,7 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
     }
   };
   const wake = () => {
-    if (looping || !visible || !slots.size) return;
+    if (looping || !slots.size || (!visible && !capturing())) return;
     looping = true;
     nextFrame(loop);
   };
@@ -179,6 +181,7 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
         break;
       case 'capture':
         slot.capture = m.on;
+        wake();
         break;
       case 'step': {
         slot.stepped = true;
