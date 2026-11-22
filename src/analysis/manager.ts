@@ -215,7 +215,7 @@ export class AnalysisManager {
         /* storage unavailable */
       }
     }
-    // A device that cannot analyze (a phone) keeps playing a song by the analysis an earlier
+    // A device that cannot analyze (analyzing switched off) keeps playing a song by the analysis an earlier
     // version of the game made: charts from an older analysis beat no charts at all.
     if (!(await this.env.canAnalyze())) {
       const older = await this.olderAnalysis(id);
@@ -429,7 +429,7 @@ export class AnalysisManager {
 export interface ManagerEnv {
   /** Every analysis kept for a song, with the version of the game that made it. */
   olderAnalyses(id: string): Promise<{ version: number; data: unknown }[]>;
-  /** Whether this device can analyze songs at all (a phone cannot). */
+  /** Whether this device can analyze songs at all (only not where analyzing is switched off). */
   canAnalyze(): Promise<boolean>;
 }
 

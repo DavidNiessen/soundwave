@@ -139,7 +139,7 @@ export interface SongPackage {
   analysis?: AnalysisResult;
   /**
    * An analysis an earlier version of the game made, with that version: it is not charted from
-   * where songs can be analyzed again, but a device that cannot analyze (a phone) plays by it.
+   * where songs can be analyzed again, but a device that cannot analyze plays by it.
    */
   olderAnalysis?: { version: number; data: AnalysisResult };
   edits?: SongEdits;
