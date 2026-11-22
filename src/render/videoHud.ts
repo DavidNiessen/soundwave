@@ -32,6 +32,9 @@ export interface VideoHudFrame {
   deck: { x: number; y: number; foot: number; width: number } | null;
 }
 
+import type { GameSession } from '../game/GameSession';
+import { MAX_MULTIPLIER, multiplierFor, STREAK_PER_MULTIPLIER } from '../game/scoring';
+
 const FONT = '"Archivo Variable", Archivo, system-ui, sans-serif';
 const DIAL: Record<number, string> = { 1: '#d2c9fa', 2: '#3a8bff', 3: '#3ddc5a', 4: '#ffd23d', 5: '#ff8a1f', 6: '#ffd23d' };
 const TAG: Record<string, [string, string, string]> = {
@@ -265,4 +268,68 @@ export function drawVideoHud(ctx: CanvasRenderingContext2D, width: number, heigh
   ctx.fillText('SOUNDWAVE', width - 28 * u, portrait ? height - 28 * u : 44 * u);
   ctx.globalAlpha = 1;
   ctx.restore();
+}
+
+/** What a video frame shows besides the pictures: the run as it stands, and where the deck is. */
+export interface VideoFrameInfo {
+  t: number;
+  /** The frame clock (ms), for how long ago the last note's tag appeared. */
+  now: number;
+  duration: number;
+  title: string;
+  artist: string;
+  scoreLabel: string;
+  session: GameSession;
+  feedback: { text: string; kind: string; at: number } | null;
+  deck: VideoHudFrame['deck'];
+}
+
+/** The HUD of a run at one moment, from its session. */
+export function videoHudFrame(f: VideoFrameInfo): VideoHudFrame {
+  const s = f.session;
+  const top = multiplierFor(s.streak) >= MAX_MULTIPLIER;
+  return {
+    t: f.t,
+    duration: f.duration,
+    title: f.title,
+    artist: f.artist,
+    scoreLabel: f.scoreLabel,
+    score: s.score,
+    multiplier: s.multiplier,
+    level: multiplierFor(s.streak),
+    streakP: top ? 1 : (s.streak % STREAK_PER_MULTIPLIER) / STREAK_PER_MULTIPLIER,
+    streak: s.streak,
+    overdrive: s.overdrive,
+    overdriveActive: s.overdriveActive,
+    stars: s.progressStars,
+    starP: s.nextStarProgress,
+    feedback: f.feedback ? { text: f.feedback.text, kind: f.feedback.kind, age: (f.now - f.feedback.at) / 1000 } : null,
+    deck: f.deck,
+  };
+}
+
+type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+
+/**
+ * Lays one frame of a replay's video onto `g`: the stage (or the plain night without one), the
+ * highway over it, and the HUD over both when `hud` is given.
+ */
+export function composeVideoFrame(
+  g: Ctx2D,
+  width: number,
+  height: number,
+  stage: CanvasImageSource | null,
+  highway: CanvasImageSource,
+  hud: VideoHudFrame | null,
+) {
+  if (stage) g.drawImage(stage, 0, 0, width, height);
+  else {
+    const night = g.createLinearGradient(0, 0, 0, height);
+    night.addColorStop(0, '#1a0f4c');
+    night.addColorStop(1, '#05030f');
+    g.fillStyle = night;
+    g.fillRect(0, 0, width, height);
+  }
+  g.drawImage(highway, 0, 0, width, height);
+  if (hud) drawVideoHud(g as CanvasRenderingContext2D, width, height, hud);
 }

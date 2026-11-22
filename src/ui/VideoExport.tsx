@@ -4,10 +4,9 @@ import { getEngine } from '../audio/engine';
 import type { Chart } from '../chart/types';
 import { PlayController, REPLAY_START } from '../game/PlayController';
 import type { ReplayInputs } from '../game/replay';
-import { multiplierFor, MAX_MULTIPLIER, STREAK_PER_MULTIPLIER } from '../game/scoring';
 import type { Settings } from '../game/settings';
 import { videoBitrate, VideoRecorder, videoSize, type VideoExportSettings } from '../game/videoExport';
-import { drawVideoHud } from '../render/videoHud';
+import { composeVideoFrame, videoHudFrame } from '../render/videoHud';
 import { planVideo, songSamples, startFrameEncoder, type FrameEncoder, type VideoPlan } from '../game/videoRender';
 import type { SaveTarget } from '../storage/share';
 import type { ReplayMeta } from '../storage/replays';
@@ -241,9 +240,6 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
     );
     const out = outRef.current!;
     const g = out.getContext('2d', { alpha: false })!;
-    const night = g.createLinearGradient(0, 0, 0, height);
-    night.addColorStop(0, '#1a0f4c');
-    night.addColorStop(1, '#05030f');
     const scoreLabel = `${PART_LABEL[chart.part]} score`;
     const length = Math.max(chart.duration, buffer.duration);
     let shownSecond = -1;
@@ -253,36 +249,23 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
      * as it was drawn), the HUD. `now`: the clock it was drawn on, ms.
      */
     const compose = (t: number, stageFrame: ImageBitmap | null, now: number, highway: CanvasImageSource = hwRef.current!) => {
-      g.fillStyle = video.stage ? '#05030f' : night;
-      g.fillRect(0, 0, width, height);
-      if (stageFrame) g.drawImage(stageFrame, 0, 0, width, height);
       const hw = hwRef.current!;
-      g.drawImage(highway, 0, 0, width, height);
-      if (video.hud) {
-        const s = ctrl.session;
-        const layout = ctrl.hudLayout();
-        const k = width / Math.max(1, hw.clientWidth);
-        const top = multiplierFor(s.streak) >= MAX_MULTIPLIER;
-        const fb = ctrl.lastFeedback;
-        drawVideoHud(g, width, height, {
-          t,
-          duration: chart.duration,
-          title: replay.title,
-          artist: replay.artist,
-          scoreLabel,
-          score: s.score,
-          multiplier: s.multiplier,
-          level: multiplierFor(s.streak),
-          streakP: top ? 1 : (s.streak % STREAK_PER_MULTIPLIER) / STREAK_PER_MULTIPLIER,
-          streak: s.streak,
-          overdrive: s.overdrive,
-          overdriveActive: s.overdriveActive,
-          stars: s.progressStars,
-          starP: s.nextStarProgress,
-          feedback: fb ? { ...fb, age: (now - fb.at) / 1000 } : null,
-          deck: layout ? { x: layout.x * k, y: layout.y * k, foot: layout.foot * k, width: layout.width * k } : null,
-        });
-      }
+      const layout = video.hud ? ctrl.hudLayout() : null;
+      const k = width / Math.max(1, hw.clientWidth);
+      const hud = video.hud
+        ? videoHudFrame({
+            t,
+            now,
+            duration: chart.duration,
+            title: replay.title,
+            artist: replay.artist,
+            scoreLabel,
+            session: ctrl.session,
+            feedback: ctrl.lastFeedback,
+            deck: layout ? { x: layout.x * k, y: layout.y * k, foot: layout.foot * k, width: layout.width * k } : null,
+          })
+        : null;
+      composeVideoFrame(g, width, height, video.stage ? stageFrame : null, highway, hud);
       const p = Math.max(0, Math.min(1, (t - REPLAY_START) / (length + TAIL - REPLAY_START)));
       barRef.current?.style.setProperty('width', `${(p * 100).toFixed(2)}%`);
       const sec = Math.floor(Math.max(0, Math.min(t, chart.duration)));
