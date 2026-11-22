@@ -7,6 +7,7 @@ import type { SongMeta } from '../storage/db';
 import type { ReplayMeta } from '../storage/replays';
 import { Hint, useHints } from './actions';
 import { Cover } from './Cover';
+import { ExportsList } from './ExportsList';
 import { Dialog } from './Dialog';
 import { DIFFICULTY_LABEL, ICON_STROKE, PART_ICON, PART_LABEL, Pips, Stars } from './icons';
 import { clock, replayDate } from './ReplayScreen';
@@ -117,6 +118,7 @@ export function ReplaysPanel({ replays, songs, settings, actions, onSettings, co
       </div>
       <div className="library-body">
         <div className="track-column">
+          <ExportsList />
           <ul className="song-list" data-nav-group="replays" aria-label="Replays" ref={list}>
             {replays.map((r, i) => {
               const song = byId.get(r.songId);

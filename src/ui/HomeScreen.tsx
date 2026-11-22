@@ -33,6 +33,7 @@ import { Mosaic } from './Cover';
 import { ICON_STROKE } from './icons';
 import { TrackPicker, type TrackPickerProps } from './TrackPicker';
 import { ReplaysPanel, type ReplayActions, type ReplayCommands } from './ReplaysPanel';
+import { ExportsChip } from './ExportsList';
 import type { ReplayMeta } from '../storage/replays';
 import { useSlide } from './useSlide';
 import { keysOf } from '../input/bindings';
@@ -251,6 +252,7 @@ export function HomeScreen({
           </div>
           <Hint {...keysOf('menus.tabNext')} mode={mode} style={style} />
         </div>
+        <ExportsChip />
         {update && (
           <button type="button" className="btn head-btn update-btn" data-action="update" onClick={onUpdate}>
             <Hint kbd={keysOf('home.update').kbd} mode={mode} style={style} />
