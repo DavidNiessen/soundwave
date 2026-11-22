@@ -57,9 +57,12 @@ export function ContextMenu({ title, label, at, items, onClose }: Props) {
     if (!menu) return;
     const r = menu.getBoundingClientRect();
     const margin = 8;
+    // Above the action bar, which stays over everything at the bottom.
+    const bar = document.querySelector('.action-bar')?.getBoundingClientRect();
+    const bottom = bar && bar.height ? Math.min(innerHeight, bar.top) : innerHeight;
     setPlace({
       left: Math.max(margin, Math.min(at.x, innerWidth - r.width - margin)),
-      top: Math.max(margin, Math.min(at.y, innerHeight - r.height - margin)),
+      top: Math.max(margin, Math.min(at.y, bottom - r.height - margin)),
     });
   }, [at.x, at.y]);
 

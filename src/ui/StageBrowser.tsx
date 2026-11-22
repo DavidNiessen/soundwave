@@ -1,9 +1,12 @@
 import {
   Box,
   Check,
+  CheckSquare,
   ChevronDown,
+  CircleCheck,
   Copy,
   Dices,
+  Ellipsis,
   Film,
   Image as ImageIcon,
   LayoutGrid,
@@ -13,9 +16,10 @@ import {
   Sparkles,
   Trash2,
   Undo2,
+  X,
   type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { keysOf } from '../input/bindings';
 import {
@@ -46,6 +50,8 @@ import { useHints, type Action } from './actions';
 import { Dialog } from './Dialog';
 import { ColorPicker } from './ColorPicker';
 import { ICON_STROKE } from './icons';
+import { ContextMenu, type MenuItem } from './ContextMenu';
+import { isTextField } from '../input/inputMode';
 import { ON_OFF, RowView, type Row } from './SettingsScreen';
 
 interface Options {
@@ -286,16 +292,85 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): {
     history.current = [];
     void tidyMedia(s);
   };
-  const remove = (def: StageDef) => {
+  /** Deletes stages of the player's own (the one in use gives way to Festival). */
+  const remove = (ids: string[]) => {
     // An edit still on its way to the settings (of this stage or another) is kept first.
     const s = flush();
-    const next = { active: s.active === def.id ? 'festival' : s.active, mine: s.mine.filter((d) => d.id !== def.id) };
+    const gone = new Set(ids);
+    const next = { active: gone.has(s.active) ? 'festival' : s.active, mine: s.mine.filter((d) => !gone.has(d.id)) };
     latest.current = next;
     onChange(next);
     setEditId(null);
     setFocusId(next.active);
+    setSelected(new Set());
     history.current = [];
     void tidyMedia(next);
+  };
+  /** Copies of stages of the player's own, each after the last of them. */
+  const duplicate = (defs: StageDef[]) => {
+    const s = flush();
+    const copies: StageDef[] = [];
+    for (const d of defs) copies.push(copyStage({ ...s, mine: [...s.mine, ...copies] }, d));
+    const next = { ...s, mine: [...s.mine, ...copies] };
+    latest.current = next;
+    onChange(next);
+    setSelected(new Set());
+    if (copies.length) setFocusId(copies[copies.length - 1].id);
+  };
+
+  /** Stages of the player's own picked for the menu, which acts on several at once (like the library's songs). */
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [anchor, setAnchor] = useState<string | null>(null);
+  /** The open stage menu: the stages it is for and where it opens; and stages waiting on a Delete to be confirmed. */
+  const [menu, setMenu] = useState<{ ids: string[]; at: { x: number; y: number } } | null>(null);
+  const [deleting, setDeleting] = useState<string[] | null>(null);
+  // Stages that are gone leave the selection too; leaving the tab clears it.
+  useEffect(() => {
+    setSelected((was) => {
+      const kept = [...was].filter((id) => on && stages.mine.some((d) => d.id === id));
+      return kept.length === was.size ? was : new Set(kept);
+    });
+  }, [stages.mine, on]);
+  /** Selects or deselects one of the player's stages (Ctrl-click, or Select). Templates cannot be selected. */
+  const pick = (id: string) => {
+    if (isBuiltIn(id)) return;
+    setSelected((was) => {
+      const next = new Set(was);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+    setAnchor(id);
+  };
+  /** Selects every stage of the player's from the last one picked to this one (Shift-click). */
+  const pickRange = (id: string) => {
+    const list = stages.mine.map((d) => d.id);
+    const from = list.indexOf(anchor ?? id);
+    const to = list.indexOf(id);
+    if (from < 0 || to < 0) return pick(id);
+    const [a, b] = from < to ? [from, to] : [to, from];
+    setSelected((was) => new Set([...was, ...list.slice(a, b + 1)]));
+  };
+  /**
+   * Opens the stage menu: for the selection when there is one (and the stage pressed is in it), else
+   * for that stage alone. Without a pointer it opens beside the stage's card.
+   */
+  const openMenu = (def: StageDef = shown, at?: { x: number; y: number }) => {
+    let ids: string[];
+    if (selected.size && selected.has(def.id)) ids = stages.mine.filter((d) => selected.has(d.id)).map((d) => d.id);
+    else {
+      ids = [def.id];
+      if (selected.size) setSelected(new Set());
+    }
+    if (!at) {
+      const card = document.querySelector(`.stage-card[data-stage="${CSS.escape(def.id)}"]`);
+      const r = card?.getBoundingClientRect();
+      at = r ? { x: r.left + r.width * 0.3, y: r.top + r.height * 0.4 } : { x: innerWidth / 2, y: innerHeight / 3 };
+    }
+    setMenu({ ids, at });
+  };
+  const askDelete = (ids: string[]) => {
+    const mine = ids.filter((id) => !isBuiltIn(id));
+    if (mine.length) setDeleting(mine);
   };
   // Test the drop: the stage plays one for a few seconds, and the button says so meanwhile. Only a
   // 3D stage has a show to drop.
@@ -349,20 +424,65 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): {
         ...dropAction(editing),
         { id: 'undo', label: 'Undo', icon: Undo2, ...keysOf('stages.undo'), bar: false, run: undo },
       ];
-  const actions: Action[] =
-    !on || dialog || editing || all
-      ? []
-      : [
-          { id: 'new', label: 'New stage', icon: Plus, ...keysOf('stages.new'), primary: true, run: () => setDialog('new') },
-          {
-            id: 'edit',
-            label: isBuiltIn(shown.id) ? 'Copy and customize' : 'Customize',
-            icon: Paintbrush,
-            ...keysOf('stages.edit'),
-            run: () => customize(shown),
-          },
-          ...dropAction(shown),
-        ];
+  const selecting = selected.size > 0;
+  const browsing = on && !dialog && !editing && !all && !menu && !deleting;
+  // The keyboard's menu key and Shift+F10 open the menu too; Ctrl+A selects every stage of the player's.
+  useEffect(() => {
+    if (!browsing) return;
+    const key = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || isTextField(e.target)) return;
+      if (e.code === 'ContextMenu' || (e.code === 'F10' && e.shiftKey)) {
+        e.preventDefault();
+        openMenu();
+      } else if (e.code === 'KeyA' && (e.ctrlKey || e.metaKey) && !e.altKey) {
+        e.preventDefault();
+        setSelected(new Set(stages.mine.map((d) => d.id)));
+      }
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  });
+  const own = !isBuiltIn(shown.id);
+  const actions: Action[] = !browsing
+    ? []
+    : [
+        ...(selecting
+          ? [{ id: 'clear', label: 'Clear selection', icon: X, kbd: 'Escape', sfx: 'back' as const, run: () => setSelected(new Set()) }]
+          : []),
+        { id: 'new', label: 'New stage', icon: Plus, ...keysOf('stages.new'), primary: true, run: () => setDialog('new') },
+        {
+          id: 'edit',
+          label: isBuiltIn(shown.id) ? 'Copy and customize' : 'Customize',
+          icon: Paintbrush,
+          ...keysOf('stages.edit'),
+          run: () => customize(shown),
+        },
+        ...dropAction(shown),
+        {
+          id: 'options',
+          label: selecting ? `Options for ${selected.size}` : 'Options',
+          icon: Ellipsis,
+          ...keysOf('stages.options'),
+          run: () => openMenu(),
+        },
+        {
+          id: 'select',
+          label: selected.has(shown.id) ? 'Deselect' : 'Select',
+          icon: CheckSquare,
+          ...keysOf('stages.select'),
+          disabled: !own,
+          run: () => pick(shown.id),
+        },
+        {
+          id: 'delete',
+          label: selecting ? `Delete ${selected.size}` : 'Delete',
+          icon: Trash2,
+          ...keysOf('stages.delete'),
+          bar: false,
+          disabled: !selecting && !own,
+          run: () => askDelete(selecting ? [...selected] : [shown.id]),
+        },
+      ];
 
   // The templates in view: the featured ones, and the one in use when it is another.
   const templates = BUILT_IN.filter((d) => FEATURED.includes(d.id) || d.id === stages.active);
@@ -373,10 +493,54 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): {
       info={info}
       active={d.id === stages.active}
       focused={d.id === shown.id}
+      selected={selected.has(d.id)}
       onFocus={() => setFocusId(d.id)}
-      onPick={() => (d.id === stages.active && !isBuiltIn(d.id) ? customize(d) : equip(d.id))}
+      onPick={(e) => {
+        // Ctrl (Cmd on a Mac) picks one stage more or less, Shift a run of them.
+        if (e.ctrlKey || e.metaKey) return pick(d.id);
+        if (e.shiftKey && !isBuiltIn(d.id)) return pickRange(d.id);
+        if (selecting) setSelected(new Set());
+        setAnchor(d.id);
+        if (d.id === stages.active && !isBuiltIn(d.id)) customize(d);
+        else equip(d.id);
+      }}
+      onMenu={(at) => {
+        setFocusId(d.id);
+        openMenu(d, at);
+      }}
     />
   );
+  /** What the stage menu offers: for one stage, or for every one selected. */
+  const menuItems = (ids: string[]): MenuItem[] => {
+    const defs = ids.map((id) => findStage(stages, id)).filter((d) => ids.includes(d.id));
+    if (defs.length > 1)
+      return [
+        { id: 'duplicate', label: `Duplicate ${defs.length} stages`, icon: Copy, run: () => duplicate(defs) },
+        { id: 'delete', label: `Delete ${defs.length} stages…`, icon: Trash2, danger: true, stays: true, run: () => askDelete(ids) },
+      ];
+    const d = defs[0];
+    if (!d) return [];
+    const inUse = d.id === stages.active;
+    const mine = !isBuiltIn(d.id);
+    return [
+      { id: 'use', label: inUse ? 'In use' : 'Use this stage', icon: CircleCheck, disabled: inUse, run: () => equip(d.id) },
+      { id: 'edit', label: mine ? 'Customize' : 'Copy and customize', icon: Paintbrush, run: () => customize(d) },
+      ...(mine
+        ? [
+            { id: 'duplicate', label: 'Duplicate', icon: Copy, run: () => duplicate([d]) },
+            {
+              id: 'select',
+              label: selected.has(d.id) ? 'Deselect' : 'Select',
+              icon: CheckSquare,
+              run: () => pick(d.id),
+            },
+            { id: 'delete', label: 'Delete…', icon: Trash2, danger: true, stays: true, run: () => askDelete([d.id]) },
+          ]
+        : []),
+    ];
+  };
+  const menuTitle = (ids: string[]) => (ids.length > 1 ? `${ids.length} stages selected` : findStage(stages, ids[0]).name);
+  const deletingNames = (deleting ?? []).map((id) => findStage(stages, id)).filter((d) => deleting?.includes(d.id));
   const inUse = findStage(stages, stages.active);
   const view = (
     <div className={`stages ${editing ? 'is-editing' : ''}`}>
@@ -396,7 +560,7 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): {
             onSave={save}
             onUndo={undo}
             canUndo={history.current.length > 0}
-            onDelete={() => remove(editing)}
+            onDelete={() => remove([editing.id])}
           />
         ) : all ? (
           <TemplatePanel
@@ -454,6 +618,57 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): {
           </div>
         )}
       </div>
+      {menu && !deleting && (
+        <ContextMenu
+          title={menuTitle(menu.ids)}
+          label={`${menuTitle(menu.ids)} options`}
+          at={menu.at}
+          items={menuItems(menu.ids)}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {deleting && (
+        <Dialog
+          title={deleting.length > 1 ? `Delete ${deleting.length} stages` : `Delete ${deletingNames[0]?.name ?? 'stage'}`}
+          variant="card"
+          closeLabel="Keep"
+          onClose={() => {
+            setDeleting(null);
+            setMenu(null);
+          }}
+        >
+          {(keep) => (
+            <div className="pause-card">
+              <h2 className="display">{deleting.length > 1 ? `Delete ${deleting.length} stages?` : 'Delete this stage?'}</h2>
+              <p className="hint">
+                {deleting.length > 1 ? (
+                  `These ${deleting.length} stages are`
+                ) : (
+                  <>
+                    <b>{deletingNames[0]?.name}</b> is
+                  </>
+                )}{' '}
+                deleted with the videos and pictures only {deleting.length > 1 ? 'they use' : 'it uses'}. This cannot be undone.
+              </p>
+              <button type="button" className="btn wide" data-autofocus data-sfx="back" onClick={keep}>
+                Keep
+              </button>
+              <button
+                type="button"
+                className="btn danger wide"
+                onClick={() => {
+                  remove(deleting);
+                  setDeleting(null);
+                  setMenu(null);
+                }}
+              >
+                <Trash2 strokeWidth={ICON_STROKE} aria-hidden />
+                {deleting.length > 1 ? `Delete ${deleting.length} stages` : 'Delete stage'}
+              </button>
+            </div>
+          )}
+        </Dialog>
+      )}
       {dialog === 'new' && (
         <Dialog title="New stage" variant="card" className="new-stage-card" onClose={() => setDialog(null)} closeLabel="Cancel">
           <div className="pause-card new-stage">
@@ -536,16 +751,21 @@ function StageCard({
   info,
   active,
   focused,
+  selected,
   onFocus,
   onPick,
+  onMenu,
 }: {
   def: StageDef;
   /** What the stage is like, in place of its tags (the list of all templates). */
   info?: string;
   active: boolean;
   focused: boolean;
+  selected: boolean;
   onFocus(): void;
-  onPick(): void;
+  onPick(e: ReactMouseEvent): void;
+  /** Its menu, at the pointer (a right-click, or a long press on a touchscreen). */
+  onMenu(at: { x: number; y: number }): void;
 }) {
   const b = def.backdrop;
   const tags = [
@@ -557,14 +777,25 @@ function StageCard({
       type="button"
       role="option"
       aria-selected={active}
-      className={`stage-card ${active ? 'active' : ''} ${focused ? 'focused' : ''}`}
+      aria-label={selected ? `Selected. ${def.name}` : undefined}
+      className={`stage-card ${active ? 'active' : ''} ${focused ? 'focused' : ''} ${selected ? 'selected' : ''}`}
+      data-stage={def.id}
       data-autofocus={active ? '' : undefined}
       onFocus={onFocus}
       onPointerEnter={(e) => e.pointerType === 'mouse' && onFocus()}
       onClick={onPick}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onMenu({ x: e.clientX, y: e.clientY });
+      }}
     >
       <span className="stage-art">
         <Swatch def={def} />
+        {selected && (
+          <span className="select-mark" aria-hidden>
+            <Check strokeWidth={3} />
+          </span>
+        )}
         {active && (
           <span className="stage-badge">
             <Check strokeWidth={3} aria-hidden /> In use
