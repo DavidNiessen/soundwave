@@ -379,7 +379,7 @@ function ReplayCard({ replay: r, song, hints, onWatch, onExport, onKeep, onDelet
           Watch
         </button>
         <button type="button" className="btn" data-action="replay-export" onClick={onExport}>
-          <Hint kbd={keysOf('home.replayExport').kbd} {...hints} />
+          <Hint {...keysOf('home.replayExport')} {...hints} />
           <Film strokeWidth={ICON_STROKE} aria-hidden />
           Video
         </button>
