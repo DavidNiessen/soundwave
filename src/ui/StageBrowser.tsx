@@ -295,10 +295,10 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): {
     void tidyMedia(s);
   };
   const remove = (def: StageDef) => {
-    clearTimeout(commitTimer.current);
-    draftRef.current = null;
-    setDraft(null);
-    const next = { active: stages.active === def.id ? 'festival' : stages.active, mine: stages.mine.filter((d) => d.id !== def.id) };
+    // An edit still on its way to the settings (of this stage or another) is kept first.
+    const s = flush();
+    const next = { active: s.active === def.id ? 'festival' : s.active, mine: s.mine.filter((d) => d.id !== def.id) };
+    latest.current = next;
     onChange(next);
     setEditId(null);
     setFocusId(next.active);
