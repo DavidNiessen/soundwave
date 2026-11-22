@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { setDiscordEnabled, showScene } from '../app/discord';
 import { analysisManager, canPlay } from '../analysis/manager';
 import { stemModel } from '../analysis/separation/model';
-import { analysisDevice, type AnalysisDevice } from '../analysis/separation/support';
+import { analysisDevice, isHandheld, type AnalysisDevice } from '../analysis/separation/support';
 import { getEngine } from '../audio/engine';
 import { ACCEPTED, isAudioFile, readSongFile } from '../audio/importSong';
 import { menuMusicStatus, setMenuMusic, setMusicVolume } from '../audio/menuMusic';
@@ -355,7 +355,7 @@ export function App() {
     void analysisDevice().then(async (d) => {
       if (!live) return;
       setDevice(d);
-      if (d !== 'none' && (await stemModel.check()) === 'absent') void stemModel.ensure().catch(() => {});
+      if (d !== 'none' && !isHandheld() && (await stemModel.check()) === 'absent') void stemModel.ensure().catch(() => {});
     });
     return () => {
       live = false;
