@@ -30,7 +30,7 @@
   --glass-blur: blur(22px);
   --violet: #5b3ee0;
   /* What the menus lay over the stage: a glow from below, two lights from the top corners and a
-     wash from top to bottom. Each venue tints them its own way (see the venue themes below). */
+     wash from top to bottom. */
   --menu-glow: #3a1f9c;
   --veil-1: rgb(93 242 214 / 0.2);
   --veil-2: rgb(124 92 255 / 0.4);
@@ -87,63 +87,6 @@
   font-stretch: 100%;
 }
 
-/* Venue themes: the night and the veil take the colours of the venue behind the menus (the root
-   carries data-venue), so the menus and the place feel like one. Moonrise keeps the defaults. */
-:root[data-venue='mainstage'] {
-  --night: #170914;
-  --deep: #3a1430;
-  --violet: #c2386e;
-  --menu-glow: #8a2a3c;
-  --veil-1: rgb(255 150 70 / 0.24);
-  --veil-2: rgb(255 70 140 / 0.36);
-  --veil-top: rgb(22 8 22 / 0.84);
-  --veil-mid: rgb(72 20 46 / 0.6);
-  --veil-bottom: rgb(20 8 18 / 0.9);
-}
-:root[data-venue='monolith'] {
-  --night: #07090c;
-  --deep: #1a2028;
-  --violet: #7d8894;
-  --menu-glow: #2a323c;
-  --veil-1: rgb(255 255 255 / 0.16);
-  --veil-2: rgb(150 190 220 / 0.2);
-  --veil-top: rgb(6 8 11 / 0.88);
-  --veil-mid: rgb(24 30 38 / 0.6);
-  --veil-bottom: rgb(6 8 10 / 0.92);
-}
-:root[data-venue='warehouse'] {
-  --night: #0c0607;
-  --deep: #2a0e10;
-  --violet: #b8242c;
-  --menu-glow: #5e1014;
-  --veil-1: rgb(210 220 255 / 0.12);
-  --veil-2: rgb(255 40 30 / 0.3);
-  --veil-top: rgb(12 6 7 / 0.88);
-  --veil-mid: rgb(42 12 12 / 0.62);
-  --veil-bottom: rgb(10 5 6 / 0.92);
-}
-:root[data-venue='arena'] {
-  --night: #050a1c;
-  --deep: #0e1d4a;
-  --violet: #2b6fe0;
-  --menu-glow: #13358a;
-  --veil-1: rgb(60 210 255 / 0.22);
-  --veil-2: rgb(255 60 180 / 0.26);
-  --veil-top: rgb(4 8 26 / 0.86);
-  --veil-mid: rgb(10 24 72 / 0.62);
-  --veil-bottom: rgb(4 8 24 / 0.9);
-}
-:root[data-venue='basement'] {
-  --night: #110504;
-  --deep: #34100a;
-  --violet: #c23a1c;
-  --menu-glow: #6a1408;
-  --veil-1: rgb(255 170 70 / 0.16);
-  --veil-2: rgb(255 50 30 / 0.32);
-  --veil-top: rgb(16 5 4 / 0.88);
-  --veil-mid: rgb(56 14 8 / 0.62);
-  --veil-bottom: rgb(14 5 4 / 0.92);
-}
 :root[data-input='touch'] {
   --target: 3rem;
   --bar-h: 4.5rem;
@@ -2365,8 +2308,7 @@ img.cover {
   height: 2.1rem;
 }
 .part-row,
-.diff-row,
-.venue-row {
+.diff-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.35rem;
@@ -2421,15 +2363,6 @@ img.cover {
   position: absolute;
   top: 0.3rem;
   right: 0.3rem;
-}
-.choice.venue {
-  font-size: 0.85rem;
-  min-height: 2.75rem;
-}
-.venue-blurb {
-  min-height: 1.4rem;
-  font-weight: 600;
-  font-size: 0.9rem;
 }
 .choice.diff {
   flex-direction: column;
@@ -6951,37 +6884,6 @@ a.btn {
   mix-blend-mode: screen;
   opacity: calc(0.15 + 0.45 * var(--beams));
 }
-/* Random: every venue, side by side. */
-.venue-picture.shuffle {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(2, 1fr);
-  gap: 1px;
-  background: #07051a;
-}
-.venue-picture.shuffle img {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  object-fit: cover;
-}
-/* The venues to start a new stage in, each with its picture. */
-.start-venue .venue-row {
-  grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
-}
-.start-venue .choice.venue {
-  flex-direction: column;
-  gap: 0.3rem;
-  padding: 0.3rem 0.3rem 0.4rem;
-  min-height: 0;
-}
-.start-venue .choice.venue .venue-picture {
-  width: 100%;
-  aspect-ratio: 16 / 10;
-  border-radius: calc(var(--r-m) - 0.25rem);
-  object-fit: cover;
-  overflow: hidden;
-}
 .stage-swatch.blank {
   background: var(--well);
   color: var(--ink-2);
@@ -7339,12 +7241,6 @@ a.btn {
 /* Every template, in a panel beside the stage: a row each, the whole row picks it. */
 .template-panel {
   gap: 0.2rem;
-}
-/* New stage: the venue its looks are seen in, above them. */
-.start-venue {
-  display: grid;
-  gap: 0.4rem;
-  padding: 0 0 0.6rem;
 }
 .template-head {
   padding: 0.4rem 0.8rem 0.6rem;

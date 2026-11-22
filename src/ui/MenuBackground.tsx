@@ -5,7 +5,7 @@ import { gpuKnown, resolveGraphics, type GraphicsSettings } from '../game/graphi
 import { acquireMenuStage, menuStageBoosted, releaseMenuStage, watchMenuLoading } from '../render/aurora/menuStage';
 import { shownStage, watchShownStage } from '../render/stage/showStage';
 import type { StageView } from '../render/stage/StageView';
-import { menuVenue, VENUES, type VenueId } from '../render/venues/catalog';
+import { DEFAULT_VENUE, VENUES, type VenueId } from '../render/venues/catalog';
 
 /**
  * The backdrop behind menus: the 3D stage idling with slow camera moves, reacting to whatever the
@@ -21,7 +21,7 @@ import { menuVenue, VENUES, type VenueId } from '../render/venues/catalog';
  */
 export function MenuBackground({ graphics, onReady }: { graphics: GraphicsSettings; onReady?(): void }) {
   const def = useSyncExternalStore(watchShownStage, shownStage);
-  const venue = menuVenue(def?.venueId ?? 'moonrise');
+  const venue = def?.venueId ?? DEFAULT_VENUE;
   const stageRef = useRef<HTMLDivElement>(null);
   const readyRef = useRef(onReady);
   readyRef.current = onReady;

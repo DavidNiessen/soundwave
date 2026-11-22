@@ -15,7 +15,7 @@ import { WINDOWS } from './judge';
 import { GOLD_STARS, MAX_MULTIPLIER, multiplierFor, STREAK_PER_MULTIPLIER } from './scoring';
 import { highwaySpeed, type Settings } from './settings';
 import { stageVenue } from './stages';
-import { resolveVenue, type VenueChoice, type VenueId } from '../render/venues/catalog';
+import type { VenueId } from '../render/venues/catalog';
 
 export interface HudRefs {
   score: HTMLElement;
@@ -55,13 +55,6 @@ export interface FrameJob {
 
 const LEAD_IN = 3;
 export { FINALE_SECONDS, REPLAY_START };
-
-/** The venue the last song played in at random: the next one goes somewhere else. */
-let lastRandom: VenueId | undefined;
-function pickVenue(choice: VenueChoice): VenueId {
-  if (choice !== 'random') return choice;
-  return (lastRandom = resolveVenue(choice, Math.random() * 1e4, lastRandom));
-}
 
 /**
  * Drives one play-through: audio, input, session and both renderers. Lives outside React
@@ -109,8 +102,7 @@ export class PlayController {
   private stageHost: HTMLElement | null = null;
   /** The graphics the newest stage was built with, as JSON. */
   private graphicsKey = '';
-  /** The venue of the stage in use (or Random), and the one this song is played in. */
-  private venueChoice: VenueChoice = 'moonrise';
+  /** The venue of the stage in use. */
   private venue: VenueId;
   private readonly input: KeyboardInput | null = null;
   private readonly padInput: GamepadInput | null = null;
@@ -218,8 +210,7 @@ export class PlayController {
     this.graphicsKey = JSON.stringify(resolveGraphics(settings.graphics));
     const stageDrawn = stageHost ? new Promise<void>((resolve) => (this.stageSettled = resolve)) : Promise.resolve();
     this.ready = this.highway.ready.then(() => stageDrawn);
-    this.venueChoice = stageVenue(settings.stage);
-    this.venue = pickVenue(this.venueChoice);
+    this.venue = stageVenue(settings.stage);
     if (stageHost) {
       // Built once the highway is ready to draw: both compile their shaders in the same GPU process,
       // and the highway, which the player needs first, should not queue behind the stage's.
@@ -370,11 +361,8 @@ export class PlayController {
     this.rumble.update(this.rumbleSettings(s));
     const key = JSON.stringify(resolveGraphics(s.graphics));
     const venue = stageVenue(s.stage);
-    if (key === this.graphicsKey && venue === this.venueChoice) return;
-    if (venue !== this.venueChoice) {
-      this.venueChoice = venue;
-      this.venue = pickVenue(venue);
-    }
+    if (key === this.graphicsKey && venue === this.venue) return;
+    this.venue = venue;
     this.graphicsKey = key;
     if (this.stageHost) this.buildStage();
   }

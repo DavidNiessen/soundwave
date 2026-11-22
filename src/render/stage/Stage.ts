@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import type { BandLevels } from '../../audio/bands';
@@ -14,9 +13,6 @@ import { Beams } from '../aurora/beams';
 import { shared } from '../aurora/shared';
 import { DEFAULT_VENUE, type VenueId } from '../venues/catalog';
 import { buildVenue } from '../venues';
-import { Confetti } from '../venues/kit/confetti';
-import { gradeShader } from '../venues/kit/grade';
-import { HANDHELD_SHADER } from '../venues/kit/handheld';
 import type { Look, Venue, VenueFrame } from '../venues/types';
 import { Director } from './Director';
 import { LightShow, PALETTES, type ShowState } from './LightShow';
@@ -55,7 +51,6 @@ const PYRO: Record<Level, PyroBudget> = {
 };
 /** Low fog rolling off the deck in quiet passages, puffs a second (none on low settings). */
 const FOG: Record<Level, number> = { off: 0, low: 0, medium: 6, high: 12 };
-const CONFETTI: Record<Level, number> = { off: 0, low: 900, medium: 2400, high: 5000 };
 const EXPOSURE = 0.86;
 
 /** A pulse `age` seconds old: it swells to full strength over `attack` seconds, then rings out. */
@@ -66,7 +61,7 @@ function swell(age: number, attack: number, decay: number): number {
 
 /**
  * The 3D stage in real time: a venue (see venues/), and in it a band and a crowd that move with the
- * beat, moving-head beams, sparks, smoke, flames and confetti, a light show that follows the music
+ * beat, moving-head beams, sparks, smoke and flames, a light show that follows the music
  * and a camera director that cuts to it. The venue brings the place; everything here is shared.
  */
 export class Stage {
@@ -77,18 +72,13 @@ export class Stage {
   static async create(canvas: HTMLCanvasElement | OffscreenCanvas, g: GraphicsSettings, opts: StageOptions): Promise<Stage> {
     const cast = await loadCast();
     const focus = opts.part === 'vocals' ? 'vox' : opts.part;
-    const menu = opts.mode === 'menu';
     const venue = await buildVenue(opts.venue ?? DEFAULT_VENUE, {
-      // The menus' venue has no lasers: they would run all the time. Its pyro (below) only fires in
-      // a drop tried out in the stage browser.
-      g: menu ? { ...g, effects: 'off' } : g,
-      menu,
+      g,
+      menu: opts.mode === 'menu',
       part: opts.part,
       focus,
       cast,
       characters: Object.keys(cast.crowd.data.characters),
-      // The renderer caps this at what the graphics card does.
-      anisotropy: 8,
     });
     return new Stage(canvas, venue, cast, g, opts);
   }
@@ -102,8 +92,6 @@ export class Stage {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(50, 1, 0.3, 4000);
   private composer: EffectComposer | null = null;
-  private handheld: ShaderPass | null = null;
-  private grade: ShaderPass | null = null;
   private readonly show: LightShow;
   private readonly beams: Beams;
   private readonly crowd: Figures;
@@ -112,7 +100,6 @@ export class Stage {
   private mirror: THREE.WebGLRenderTarget | null = null;
   private readonly mirrorCamera = new THREE.PerspectiveCamera();
   private readonly flames: Flames | null = null;
-  private readonly confetti: Confetti | null = null;
   /** Seconds of finale left, the time to its next salvo, and how many it has fired. */
   private finaleLeft = 0;
   /** The menus' stage: no drifting smoke, and its pyro only fires in a drop. */
@@ -211,11 +198,6 @@ export class Stage {
       this.scene.add(this.flames.mesh);
       this.owned.push(this.flames);
     }
-    if (CONFETTI[g.effects] && venue.confetti?.length) {
-      this.confetti = new Confetti(CONFETTI[g.effects]);
-      this.scene.add(this.confetti.points);
-      this.owned.push(this.confetti);
-    }
     this.sparks = new Particles(SPARKS[g.effects] || 1, 'sparks');
     this.smoke = new Particles(SMOKE[g.effects] || 1, 'smoke');
     this.pyro = new Pyro(this.sparks.sim, this.smoke.sim, PYRO[g.effects]);
@@ -259,7 +241,7 @@ export class Stage {
       band: this.band,
       shot: this.director.shot.name,
     };
-    if (g.glow || venue.handheld || venue.grade) this.buildComposer();
+    if (g.glow) this.buildComposer();
     this.applySize();
   }
 
@@ -396,7 +378,7 @@ export class Stage {
 
   /**
    * The song is over: for `seconds` the flame jets burn in one long burst, the fireworks go off
-   * one salvo after another, confetti flies and the crowd applauds.
+   * one salvo after another and the crowd applauds.
    */
   finale(seconds = 4) {
     this.show.finale();
@@ -422,8 +404,6 @@ export class Stage {
     this.renderer.setSize(w, h, false);
     this.composer?.setPixelRatio(ratio);
     this.composer?.setSize(w, h);
-    if (this.handheld) this.handheld.uniforms.uAspect.value = w / Math.max(1, h);
-    if (this.grade) this.grade.uniforms.uAspect.value = w / Math.max(1, h);
     this.mirror?.setSize(Math.max(1, Math.round((w * ratio) / 2)), Math.max(1, Math.round((h * ratio) / 2)));
     this.camera.aspect = w / Math.max(1, h);
     this.camera.updateProjectionMatrix();
@@ -478,10 +458,8 @@ export class Stage {
     const intensity = showIntensity(look, f.intensity);
     for (const e of this.show.update({ dt, beat, intensity, bands, overdrive: f.overdrive })) {
       if (!look.pyro) continue;
-      if (e.type === 'fireworks') {
-        this.fireworks(e.which);
-        if (e.which === 'all') this.confetti?.burst(this.venue.confetti!, this.key, this.accent, 1);
-      } else this.co2(e.strength);
+      if (e.type === 'fireworks') this.fireworks(e.which);
+      else this.co2(e.strength);
     }
     // In overdrive the jets keep time: all of them on the bar, every other one on the beats between.
     if (this.flames && look.pyro && this.finaleLeft <= 0 && this.show.state.overdrive > 0.5 && jetBeat !== 'none') {
@@ -497,7 +475,6 @@ export class Stage {
         this.finaleNext = 0.42;
         this.fireworks((['center', 'sides', 'all'] as const)[this.finaleShot % 3]);
         if (this.finaleShot % 3 === 2) this.co2(0.8);
-        if (this.finaleShot % 3 === 0) this.confetti?.burst(this.venue.confetti!, this.key, this.accent, 0.7);
         this.finaleShot++;
       }
     }
@@ -518,7 +495,6 @@ export class Stage {
     this.pyro.update(dt);
     this.sparks.update(dt, this.venue.sparkGravity ?? -9);
     this.smoke.update(dt, 1);
-    this.confetti?.update(dt);
     shared.uBurst.value.w *= Math.exp(-dt * 1.6);
     this.director.update(dt, beat === 'downbeat', this.show.state.level, f.barSeconds);
     this.energy += (intensity - this.energy) * Math.min(1, dt * 1.2);
@@ -557,29 +533,14 @@ export class Stage {
     const raised = this.venue.cameraLift?.(this.director.shot.name) ?? 0;
     pose.pos[1] += raised;
     pose.target[1] += raised;
-    const hand = this.venue.handheld ?? 0;
-    if (hand) {
-      // A camera operator's hands: slow drift, a little sway with the beat, never still.
-      const t = this.show.state.time;
-      const sway = (a: number, b: number) => Math.sin(t * a + b) * 0.6 + Math.sin(t * a * 2.3 + b * 1.7) * 0.4;
-      pose.pos[0] += hand * (0.09 * sway(0.7, 1) + 0.025 * this.pulse);
-      pose.pos[1] += hand * (0.07 * sway(0.9, 2) - 0.04 * this.pulse);
-      pose.target[0] += hand * 0.35 * sway(0.5, 3);
-      pose.target[1] += hand * 0.25 * sway(0.6, 4);
-    }
     this.camera.position.set(...pose.pos);
     this.camera.lookAt(...pose.target);
-    if (hand) this.camera.rotateZ(hand * 0.02 * Math.sin(this.show.state.time * 0.45));
     const vfov = (2 * Math.atan(Math.tan((pose.hfov * Math.PI) / 360) / this.camera.aspect) * 180) / Math.PI;
     if (Math.abs(vfov - this.camera.fov) > 0.01) {
       this.camera.fov = vfov;
       this.camera.updateProjectionMatrix();
     }
     this.camera.updateMatrixWorld();
-    if (this.handheld) {
-      this.handheld.uniforms.uTime.value = this.show.state.time;
-      this.handheld.uniforms.uAmount.value = hand;
-    }
     this.crowd.focus(this.camera.position);
     const scale = this.renderer.domElement.height / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
     this.beams.update(this.camera, scale);
@@ -588,7 +549,6 @@ export class Stage {
     if (this.smoke.mesh.visible) this.beams.light(this.smoke.beams.pos, this.smoke.beams.dir, this.smoke.beams.col);
     this.sparks.setScale(scale);
     this.smoke.setScale(scale);
-    this.confetti?.setScale(scale);
     this.renderMirror();
     if (this.composer) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
@@ -832,14 +792,6 @@ export class Stage {
     if (this.g.glow) {
       const [strength, radius, threshold] = this.venue.bloom ?? [0.2, 0.45, 1.0];
       composer.addPass(new UnrealBloomPass(new THREE.Vector2(512, 512), strength, radius, threshold));
-    }
-    if (this.venue.grade) {
-      this.grade = new ShaderPass(gradeShader(this.venue.grade));
-      composer.addPass(this.grade);
-    }
-    if (this.venue.handheld) {
-      this.handheld = new ShaderPass(HANDHELD_SHADER);
-      composer.addPass(this.handheld);
     }
     composer.addPass(new OutputPass());
     this.composer = composer;

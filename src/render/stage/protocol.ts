@@ -1,6 +1,5 @@
 import type { BandLevels } from '../../audio/bands';
 import type { GraphicsSettings } from '../../game/graphics';
-import type { VenueId } from '../venues/catalog';
 import type { StageOptions } from './Stage';
 import type { StageLook } from './look';
 
@@ -24,7 +23,7 @@ export type Beat = 'beat' | 'downbeat';
 
 /** From the page to the stage host. Every message but `preload` and `visible` names one stage. */
 export type ToStage =
-  | { type: 'preload'; venue: VenueId }
+  | { type: 'preload' }
   | { type: 'visible'; visible: boolean }
   | {
       type: 'create';

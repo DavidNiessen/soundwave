@@ -1,6 +1,6 @@
 import { applyPreset, DEFAULT_GRAPHICS, type GraphicsPreset } from '../game/graphics';
 import { Stage } from '../render/stage/Stage';
-import { isVenueChoice, resolveVenue } from '../render/venues/catalog';
+import { DEFAULT_VENUE, isVenueId } from '../render/venues/catalog';
 
 /**
  * Dev-only: the 3D stage full screen with a simulated song, for checking looks and performance
@@ -17,7 +17,7 @@ export async function runStagePreview(root: HTMLElement) {
   canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;display:block;background:#000';
   root.replaceChildren(canvas);
   const choice = q.get('venue');
-  const venue = resolveVenue(isVenueChoice(choice) ? choice : 'moonrise', Date.now());
+  const venue = isVenueId(choice) ? choice : DEFAULT_VENUE;
   const stage = await Stage.create(canvas, g, { mode: q.get('mode') === 'menu' ? 'menu' : 'play', part: 'lead', venue });
   const fit = () => stage.setSize(innerWidth, innerHeight, devicePixelRatio);
   fit();

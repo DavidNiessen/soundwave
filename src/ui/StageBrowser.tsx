@@ -41,10 +41,7 @@ import { playSfx } from '../audio/sfx';
 import { menuPulse } from '../input/rumble';
 import { boostMenuStage } from '../render/aurora/menuStage';
 import { setPreviewStage } from '../render/stage/showStage';
-import { DEFAULT_VENUE, menuVenue, VENUE_CHOICES, type VenueChoice } from '../render/venues/catalog';
-import { preloadStage } from '../render/stage/StageView';
 import { VenuePicture } from './VenuePicture';
-import { useSlide } from './useSlide';
 import { deleteMedia, getMedia, mediaIds, mediaUrl, putMedia } from '../storage/stageMedia';
 import { useHints, type Action } from './actions';
 import { Dialog } from './Dialog';
@@ -185,8 +182,6 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): {
    * 3D stage) the 3D stages to start from.
    */
   const [panel, setPanel] = useState<'templates' | 'start' | null>(null);
-  /** The venue a new 3D stage is made in (picked beside the looks it can start from). */
-  const [startVenue, setStartVenue] = useState<VenueChoice>(DEFAULT_VENUE);
   const all = panel !== null;
   const setAll = (on: boolean) => setPanel(on ? 'templates' : null);
   const [activeRow, setActiveRow] = useState<string | null>(null);
@@ -201,7 +196,7 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): {
   const commitTimer = useRef(0);
   const editing = on && editId ? ((draft?.id === editId ? draft : null) ?? stages.mine.find((d) => d.id === editId) ?? null) : null;
   const focused = findStage(stages, focusId);
-  const shown = editing ?? (panel === 'start' ? { ...focused, venueId: startVenue } : focused);
+  const shown = editing ?? focused;
 
   // The real stage shows the stage in focus or being edited; leaving the tab puts the one in use back.
   const preview = on ? JSON.stringify(shown) : '';
@@ -272,7 +267,6 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): {
     // A new 3D stage starts from one of the 3D stages, picked in the panel beside the stage.
     if (kind === 'venue') {
       setFocusId(BUILT_IN[0].id);
-      setStartVenue(DEFAULT_VENUE);
       return setPanel('start');
     }
     if (kind === 'gradient') {
@@ -413,15 +407,13 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): {
             shown={shown.id}
             onFocus={setFocusId}
             onUse={(id) => {
-              if (panel === 'start') return create(findStage(stages, id), { venueId: startVenue });
+              if (panel === 'start') return create(findStage(stages, id));
               equip(id);
               setAll(false);
               setFocusId(id);
             }}
             onCopy={(d) => create(d)}
             onClose={leaveAll}
-            venue={startVenue}
-            onVenue={setStartVenue}
           />
         ) : (
           <div className="stage-cards" ref={wheelSideways} data-nav-group="stage-cards">
@@ -696,22 +688,13 @@ function Editor({ def, actions, onClose, touch, activeRow, setActiveRow, onSave,
   if (venue) {
     sections.push(
       {
-        title: 'Venue and sky',
+        title: 'Sky',
         rows: [
-          {
-            kind: 'choice',
-            id: 'venueId',
-            label: 'Venue',
-            help: `${VENUE_CHOICES.find((v) => v.id === def.venueId)?.blurb ?? ''}.`,
-            value: def.venueId,
-            options: VENUE_CHOICES.map((v) => ({ value: v.id, label: v.name, help: `${v.blurb}.` })),
-            set: (v) => set({ venueId: v as VenueChoice }),
-          },
           {
             kind: 'choice',
             id: 'sky',
             label: 'Sky',
-            help: `${SKIES.map((x) => `${x.label}: ${x.help}`).join(' ')} Moonrise only: the other venues bring their own sky.`,
+            help: SKIES.map((x) => `${x.label}: ${x.help}`).join(' '),
             value: def.sky,
             options: SKIES,
             set: (v) => set({ sky: v as StageDef['sky'] }),
@@ -749,7 +732,7 @@ function Editor({ def, actions, onClose, touch, activeRow, setActiveRow, onSave,
             kind: 'choice',
             id: 'screensMode',
             label: 'Screens show',
-            help: 'Moonrise’s big round screen and the screens beside it: the show’s own pictures, or a video of yours. The other venues keep their own pictures.',
+            help: 'Moonrise’s big round screen and the screens beside it: the show’s own pictures, or a video of yours.',
             value: def.screens ? 'video' : 'show',
             options: [
               { value: 'show', label: 'The show' },
@@ -994,8 +977,6 @@ function TemplatePanel({
   onUse,
   onCopy,
   onClose,
-  venue,
-  onVenue,
 }: {
   /** `browse`: use a template or copy it; `start`: pick the 3D stage a new one starts from. */
   mode: 'browse' | 'start';
@@ -1005,13 +986,8 @@ function TemplatePanel({
   onUse(id: string): void;
   onCopy(d: StageDef): void;
   onClose(): void;
-  /** The venue a new stage is made in (start mode): the looks are seen in it. */
-  venue: VenueChoice;
-  onVenue(venue: VenueChoice): void;
 }) {
   const start = mode === 'start';
-  const venueRow = useSlide<HTMLDivElement>(venue);
-  const picked = VENUE_CHOICES.find((v) => v.id === venue) ?? VENUE_CHOICES[0];
   return createPortal(
     <Dialog title={start ? 'Pick a 3D stage' : 'Templates'} className="see-through stage-drawer" onClose={onClose}>
       <div className="sheet-body template-panel" data-nav-group="templates">
@@ -1019,51 +995,12 @@ function TemplatePanel({
           <h2 className="display meta-heading">{start ? 'Pick a 3D stage' : 'Templates'}</h2>
           <p className="hint">
             {start
-              ? 'Pick a venue, then a look: point at one to see it, press it to make it yours.'
+              ? 'Pick a look: point at one to see it, press it to make it yours.'
               : 'Use one as it is, or copy it to make it your own.'}
           </p>
         </div>
-        {start && (
-          <div className="start-venue">
-            <h3 className="label" id="start-venue-label">
-              Venue
-            </h3>
-            <div
-              className="venue-row slide"
-              ref={venueRow}
-              role="radiogroup"
-              aria-labelledby="start-venue-label"
-              aria-describedby="start-venue-blurb"
-            >
-              <span className="sel" aria-hidden />
-              {VENUE_CHOICES.map((v) => {
-                const on = venue === v.id;
-                return (
-                  <button
-                    key={v.id}
-                    type="button"
-                    className={`choice venue ${on ? 'on' : ''}`}
-                    data-on={on}
-                    role="radio"
-                    aria-checked={on}
-                    onClick={() => onVenue(v.id)}
-                    onFocus={() => preloadStage(menuVenue(v.id))}
-                    onPointerEnter={() => preloadStage(menuVenue(v.id))}
-                  >
-                    <VenuePicture venue={v.id} />
-                    <span>{v.name}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <p className="venue-blurb dim" id="start-venue-blurb">
-              {picked.blurb}
-              {venue === 'random' ? '. The menus show Moonrise.' : '.'}
-            </p>
-          </div>
-        )}
         <ul className="template-list">
-          {(start ? BUILT_IN.filter((d) => d.venueId === DEFAULT_VENUE) : BUILT_IN).map((d) => (
+          {BUILT_IN.map((d) => (
             <li key={d.id} className={`template-row ${d.id === active ? 'active' : ''} ${d.id === shown ? 'shown' : ''}`}>
               <button
                 type="button"
@@ -1073,8 +1010,7 @@ function TemplatePanel({
                 onPointerEnter={(e) => e.pointerType === 'mouse' && onFocus(d.id)}
                 onClick={() => onUse(d.id)}
               >
-                {/* Starting a new stage, each look is seen in the venue picked above. */}
-                <Swatch def={start ? { ...d, venueId: venue } : d} />
+                <Swatch def={d} />
                 <span className="template-text">
                   <span className="stage-name">
                     {d.name}

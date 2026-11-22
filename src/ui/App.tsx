@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { setDiscordEnabled, showScene } from '../app/discord';
-import { findStage, stageVenue } from '../game/stages';
+import { findStage } from '../game/stages';
 import { setActiveStage } from '../render/stage/showStage';
 import { analysisManager, canPlay } from '../analysis/manager';
 import { stemModel } from '../analysis/separation/model';
@@ -64,7 +64,6 @@ import { resolveGraphics } from '../game/graphics';
 import { videoExports } from '../video/exports';
 import type { VideoJob } from '../video/protocol';
 import { stageLook, type StageDef } from '../game/stages';
-import { resolveVenue } from '../render/venues/catalog';
 import { ExportVideoDialog, VideoExportScreen } from './VideoExport';
 import { readSongPackage, songFile, storeNewSong, storeSongPackage, updateSongMeta } from '../storage/songFile';
 import { ActionBar, useActions } from './actions';
@@ -79,7 +78,6 @@ import { LobbyScreen } from './LobbyScreen';
 import { watchStageLoading } from '../render/stage/StageView';
 import { bootDone, bootStep } from './boot';
 import { MenuBackground } from './MenuBackground';
-import { menuVenue } from '../render/venues/catalog';
 import { onBackdrop } from './windowDrag';
 import { InstallAppCard, UpdateCard } from './AppUpdates';
 import { checkForUpdates, updates } from '../app/updates';
@@ -160,7 +158,7 @@ const DEPTH: Record<View['name'], number> = {
 /** What stands behind the highway in a replay's video: the player's stage, as far as a worker can draw it. */
 async function videoBackdrop(def: StageDef): Promise<VideoJob['backdrop']> {
   const b = def.backdrop;
-  if (b.kind === 'venue') return { kind: 'venue', venue: resolveVenue(def.venueId, Math.random() * 1e4), look: stageLook(def) };
+  if (b.kind === 'venue') return { kind: 'venue', venue: def.venueId, look: stageLook(def) };
   if (b.kind === 'gradient') return { kind: 'gradient', colors: [b.from, b.to], dim: def.dim };
   // The player's file, read here: the worker has no way into the page's stage files.
   const file = b.media ? await getMedia(b.media) : null;
@@ -316,10 +314,6 @@ export function App() {
     return () => window.removeEventListener('mousedown', press);
   }, [windowed]);
   useEffect(() => document.documentElement.style.setProperty('--ui-scale', String(settings.uiScale)), [settings.uiScale]);
-  // The menus take the colours of the venue behind them (see the venue themes in styles.css).
-  useEffect(() => {
-    document.documentElement.dataset.venue = menuVenue(stageVenue(settings.stage));
-  }, [settings.stage]);
   // Motion: the player's choice, or the system's when they left it alone.
   useEffect(() => {
     const media = matchMedia('(prefers-reduced-motion: reduce)');

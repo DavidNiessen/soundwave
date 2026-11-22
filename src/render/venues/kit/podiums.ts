@@ -4,7 +4,7 @@ import { PODIUM_FRAGMENT } from '../../aurora/materials';
 import { STATIC_VERTEX, shared } from '../../aurora/shared';
 import type { Vec3 } from '../../stage/Director';
 import type { VenueFrame } from '../types';
-import { glow } from './surface';
+import { glow } from './glow';
 
 /** The order the shaders know the players in. */
 export const PLAYERS = ['lead', 'vox', 'bass', 'drums'];

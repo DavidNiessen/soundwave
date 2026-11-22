@@ -1,7 +1,6 @@
 import { gpuFound, type GraphicsSettings } from '../../game/graphics';
 import { serveWorkerFetch } from '../../app/workerFetch';
 import { DEFAULT_LOOK, type StageLook } from './look';
-import type { VenueId } from '../venues/catalog';
 import type { StageOptions } from './Stage';
 import type { Beat, FromStage, StageInput, StageRate, ToStage } from './protocol';
 
@@ -160,10 +159,10 @@ function getPageHost(): Promise<(m: ToStage) => void> {
 if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => postVisible());
 
 /** Starts loading the venue now, ahead of the first stage, so it is there sooner. */
-export function preloadStage(venue: VenueId) {
+export function preloadStage() {
   const w = workerDraws ? getWorker() : null;
-  if (w) w.postMessage({ type: 'preload', venue } satisfies ToStage);
-  else void getPageHost().then((handle) => handle({ type: 'preload', venue }));
+  if (w) w.postMessage({ type: 'preload' } satisfies ToStage);
+  else void getPageHost().then((handle) => handle({ type: 'preload' }));
 }
 
 /** Calls back with how much of the venue has loaded (0..1), now and as more of it arrives. */

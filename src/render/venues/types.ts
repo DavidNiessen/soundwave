@@ -21,8 +21,6 @@ export interface VenueContext {
   part?: Part;
   focus?: string;
   cast: Cast;
-  /** Highest anisotropic filtering the graphics card does (for textures seen at a slant). */
-  anisotropy: number;
   /** The crowd's character names. */
   characters: string[];
 }
@@ -88,8 +86,6 @@ export interface Venue {
   flames?: Vec3[];
   /** The jets that fire with the middle salvo, first and last index (the middle two fifths if not given). */
   flameMiddle?: [number, number];
-  /** Confetti cannons: where they stand and which way they shoot. */
-  confetti?: { pos: Vec3; dir: Vec3 }[];
   looks: Look[];
   /** Tone mapping exposure, and the glow's strength, radius and threshold. */
   exposure?: number;
@@ -107,10 +103,6 @@ export interface Venue {
   mirror?: { level: number; hide?: THREE.Object3D[] };
   /** Height at which the beams lay pools of light (over the crowd's heads); none when not given. */
   pools?: number;
-  /** A colour grade over the picture: contrast, saturation and a vignette (see kit/grade). */
-  grade?: { contrast: number; saturation: number; vignette: number; tint?: Rgb };
-  /** Film grain, vignette and a little shake for a hand-held camera, 0..1. */
-  handheld?: number;
   /** Sets the shared uniforms this venue holds still (glow, haze, screens). Called every frame. */
   bind(): void;
   /** Moves the set pieces. */
