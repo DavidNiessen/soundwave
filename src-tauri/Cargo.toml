@@ -26,7 +26,9 @@ tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-single-instance = "2"
 cpal = "0.16"
-hidapi = "2"
+# Shared on macOS: by default hidapi seizes a device there, and the web view would stop
+# seeing the controller it reads the touchpad and sets the light bar of.
+hidapi = { version = "2", features = ["macos-shared-device"] }
 discord-rich-presence = "1.1"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]

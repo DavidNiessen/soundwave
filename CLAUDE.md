@@ -34,7 +34,7 @@ Tests synthesize their audio; never add real songs or recordings to the reposito
 
 **The 3D stage** (`src/render/aurora/`, built from Blender assets in `public/stage/aurora/`) draws in a worker of its own through OffscreenCanvas (`render/stage/StageView.ts` on the page, `stage.worker.ts` + `stageHost.ts` in the worker), so a slow stage frame never holds up the menus or the highway. Where a worker cannot draw (and in the macOS app, which serves the game from `tauri://`), the same host runs on the page. Workers there fetch through the page (`src/app/workerFetch.ts`).
 
-**Audio** (`src/audio/`): `AudioEngine` (Web Audio) plays songs; the desktop app can play through its own native output (`audio/native/`, `src-tauri/src/audio_out.rs`). PS5 DualSense haptics are driven natively too (`src-tauri/src/haptics.rs`, cpal; `src/input/rumble.ts`).
+**Audio** (`src/audio/`): `AudioEngine` (Web Audio) plays songs; the desktop app can play through its own native output (`audio/native/`, `src-tauri/src/audio_out.rs`). PS5 DualSense haptics are driven natively too (`src-tauri/src/haptics.rs`, cpal; `src/input/rumble.ts`), and so is a PlayStation controller's light bar (`src-tauri/src/lightbar.rs`, hidapi, USB only: by Bluetooth it would switch the controller to reports the web view cannot read; `src/input/lightbar.ts`, `LightShow` in `PlayController`).
 
 **UI** (`src/ui/`, React): `App.tsx` holds the views and the set flow. `actions.tsx` provides the action bar and per-screen actions (`useActions`), `input/menuNav.ts` the directional/controller navigation, `input/bindings.ts` every rebindable command (keyboard, controller, mouse). Styles are one stylesheet, `ui/styles.css`, with design tokens at the top.
 
