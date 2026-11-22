@@ -1,7 +1,7 @@
 /**
  * Output of song analysis: what chart generation works from.
  */
-export const ANALYSIS_VERSION = 3;
+export const ANALYSIS_VERSION = 4;
 export const ANALYSIS_SAMPLE_RATE = 22050;
 
 export type DrumKind = 'kick' | 'snare' | 'hat';
