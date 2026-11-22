@@ -34,3 +34,38 @@ export async function loadRuntime(ort: typeof Ort, device: 'gpu' | 'cpu'): Promi
   if (device === 'gpu') ort.env.wasm.numThreads = 1;
   ort.env.logLevel = 'error';
 }
+
+/**
+ * Why the runtime failed, said plainly. Every build of it keeps its memory shared between threads,
+ * which a browser only allows a page that is cross-origin isolated: when it is not, that is the
+ * reason, whatever the runtime itself says.
+ */
+export function runtimeError(err: unknown): Error {
+  const message = err instanceof Error ? err.message : String(err);
+  if (typeof crossOriginIsolated !== 'undefined' && !crossOriginIsolated)
+    return new Error(`this browser did not isolate the page, which the analysis needs for its shared memory; the runtime said: ${message}`);
+  return err instanceof Error ? err : new Error(message);
+}
+
+/**
+ * Opens a model on the graphics card, or on the processor when that fails. Should the processor fail
+ * too, the first failure is the one reported: once the runtime has failed to start, a second try
+ * only says that it did ("previous call to 'initWasm()' failed").
+ */
+export async function openOnDevice<T>(
+  device: 'gpu' | 'cpu',
+  open: (provider: 'webgpu' | 'wasm') => Promise<T>,
+  onFallback: (err: Error) => void,
+): Promise<{ value: T; device: 'gpu' | 'cpu' }> {
+  try {
+    return { value: await open(device === 'gpu' ? 'webgpu' : 'wasm'), device };
+  } catch (err) {
+    if (device !== 'gpu') throw runtimeError(err);
+    onFallback(err as Error);
+    try {
+      return { value: await open('wasm'), device: 'cpu' };
+    } catch {
+      throw runtimeError(err);
+    }
+  }
+}

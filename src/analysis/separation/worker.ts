@@ -2,7 +2,7 @@
 import * as ort from 'onnxruntime-web/webgpu';
 import { proxyWorkerFetch } from '../../app/workerFetch';
 import { transcribeOnnx } from '../pitch/basicPitchOnnx';
-import { loadRuntime } from '../runtime';
+import { loadRuntime, openOnDevice } from '../runtime';
 import type { StemName, StemNotes } from '../types';
 import type { LoadedModel } from './model';
 import { MODEL_STEMS, separate, type SegmentModel } from './separate';
@@ -38,17 +38,14 @@ const post = (m: SeparationResponse, transfer: Transferable[] = []) => (self as 
 /** The transcription model (Basic Pitch, 230 KB) on the same device as the stem model. */
 async function openPitchSession(url: string, device: 'gpu' | 'cpu'): Promise<ort.InferenceSession> {
   const bytes = new Uint8Array(await (await fetch(url)).arrayBuffer());
-  try {
+  const opened = await openOnDevice(
+    device,
     // Its few shape operations run on the processor by design; the runtime would warn about that.
-    return await ort.InferenceSession.create(bytes, { executionProviders: [device === 'gpu' ? 'webgpu' : 'wasm'], logSeverityLevel: 3 });
-  } catch (err) {
-    if (device !== 'gpu') throw err;
-    post({
-      type: 'log',
-      message: `the graphics card could not load the transcription model (${(err as Error).message}); using the processor`,
-    });
-    return ort.InferenceSession.create(bytes, { executionProviders: ['wasm'], logSeverityLevel: 3 });
-  }
+    (provider) => ort.InferenceSession.create(bytes, { executionProviders: [provider], logSeverityLevel: 3 }),
+    (err) =>
+      post({ type: 'log', message: `the graphics card could not load the transcription model (${err.message}); using the processor` }),
+  );
+  return opened.value;
 }
 
 async function openSession(model: LoadedModel, provider: 'webgpu' | 'wasm'): Promise<ort.InferenceSession> {
@@ -87,17 +84,12 @@ self.onmessage = async (e: MessageEvent<SeparationRequest>) => {
   try {
     await loadRuntime(ort, req.device);
     post({ type: 'progress', progress: 0, step: 'Loading the stem model' });
-    let device = req.device;
-    let session: ort.InferenceSession;
     const opened = performance.now();
-    try {
-      session = await openSession(req.model, device === 'gpu' ? 'webgpu' : 'wasm');
-    } catch (err) {
-      if (device !== 'gpu') throw err;
-      post({ type: 'log', message: `the graphics card could not load the stem model (${(err as Error).message}); using the processor` });
-      device = 'cpu';
-      session = await openSession(req.model, 'wasm');
-    }
+    const { value: session, device } = await openOnDevice(
+      req.device,
+      (provider) => openSession(req.model, provider),
+      (err) => post({ type: 'log', message: `the graphics card could not load the stem model (${err.message}); using the processor` }),
+    );
     post({ type: 'log', message: `stem model on ${device} loaded in ${Math.round(performance.now() - opened)} ms` });
 
     const started = performance.now();
