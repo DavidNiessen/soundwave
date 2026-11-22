@@ -12,7 +12,7 @@ import {
   Power,
   Search,
   Settings as SettingsIcon,
-  FerrisWheel,
+  Sparkles,
   Upload,
   Download,
   MonitorDown,
@@ -78,7 +78,7 @@ type Tab = 'play' | 'edit' | 'stage' | 'replays';
 const TABS: [Tab, string, LucideIcon][] = [
   ['play', 'Play', Play],
   ['edit', 'Edit', PencilRuler],
-  ['stage', 'Stage', FerrisWheel],
+  ['stage', 'Stage', Sparkles],
   ['replays', 'Replays', Clapperboard],
 ];
 const tabIndex = (t: Tab) => TABS.findIndex(([id]) => id === t);
