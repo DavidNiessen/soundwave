@@ -3239,6 +3239,11 @@ input.text {
   background: var(--raised-hi);
   color: var(--ink);
 }
+/* Unfolded, the gaps between the cards are part of the stack, so the pointer can travel from the
+   newest to the older ones without the stack folding under it. */
+.notices.held {
+  pointer-events: auto;
+}
 /* Folded: every notification in one place, the older ones as edges behind the newest (above it at
    the foot, below it at the top), so the stack covers no more than one. The pointer unfolds it. */
 .notices.folded {

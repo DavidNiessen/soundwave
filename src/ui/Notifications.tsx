@@ -1,5 +1,5 @@
 import { CircleCheck, CircleX, Info, TriangleAlert, X, type LucideIcon } from 'lucide-react';
-import { useEffect, useSyncExternalStore, type CSSProperties } from 'react';
+import { useEffect, useRef, useSyncExternalStore, type CSSProperties } from 'react';
 import { playSfx, type Sfx } from '../audio/sfx';
 import type { Settings } from '../game/settings';
 import { bound, keysOf, mouseInput, pressed } from '../input/bindings';
@@ -16,6 +16,9 @@ const LOOK: Record<Tone, { icon: LucideIcon; label: string; sfx: Sfx; pulse: Men
   success: { icon: CircleCheck, label: 'Done', sfx: 'toggle-on', pulse: 'select' },
   info: { icon: Info, label: 'For your information', sfx: 'move', pulse: null },
 };
+
+/** How long the unfolded stack waits after the pointer leaves it before it folds again. */
+const FOLD_DELAY_MS = 350;
 
 /**
  * Where notifications stand: `bar` above the action bar at the foot of the menus (at the top on a
@@ -46,6 +49,14 @@ export function Notifications({
 }) {
   const { items, held } = useSyncExternalStore(subscribe, snapshot);
   const hints = useHints(settings);
+  // The stack folds a moment after the pointer leaves it, not at once: a pointer on its way to an
+  // older card that slips off an edge on the way keeps the stack open.
+  const folding = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const keepOpen = () => {
+    if (folding.current) clearTimeout(folding.current);
+    folding.current = null;
+  };
+  useEffect(() => keepOpen, []);
 
   // Each tone has its own sound, and a controller its own pulse; while a song plays they keep
   // quiet, so nothing is heard or felt that is not the music or the notes.
@@ -149,8 +160,15 @@ export function Notifications({
       data-nav-skip
       role="region"
       aria-label="Notifications"
-      onPointerEnter={(e) => e.pointerType === 'mouse' && hold(true)}
-      onPointerLeave={() => hold(document.hidden)}
+      onPointerEnter={(e) => {
+        if (e.pointerType !== 'mouse') return;
+        keepOpen();
+        hold(true);
+      }}
+      onPointerLeave={() => {
+        keepOpen();
+        folding.current = setTimeout(() => hold(document.hidden), FOLD_DELAY_MS);
+      }}
     >
       {items.map(card)}
       <div className="sr-only" role="alert">
