@@ -167,7 +167,12 @@ export async function startFrameEncoder(
         if (b > a) data.set(src.subarray(start + a, start + b), c * length + a);
       }
       audioUntil = to;
-      await sound.add(new mb.AudioSample({ data, format: 'f32-planar', numberOfChannels: n, sampleRate: rate, timestamp: from }));
+      const sample = new mb.AudioSample({ data, format: 'f32-planar', numberOfChannels: n, sampleRate: rate, timestamp: from });
+      try {
+        await sound.add(sample);
+      } finally {
+        sample.close();
+      }
     }
     if (audioUntil >= audioEnd && audioEnd > 0) sound.close();
   };
