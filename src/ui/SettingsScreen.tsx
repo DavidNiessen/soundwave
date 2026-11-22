@@ -737,11 +737,7 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
           level('beams', 'Beams', 'Moving light beams in the haze.'),
           level('lights', 'Lights and bulbs', 'Washes, bulbs and glowing details.'),
           level('effects', 'Fireworks and smoke', 'Fireworks and smoke jets on big moments.'),
-          level(
-            'textures',
-            'Textures',
-            'Scanned surfaces in the venues: 1K at Low, 2K at Medium, 4K at High. 4K needs a strong graphics card.',
-          ),
+          level('textures', 'Textures', 'Scanned surfaces in the venues: 1K at Low, 2K at Medium and High.'),
         ],
       },
     ];

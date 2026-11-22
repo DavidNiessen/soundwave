@@ -22,7 +22,7 @@ export interface GraphicsSettings {
   lights: Level;
   /** Fireworks and CO2. */
   effects: Level;
-  /** Scanned surface textures: off (drawn in the shader instead), 1K, 2K or 4K. */
+  /** Scanned surface textures: off (drawn in the shader instead), 1K or 2K (High uses 2K too). */
   textures: Level;
   /** Bloom around bright lights. */
   glow: boolean;

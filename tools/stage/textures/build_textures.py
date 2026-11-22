@@ -8,8 +8,8 @@ any use, commercial included, with no attribution required (they are credited in
 docs/THIRD_PARTY.md all the same). Their 4K packages are downloaded once into --src, which is not
 part of the repository.
 
-For every material the game gets two tiling textures in three sizes (4k, 2k, 1k; the graphics
-settings pick one):
+For every material the game gets two tiling textures in two sizes (2k, 1k; the graphics
+settings pick one, and High uses 2k):
 
     <name>_c.webp   colour
     <name>_n.webp   the normal's x and y in red and green (OpenGL convention: green points up),
@@ -47,7 +47,7 @@ MATERIALS = {
     'ground': 'Ground037',
     'asphalt': 'Asphalt031',
 }
-SIZES = {'4k': 4096, '2k': 2048, '1k': 1024}
+SIZES = {'2k': 2048, '1k': 1024}
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--src', default='local-audio/textures')

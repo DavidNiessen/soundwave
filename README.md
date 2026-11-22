@@ -219,7 +219,7 @@ blender -b --factory-startup -P tools/stage/venues/build.py -- --venue warehouse
 
 In the game each venue's module (`src/render/venues/<venue>.ts`) gives the model's material roles their shaders and brings it to life with the kit in `src/render/venues/kit`: surfaces lit by the show (with a wet floor or a lake that mirrors it), LED screens whose pictures are made from the music, lasers that stay a line at any distance, rows of lamps, pools of light where the beams land, confetti, a colour grade, and the look of a hand-held camera. Strobes never flash more than three times a second (`kit/strobe.ts`), the limit for photosensitive viewers.
 
-Surfaces are drawn with scanned materials from [ambientCG](https://ambientcg.com) (CC0), in 1K, 2K or 4K by the **Textures** setting (off draws patterns in the shader instead). `python tools/stage/textures/build_textures.py` downloads the scans and makes `public/stage/textures`; `docs/THIRD_PARTY.md` lists them.
+Surfaces are drawn with scanned materials from [ambientCG](https://ambientcg.com) (CC0), in 1K or 2K by the **Textures** setting (off draws patterns in the shader instead). `python tools/stage/textures/build_textures.py` downloads the scans and makes `public/stage/textures`; `docs/THIRD_PARTY.md` lists them.
 
 Moonrise, and the band and the crowd every venue shares, are built in Blender and drawn by the game's own renderer (`src/render/aurora`). Three scripts regenerate everything the repository ships in `public/stage/aurora`:
 

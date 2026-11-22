@@ -4,8 +4,10 @@ import { part } from '../../aurora/assets';
 
 /**
  * Scanned materials (tools/stage/textures/build_textures.py makes them from CC0 scans): for each a
- * tiling colour texture and a normal map with the roughness in its blue, in 1K, 2K and 4K. The
+ * tiling colour texture and a normal map with the roughness in its blue, in 1K and 2K. The
  * graphics settings pick the size; with textures off, surfaces draw their pattern in the shader.
+ * High stays at 2K: from the highway's camera a 4K surface looks no different, and the 4K set alone
+ * would have added 89 MB to the game.
  */
 export type ScanName =
   | 'concrete_wall'
@@ -30,7 +32,7 @@ export interface Scan {
   normal: THREE.Texture;
 }
 
-const FOLDER: Record<Level, string | null> = { off: null, low: '1k', medium: '2k', high: '4k' };
+const FOLDER: Record<Level, string | null> = { off: null, low: '1k', medium: '2k', high: '2k' };
 const cache = new Map<string, Promise<Scan | undefined>>();
 
 async function image(url: string, anisotropy: number, srgb: boolean): Promise<THREE.Texture> {
