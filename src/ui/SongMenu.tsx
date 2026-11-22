@@ -29,6 +29,8 @@ interface Props {
   /** Where it opens: the pointer, or beside the song for keys and controllers. */
   at: { x: number; y: number };
   actions: SongActions;
+  /** Opens straight on the question whether to remove them (the Delete key). */
+  confirming?: boolean;
   onClose(): void;
 }
 
@@ -38,8 +40,8 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
  * A song's menu (right-click, a long press, or the Options button): what its detail sheet offers,
  * at hand. For several selected songs it offers what makes sense for all of them at once.
  */
-export function SongMenu({ songs, status, setlist, at, actions, onClose }: Props) {
-  const [confirm, setConfirm] = useState(false);
+export function SongMenu({ songs, status, setlist, at, actions, confirming = false, onClose }: Props) {
+  const [confirm, setConfirm] = useState(confirming);
 
   const one = songs.length === 1 ? songs[0] : null;
   const st = (s: SongMeta) => status[s.id] ?? { state: 'idle' as const };

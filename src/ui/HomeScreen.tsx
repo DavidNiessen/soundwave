@@ -182,7 +182,7 @@ export function HomeScreen({
                   id: 'replay-options',
                   label: 'Options',
                   icon: Ellipsis,
-                  ...keysOf('home.replayOptions'),
+                  ...keysOf('lists.options'),
                   run: () => replayCommands.current?.options(),
                 },
                 {
@@ -205,7 +205,7 @@ export function HomeScreen({
                   id: 'replay-delete',
                   label: 'Delete',
                   icon: Trash2,
-                  ...keysOf('home.replayDelete'),
+                  ...keysOf('lists.delete'),
                   bar: false,
                   run: () => replayCommands.current?.remove(),
                 },
