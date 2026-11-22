@@ -35,7 +35,7 @@ export const GOLD_LIGHT: Rgb = { r: 255, g: 125, b: 0 };
 export const OVERDRIVE_LIGHT: Rgb = { r: 40, g: 165, b: 255 };
 
 /** How long a lane's flash takes to fade back, ms. */
-export const FLASH_MS = 180;
+export const FLASH_MS = 360;
 /** How bright gold and blue rest between hits (and beats), as a share of full. */
 const STEADY = 0.62;
 
@@ -94,7 +94,7 @@ export async function lightPads(): Promise<LightPad[]> {
   }
 }
 
-/** How often the colour is sent at most while it changes, ms: smooth enough for a 180ms flash. */
+/** How often the colour is sent at most while it changes, ms: smooth enough for a 360ms flash. */
 const SEND_EVERY = 30;
 
 /** The light bar for one play-through. */
