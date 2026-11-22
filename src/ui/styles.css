@@ -6129,17 +6129,27 @@ a.btn {
   animation: none;
 }
 
-/* The controls: a pane at the right foot of the screen, the scorebox's twin on the other side. */
-.replay-dock {
+/* The controls: a pane at the right foot of the screen, the scorebox's twin on the other side,
+   with the video being made (when one is) standing on top of it. */
+.replay-stack {
   position: absolute;
   right: calc(1.6% + var(--safe-r));
   bottom: calc(3.5% + var(--safe-b));
   z-index: 5;
-  width: clamp(22rem, 30vw, 34rem);
+  width: clamp(21.5rem, 25vw, 27rem);
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
-  padding: 0.7rem 0.8rem 0.75rem;
+  gap: 0.45rem;
+  pointer-events: none;
+}
+.replay-stack > * {
+  pointer-events: auto;
+}
+.replay-dock {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.55rem 0.65rem 0.55rem;
   border-radius: var(--r-l);
   background: var(--panel);
   backdrop-filter: var(--glass-blur);
@@ -6152,23 +6162,80 @@ a.btn {
     opacity 0.3s var(--ease),
     transform 0.4s var(--ease);
 }
-.replay.away .replay-dock {
+.replay.away :is(.replay-dock, .replay-export-box) {
   opacity: 0;
   transform: translateY(0.8rem);
   pointer-events: none;
 }
-:root[data-motion='reduced'] .replay-dock {
+:root[data-motion='reduced'] :is(.replay-dock, .replay-export-box) {
   transition: opacity 0.2s;
 }
-:root[data-motion='reduced'] .replay.away .replay-dock {
+:root[data-motion='reduced'] .replay.away :is(.replay-dock, .replay-export-box) {
   transform: none;
+}
+/* The video being made, while one is: a slim pane over the controls. */
+.replay-export-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.5rem 0.7rem 0.6rem;
+  border-radius: var(--r-l);
+  background: var(--panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-edge),
+    inset 0 1px 0 rgb(255 255 255 / 0.1);
+  animation: rise-in 0.35s var(--ease) backwards;
+  transition:
+    opacity 0.3s var(--ease),
+    transform 0.4s var(--ease);
+}
+.replay-export-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.replay-export-head svg {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  color: var(--pink);
+}
+.replay-export-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85rem;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.replay-export-more {
+  color: var(--ink-3);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+.replay-export-what {
+  color: var(--ink-2);
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.replay-export-bar {
+  height: 4px;
+}
+.replay-export-bar > span {
+  background: linear-gradient(90deg, #b3306f, var(--pink));
 }
 .replay-head {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 0.9rem;
-  padding: 0 0.35rem;
+  gap: 0.7rem;
+  padding: 0 0.3rem;
 }
 /* Back on the left, the video and hiding the controls on the right. */
 .replay-foot {
@@ -6177,7 +6244,7 @@ a.btn {
   align-items: center;
   justify-content: space-between;
   gap: 0.3rem 0.5rem;
-  padding-top: 0.45rem;
+  padding-top: 0.3rem;
   border-top: 1px solid var(--line);
 }
 .replay-foot-end {
@@ -6187,8 +6254,13 @@ a.btn {
 }
 .replay-foot .btn {
   gap: 0.4em;
-  padding-inline: 0.45rem 0.6rem;
-  font-size: 0.9rem;
+  min-height: 2rem;
+  padding-inline: 0.4rem 0.55rem;
+  font-size: 0.8rem;
+}
+/* Where the key or button is shown beside the label, the icon would only repeat it. */
+.replay-foot .btn:has(.keycap-hint, .hint-glyph) > svg.lucide {
+  display: none;
 }
 .replay-what {
   flex: 1;
@@ -6198,7 +6270,7 @@ a.btn {
   min-width: 0;
 }
 .replay-title {
-  font-size: 1.1rem;
+  font-size: 0.95rem;
   font-weight: 800;
   line-height: 1.2;
   white-space: nowrap;
@@ -6207,13 +6279,15 @@ a.btn {
 }
 .replay-sub {
   color: var(--ink-2);
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .replay-time {
+  flex: none;
+  font-size: 0.9rem;
   font-weight: 900;
   font-style: italic;
   font-variant-numeric: tabular-nums;
@@ -6223,16 +6297,19 @@ a.btn {
   color: var(--ink-3);
 }
 .replay-note {
+  padding: 0 0.3rem;
   color: var(--ink-2);
-  font-size: 0.85rem;
-  line-height: 1.35;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The timeline: where the notes are, what has been watched, where notes were missed. Wide enough
    to take a finger, though the line itself is thin. */
 .replay-scrub {
   position: relative;
-  height: 1.7rem;
+  height: 1.35rem;
   margin: 0 0.35rem;
   border-radius: var(--r-s);
   cursor: pointer;
@@ -6298,24 +6375,39 @@ a.btn {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.35rem;
+  margin-top: 1.25rem;
+}
+/* Touch shows no key hints: the buttons sit close under the timeline. */
+:root[data-input='touch'] .replay-transport {
   margin-top: 0.35rem;
 }
 .replay-btn {
-  min-width: var(--target);
-  padding: 0.35rem 0.55rem;
+  min-width: 2.3rem;
+  min-height: 2.3rem;
+  padding: 0.25rem 0.45rem;
+}
+.replay-btn svg {
+  width: 1rem;
+  height: 1rem;
 }
 .replay-play {
-  min-width: calc(var(--target) * 1.5);
+  min-width: 3.3rem;
+}
+:root[data-input='touch'] .replay-btn {
+  min-width: var(--target);
+  min-height: var(--target);
 }
 .replay-play svg {
   fill: currentColor;
 }
-/* Each control's key or button sits on its corner, so the row stays a row of symbols. */
+/* Each control's key or button stands just above it, clear of the focus ring round the control, so
+   the row stays a row of symbols and the hint is never covered. */
 .replay-transport :is(.replay-btn, .icon-btn) > :is(.keycap-hint, .hint-glyph) {
   position: absolute;
-  top: -0.55rem;
-  right: -0.35rem;
+  bottom: calc(100% + 0.45rem);
+  left: 50%;
+  translate: -50% 0;
   z-index: 1;
   pointer-events: none;
 }
@@ -6342,7 +6434,8 @@ a.btn {
 }
 .replay-speed .icon-btn {
   position: relative;
-  width: 2.3rem;
+  width: 2rem;
+  height: 2rem;
   border-radius: 999px;
 }
 .replay-speed .icon-btn:disabled {
@@ -6650,10 +6743,36 @@ a.btn {
   }
 }
 
+/* While videos are being made in the background: a chip on the main menu. */
+.export-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: inset 0 0 0 1px var(--glass-edge);
+  color: var(--ink);
+  font-size: 0.85rem;
+  font-weight: 850;
+  font-style: italic;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.export-chip svg {
+  width: 1rem;
+  height: 1rem;
+  color: var(--pink);
+}
+.export-more {
+  color: var(--ink-3);
+}
+
 /* Narrow screens and touch: the controls run along the foot of the screen, over the deck, and step
    aside while the replay plays. The score moves to the top, as it does for touch. */
 @media (max-width: 760px) {
-  .replay-dock {
+  .replay-stack {
     left: calc(0.6rem + var(--safe-l));
     right: calc(0.6rem + var(--safe-r));
     bottom: calc(0.6rem + var(--safe-b));
@@ -6671,7 +6790,7 @@ a.btn {
     display: none;
   }
 }
-:root[data-input='touch'] .replay-dock {
+:root[data-input='touch'] .replay-stack {
   left: calc(0.6rem + var(--safe-l));
   right: calc(var(--edge, 64px) + 1.6rem + var(--safe-r));
   bottom: calc(0.6rem + var(--safe-b));
@@ -6680,7 +6799,7 @@ a.btn {
   margin-inline: auto;
 }
 @media (max-width: 560px) {
-  :root[data-input='touch'] .replay-dock {
+  :root[data-input='touch'] .replay-stack {
     right: calc(0.6rem + var(--safe-r));
   }
   .replay-transport {

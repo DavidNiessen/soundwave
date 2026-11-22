@@ -3,9 +3,21 @@ import { generateAll } from '../chart/generator';
 import { thinParts } from '../chart/presence';
 import { DIFFICULTIES, PARTS, type Chart, type Difficulty, type Part } from '../chart/types';
 import { chartFromNotes, chartKey, editedCount, resolveGrid, songDuration, standsAlone, type SongEdits } from '../editor/edits';
-import { analysisKey, deleteAnalyses, deleteEdits, getAnalysis, getEdits, putAnalysis, putEdits, putStems } from '../storage/db';
+import {
+  analysisKey,
+  deleteAnalyses,
+  deleteEdits,
+  getAnalysis,
+  getEdits,
+  listAnalyses,
+  putAnalysis,
+  putEdits,
+  putStems,
+} from '../storage/db';
 import { writeAnalysisToFile } from '../storage/songFile';
+import { serveWorkerFetch } from '../app/workerFetch';
 import { stemAnalyzer, type StemAnalyzer } from './separation/analyzer';
+import { analysisDevice } from './separation/support';
 import {
   ANALYSIS_SAMPLE_RATE,
   ANALYSIS_VERSION,
@@ -97,6 +109,8 @@ export class AnalysisManager {
   constructor(
     private readonly local: LocalAnalyzer = localAnalyzer,
     private readonly separator: StemAnalyzer | null = null,
+    /** Analyses an earlier version of the game made, and whether this device can analyze (for tests). */
+    private readonly env: ManagerEnv = defaultEnv,
   ) {}
 
   subscribe = (l: Listener) => {
@@ -161,10 +175,30 @@ export class AnalysisManager {
     // It may have been queued while the storage was read.
     const now = this.status[id]?.state as AnalysisStatus['state'] | undefined;
     if (now === 'analyzing' || now === 'queued') return;
-    // A song with a grid of its own (started from scratch in the editor) is playable as it is.
-    if (cached || standsAlone(edits)) this.set(id, { state: 'ready' });
-    else if (autoQueue) this.enqueue(id);
+    if (cached) return this.set(id, { state: 'ready' });
+    if (standsAlone(edits)) {
+      // A song with a grid of its own is playable as it is. One the game analyzed before (and the
+      // player then gave a grid of their own) is analyzed again when the game now charts
+      // differently: the parts the player did not write keep the game's charts, rather than
+      // turning empty until someone thinks of analyzing it again.
+      this.set(id, { state: 'ready' });
+      if (autoQueue && (await this.olderAnalysis(id)) && (await this.env.canAnalyze())) this.enqueue(id);
+      return;
+    }
+    if (autoQueue) this.enqueue(id);
     else this.set(id, { state: 'idle' });
+  }
+
+  /** The newest analysis an earlier version of the game made of a song, if one is kept. */
+  private async olderAnalysis(id: string): Promise<AnalysisResult | undefined> {
+    try {
+      const older = (await this.env.olderAnalyses(id))
+        .filter((a) => a.version < ANALYSIS_VERSION && isAnalysisResult(a.data))
+        .sort((a, b) => b.version - a.version);
+      return older[0]?.data as AnalysisResult | undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private async loadCached(id: string): Promise<AnalysisResult | undefined> {
@@ -179,6 +213,15 @@ export class AnalysisManager {
         }
       } catch {
         /* storage unavailable */
+      }
+    }
+    // A device that cannot analyze (analyzing switched off) keeps playing a song by the analysis an earlier
+    // version of the game made: charts from an older analysis beat no charts at all.
+    if (!(await this.env.canAnalyze())) {
+      const older = await this.olderAnalysis(id);
+      if (older) {
+        this.results.set(id, older);
+        return older;
       }
     }
     return undefined;
@@ -382,6 +425,19 @@ export class AnalysisManager {
   }
 }
 
+/** What the manager asks of the device and its storage beyond the current analysis. */
+export interface ManagerEnv {
+  /** Every analysis kept for a song, with the version of the game that made it. */
+  olderAnalyses(id: string): Promise<{ version: number; data: unknown }[]>;
+  /** Whether this device can analyze songs at all (only not where analyzing is switched off). */
+  canAnalyze(): Promise<boolean>;
+}
+
+const defaultEnv: ManagerEnv = {
+  olderAnalyses: listAnalyses,
+  canAnalyze: async () => (await analysisDevice()) !== 'none',
+};
+
 const localAnalyzer: LocalAnalyzer = async (id, onProgress, signal, assist) => {
   const buffer = await loadSongBuffer(id);
   if (signal.aborted) throw abortError();
@@ -408,7 +464,12 @@ const localAnalyzer: LocalAnalyzer = async (id, onProgress, signal, assist) => {
       if (s) stems[name] = s;
     }
   }
-  return runWorker(audio, onProgress, signal, assist?.lines, drumSignal, stems, assist?.stemNotes);
+  // The beat model is small enough for any device: without a graphics card it runs on the processor.
+  const beatModel = {
+    url: new URL(`${import.meta.env.BASE_URL}models/beat-this/small0.onnx`, location.href).href,
+    device: (await analysisDevice()) === 'gpu' ? ('gpu' as const) : ('cpu' as const),
+  };
+  return runWorker(audio, onProgress, signal, assist?.lines, drumSignal, stems, assist?.stemNotes, beatModel);
 };
 
 /** Mono, 22.05 kHz copy of the song for analysis. */
@@ -431,6 +492,7 @@ function runWorker(
   drumSignal?: Float32Array,
   stems?: Partial<Record<StemName, Float32Array>>,
   stemNotes?: StemNotes,
+  beatModel?: WorkerRequest['beatModel'],
 ): Promise<AnalysisResult> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
@@ -443,6 +505,8 @@ function runWorker(
       { once: true },
     );
     worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
+      // The worker's fetches, where it cannot make them itself (see app/workerFetch).
+      if (serveWorkerFetch(worker, e.data)) return;
       const m = e.data;
       if (m.type === 'progress') onProgress(m.progress);
       else if (m.type === 'log') console.info('[analysis]', m.message);
@@ -463,6 +527,7 @@ function runWorker(
       drumSignal,
       stems,
       stemNotes,
+      beatModel,
     };
     const transfer = [signal.buffer, ...(drumSignal ? [drumSignal.buffer] : []), ...Object.values(stems ?? {}).map((s) => s.buffer)];
     worker.postMessage(req, transfer);

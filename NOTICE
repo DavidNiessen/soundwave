@@ -25,3 +25,9 @@ The surface textures in public/stage/textures are made by
 tools/stage/textures/build_textures.py from scanned materials by ambientCG
 (ambientcg.com), dedicated to the public domain under CC0 1.0; docs/THIRD_PARTY.md
 lists each one.
+
+The beat model in public/models/beat-this is the "small0" model of Beat This by Francesco
+Foscarin, Jan Schlüter and Gerhard Widmer (Johannes Kepler University Linz;
+github.com/CPJKU/beat_this), exported by tools/analysis/export_beat_model.py. Its code and
+weights are published under the MIT licence. Its authors note that some of the recordings
+it was trained on are copyrighted or under limited Creative Commons licences.

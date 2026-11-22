@@ -68,7 +68,7 @@ export const COMMANDS: Command[] = [
     { id: 'home.replayOptions', label: 'Replay options', key: 'KeyO', pad: 'b2', mouse: 'm1' },
     { id: 'home.replayKeep', label: 'Keep a replay', key: 'KeyK' },
     { id: 'home.replayDelete', label: 'Delete a replay', key: 'Delete', key2: 'Backspace' },
-    { id: 'home.replayExport', label: 'Export a replay’s video', key: 'KeyV' },
+    { id: 'home.replayExport', label: 'Export a replay’s video', key: 'KeyV', pad: 'b11' },
   ]),
   ...cmd('library', [
     { id: 'library.options', label: 'Song options', key: 'KeyO', pad: 'b2', mouse: 'm1' },
@@ -111,7 +111,7 @@ export const COMMANDS: Command[] = [
     { id: 'replay.forward', label: 'Forward 10 seconds', key: 'KeyL', pad: 'b7' },
     { id: 'replay.restart', label: 'From the start', key: 'Home', pad: 'b8' },
     { id: 'replay.controls', label: 'Show or hide the controls', key: 'KeyH', pad: 'b2' },
-    { id: 'replay.export', label: 'Export a video', key: 'KeyV' },
+    { id: 'replay.export', label: 'Export a video', key: 'KeyV', pad: 'b11' },
   ]),
   ...cmd('editor', [
     { id: 'editor.play', label: 'Play or pause', key: 'Space', pad: 'b3' },

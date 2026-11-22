@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { AnalysisManager, type Assist, type LocalAnalyzer } from '../src/analysis/manager';
 import type { StemAnalyzer } from '../src/analysis/separation/analyzer';
-import type { AnalysisResult } from '../src/analysis/types';
+import { ANALYSIS_VERSION, type AnalysisResult } from '../src/analysis/types';
+import type { SongEdits } from '../src/editor/edits';
 
 const result = (): AnalysisResult => ({
   version: 1,
@@ -143,5 +144,60 @@ describe('AnalysisManager', () => {
     m.enqueue('song');
     for (let i = 0; i < 5 && m.snapshot().song?.state !== 'error'; i++) await tick();
     expect(m.snapshot().song).toMatchObject({ state: 'error', error: 'decode failed' });
+  });
+});
+
+describe('AnalysisManager after the analysis version is raised', () => {
+  const ownGrid: SongEdits = {
+    version: 1,
+    grid: { kind: 'fixed', bpm: 120, offset: 0, beatsPerBar: 4 },
+    duration: 10,
+    charts: {},
+    updatedAt: 1,
+  };
+  const env = (canAnalyze: boolean, older: boolean) => ({
+    olderAnalyses: async () => (older ? [{ version: ANALYSIS_VERSION - 1, data: { ...result(), source: 'ml' } }] : []),
+    canAnalyze: async () => canAnalyze,
+  });
+  const settle = async (m: AnalysisManager, id: string) => {
+    for (let i = 0; i < 10 && m.snapshot()[id]?.state !== 'ready'; i++) await tick();
+  };
+
+  it('analyzes a song again that was analyzed before and then given a grid of its own', async () => {
+    let calls = 0;
+    const m = new AnalysisManager(async () => (calls++, result()), null, env(true, true));
+    await m.saveEdits('song', ownGrid);
+    await m.check('song', true);
+    expect(['queued', 'analyzing']).toContain(m.snapshot().song?.state);
+    await settle(m, 'song');
+    expect(m.snapshot().song?.state).toBe('ready');
+    expect(calls).toBe(1);
+  });
+
+  it('leaves a song started from scratch alone: it was never analyzed', async () => {
+    let calls = 0;
+    const m = new AnalysisManager(async () => (calls++, result()), null, env(true, false));
+    await m.saveEdits('song', ownGrid);
+    await m.check('song', true);
+    await tick();
+    expect(m.snapshot().song?.state).toBe('ready');
+    expect(calls).toBe(0);
+  });
+
+  it('plays by the older analysis on a device that cannot analyze', async () => {
+    let calls = 0;
+    const m = new AnalysisManager(async () => (calls++, result()), null, env(false, true));
+    await m.check('song', true);
+    expect(m.snapshot().song?.state).toBe('ready');
+    expect((await m.analysis('song'))?.beats).toEqual(result().beats);
+    expect(calls).toBe(0);
+  });
+
+  it('still analyzes where it can rather than play by an older analysis', async () => {
+    let calls = 0;
+    const m = new AnalysisManager(async () => (calls++, result()), null, env(true, true));
+    await m.check('song', true);
+    await settle(m, 'song');
+    expect(calls).toBe(1);
   });
 });

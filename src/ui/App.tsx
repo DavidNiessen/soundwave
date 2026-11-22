@@ -4,7 +4,7 @@ import { findStage, stageVenue } from '../game/stages';
 import { setActiveStage } from '../render/stage/showStage';
 import { analysisManager, canPlay } from '../analysis/manager';
 import { stemModel } from '../analysis/separation/model';
-import { analysisDevice, type AnalysisDevice } from '../analysis/separation/support';
+import { analysisDevice, isHandheld, type AnalysisDevice } from '../analysis/separation/support';
 import { getEngine } from '../audio/engine';
 import { ACCEPTED, isAudioFile, readSongFile } from '../audio/importSong';
 import { menuMusicStatus, setMenuMusic, setMusicVolume } from '../audio/menuMusic';
@@ -58,7 +58,12 @@ import { newReplayId, type ReplayData, type ReplayMeta } from '../storage/replay
 import { soundwaveFileName, isSoundwaveFile } from '../storage/soundwaveFile';
 import { chooseSaveTarget, saveSongFile, watchOpenedFiles, type SaveTarget } from '../storage/share';
 import { videoFileName, type VideoExportSettings } from '../game/videoExport';
-import type { VideoPlan } from '../game/videoRender';
+import { songSamples, type VideoPlan } from '../game/videoRender';
+import { resolveGraphics } from '../game/graphics';
+import { videoExports } from '../video/exports';
+import type { VideoJob } from '../video/protocol';
+import { stageLook, type StageDef } from '../game/stages';
+import { resolveVenue } from '../render/venues/catalog';
 import { ExportVideoDialog, VideoExportScreen } from './VideoExport';
 import { readSongPackage, songFile, storeNewSong, storeSongPackage, updateSongMeta } from '../storage/songFile';
 import { ActionBar, useActions } from './actions';
@@ -150,6 +155,14 @@ const DEPTH: Record<View['name'], number> = {
   results: 4,
   summary: 5,
 };
+
+/** What stands behind the highway in a replay's video: the player's stage, as far as a worker can draw it. */
+function videoBackdrop(def: StageDef): VideoJob['backdrop'] {
+  const b = def.backdrop;
+  if (b.kind === 'venue') return { kind: 'venue', venue: resolveVenue(def.venueId, Math.random() * 1e4), look: stageLook(def) };
+  if (b.kind === 'gradient') return { kind: 'gradient', colors: [b.from, b.to] };
+  return { kind: 'night' };
+}
 
 /** Silence the length of a song, for a replay whose song has left the library (a low rate keeps it small). */
 function silence(seconds: number): AudioBuffer {
@@ -361,7 +374,7 @@ export function App() {
     void analysisDevice().then(async (d) => {
       if (!live) return;
       setDevice(d);
-      if (d !== 'none' && (await stemModel.check()) === 'absent') void stemModel.ensure().catch(() => {});
+      if (d !== 'none' && !isHandheld() && (await stemModel.check()) === 'absent') void stemModel.ensure().catch(() => {});
     });
     return () => {
       live = false;
@@ -657,6 +670,17 @@ export function App() {
       key: Date.now(),
     }));
   };
+  // Videos are made in the menus and while a replay is watched, never beside a song or the editor.
+  const holdVideos = view.name === 'play' || view.name === 'editor' || view.name === 'export';
+  useEffect(() => videoExports.hold(holdVideos), [holdVideos]);
+  useEffect(
+    () =>
+      videoExports.onFinished((item) => {
+        if (item.state === 'saved') toast(`The video of ${item.title} is saved as ${item.fileName}.`);
+        else if (item.state === 'failed') toast(`The video of ${item.title} could not be exported: ${item.error}`);
+      }),
+    [toast],
+  );
   /** The replay whose video is being set up (the export dialog is open). */
   const [exportAsk, setExportAsk] = useState<ReplayMeta | null>(null);
   /** Loads a replay with its song, or silence where the song has left the library. */
@@ -668,8 +692,9 @@ export function App() {
     return { data, buffer: buffer ?? silence(Math.max(meta.duration, data.chart.duration)), silent: !buffer };
   };
   /**
-   * Records a replay's video. The save dialog comes first (a browser shows it only straight after
-   * a press); the replay is then loaded and recorded behind the wipe.
+   * Makes a replay's video. The save dialog comes first (a browser shows it only straight after a
+   * press). Where videos can be made in the background, it joins the queue and the player carries on
+   * where they were; elsewhere the replay is loaded behind the wipe and recorded in the foreground.
    */
   const recordVideo = (meta: ReplayMeta, video: VideoExportSettings, plan: VideoPlan) => {
     const fileName = videoFileName(
@@ -682,9 +707,39 @@ export function App() {
     // Back to where the export was asked for: a replay starts over, the list stays as it was.
     const back: View = view.name === 'replay' ? { ...view, key: Date.now() } : view;
     void chooseSaveTarget(fileName, plan.ext === 'mp4' ? 'video-mp4' : 'video-webm')
-      .then((target) => {
+      .then(async (target) => {
         if (!target) return;
         setExportAsk(null);
+        if (plan.kind === 'frames' && (await videoExports.available())) {
+          try {
+            const { data, buffer, silent } = await loadReplay(meta);
+            const id = `${meta.id}:${Date.now().toString(36)}`;
+            videoExports.add(
+              { id, replayId: meta.id, title: meta.title, fileName },
+              {
+                id,
+                title: meta.title,
+                artist: meta.artist,
+                chart: data.chart,
+                inputs: data.inputs,
+                // Copies, handed over to the worker: the song's own stay cached for playing.
+                song: { channels: songSamples(buffer).channels.map((c) => c.slice()), sampleRate: buffer.sampleRate },
+                music: video.music && !silent,
+                trackSpeed: settings.trackSpeed,
+                graphics: resolveGraphics(settings.graphics),
+                backdrop: videoBackdrop(findStage(settings.stage, settings.stage.active)),
+                video,
+                plan,
+              },
+              target,
+            );
+            playSfx('add');
+          } catch (e) {
+            await target.abort().catch(() => {});
+            toast(`The video could not be exported: ${(e as Error).message}`);
+          }
+          return;
+        }
         menuPulse('launch');
         void wipeTo(async () => {
           const { data, buffer } = await loadReplay(meta);

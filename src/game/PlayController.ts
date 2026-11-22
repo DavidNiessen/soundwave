@@ -1,14 +1,13 @@
 import type { Chart } from '../chart/types';
 import { AudioEngine } from '../audio/AudioEngine';
-import { BandMeter } from '../audio/bands';
 import { Highway } from '../render/Highway';
 import { StageView } from '../render/stage/StageView';
-import { barAt, barIntensity } from '../render/stage/LightShow';
 import { resolveGraphics } from './graphics';
 import { GameSession, type Results } from './GameSession';
 import { ReplayPlayback, ReplayRecorder, type ReplayInputs } from './replay';
+import { feedbackFor, ShowPulse } from './showPulse';
+import { FINALE_SECONDS, REPLAY_START } from './timing';
 import { BufferAnalyser } from '../audio/bufferAnalyser';
-import type { StageInput } from '../render/stage/protocol';
 import { Rumbler } from '../input/rumble';
 import { barsLeft, findBreaks, type Break } from './breaks';
 import { GamepadInput, KeyboardInput, TouchInput, type InputHandlers } from './input';
@@ -55,8 +54,7 @@ export interface FrameJob {
 }
 
 const LEAD_IN = 3;
-/** Song time a replay starts at: a moment before the song, without a countdown. */
-export const REPLAY_START = -1.5;
+export { FINALE_SECONDS, REPLAY_START };
 
 /** The venue the last song played in at random: the next one goes somewhere else. */
 let lastRandom: VenueId | undefined;
@@ -64,8 +62,6 @@ function pickVenue(choice: VenueChoice): VenueId {
   if (choice !== 'random') return choice;
   return (lastRandom = resolveVenue(choice, Math.random() * 1e4, lastRandom));
 }
-/** How long the stage celebrates after the last note before the result comes up, seconds. */
-export const FINALE_SECONDS = 4;
 
 /**
  * Drives one play-through: audio, input, session and both renderers. Lives outside React
@@ -102,8 +98,7 @@ export class PlayController {
   onFrame: ((t: number) => void) | null = null;
   private readonly highway: Highway;
   /** How loud the song is in the bass, middle and treble: for the highway's glow and the stage. */
-  private readonly meter = new BandMeter();
-  private meterAt = performance.now();
+  private readonly show: ShowPulse;
   /**
    * The 3D stage, drawn in a worker of its own (see StageView): the highway and the input never wait
    * for it. The highway stands before the plain night until it is built.
@@ -117,7 +112,6 @@ export class PlayController {
   /** The venue of the stage in use (or Random), and the one this song is played in. */
   private venueChoice: VenueChoice = 'moonrise';
   private venue: VenueId;
-  private readonly barLevels: number[];
   private readonly input: KeyboardInput | null = null;
   private readonly padInput: GamepadInput | null = null;
   private readonly touchInput: TouchInput | null = null;
@@ -125,17 +119,13 @@ export class PlayController {
   private readonly rumble: Rumbler;
   private raf = 0;
   private phase: PlayPhase = 'countdown';
-  private lastBeat = -1;
   /** When the latest beat landed (performance.now ms), for the highway's swell of light. */
-  private beatAt = -Infinity;
   private hudCache = { score: -1, mult: -1, streak: -1, od: -1, stars: -1, starP: -1, odActive: false, breakSec: -1, songP: -1, left: -1 };
   private readonly breaks: Break[];
   /** A beat fell in the frame being drawn, and how much bass there is right now (0..1). */
-  private readonly barTimes: number[];
   private feedbackTimer = 0;
   private disposed = false;
   private lastCount = -1;
-  private readonly downbeats: Set<number>;
   /** Song time the run starts at (0 unless a chart is test-played from the middle of the song). */
   private startAt = 0;
   /** Overdrive meter when overdrive was activated, for the progressive rumble. */
@@ -211,7 +201,7 @@ export class PlayController {
     engine.volume = settings.volume;
     engine.onEnded = () => this.finish();
 
-    this.downbeats = new Set(chart.downbeats);
+    this.show = new ShowPulse(chart);
     if (replay) {
       this.playback = new ReplayPlayback(chart, replay);
       this.session = this.playback.session;
@@ -224,9 +214,7 @@ export class PlayController {
     this.highway = new Highway(highwayCanvas, chart);
     this.highway.speed = highwaySpeed(settings.trackSpeed);
     this.breaks = findBreaks(chart);
-    this.barTimes = chart.downbeats.map((i) => chart.beats[i]).filter((x) => x !== undefined);
-    this.meter.setAnalyser(engine.analyser);
-    this.barLevels = barIntensity(chart);
+    this.show.meter.setAnalyser(engine.analyser);
     this.graphicsKey = JSON.stringify(resolveGraphics(settings.graphics));
     const stageDrawn = stageHost ? new Promise<void>((resolve) => (this.stageSettled = resolve)) : Promise.resolve();
     this.ready = this.highway.ready.then(() => stageDrawn);
@@ -307,18 +295,16 @@ export class PlayController {
     const chart = this.chart;
     this.highway.attach(this.session);
     this.unwire = this.session.on((e) => {
+      const fb = feedbackFor(e);
+      if (fb) this.flashFeedback(fb.text, fb.kind, fb.delta);
       if (e.type === 'hit') {
-        this.flashFeedback(e.grade.toUpperCase(), e.grade, e.delta);
         this.rumble.hit(e.lane, e.grade);
         if (chart.notes[e.noteIndex].dur > 0) this.rumble.sustainStart(e.lane);
       } else if (e.type === 'miss') {
-        this.flashFeedback('MISS', 'miss');
         this.rumble.miss(e.lane);
       } else if (e.type === 'release') {
-        this.flashFeedback(e.grade.toUpperCase(), e.grade, e.delta);
         this.rumble.hit(e.lane, e.grade);
       } else if (e.type === 'release-miss') {
-        this.flashFeedback(e.early ? 'TOO EARLY' : 'LET GO!', 'miss');
         this.rumble.miss(e.lane);
       } else if (e.type === 'sustain-end') this.rumble.sustainEnd(e.lane);
       else if (e.type === 'overdrive-start') {
@@ -326,10 +312,7 @@ export class PlayController {
         this.odMeterAtStart = Math.max(this.session.overdrive, 0.01);
         this.rumble.overdrive();
       } else if (e.type === 'overdrive-end') this.rumble.overdriveEnd();
-      else if (e.type === 'phrase-complete') {
-        this.flashFeedback('CHARGED', 'od');
-        this.rumble.phraseComplete();
-      }
+      else if (e.type === 'phrase-complete') this.rumble.phraseComplete();
     });
   }
 
@@ -436,8 +419,7 @@ export class PlayController {
       return;
     }
     this.startAt = Math.max(0, from);
-    this.lastBeat = -1;
-    while (this.lastBeat + 1 < this.chart.beats.length && this.chart.beats[this.lastBeat + 1] <= this.startAt - LEAD_IN) this.lastBeat++;
+    this.show.from(this.startAt - LEAD_IN);
     this.setPhase('countdown');
     await this.engine.play(this.startAt - LEAD_IN, 0.05);
     this.loop();
@@ -466,8 +448,7 @@ export class PlayController {
     await this.engine.play(at, 0.05);
     this.highway.reset();
     this.lastCount = -1;
-    this.lastBeat = -1;
-    while (this.lastBeat + 1 < this.chart.beats.length && this.chart.beats[this.lastBeat + 1] <= at) this.lastBeat++;
+    this.show.from(at);
     this.setPhase(at < this.startAt ? 'countdown' : 'playing');
   }
 
@@ -497,8 +478,7 @@ export class PlayController {
     this.session = this.playback!.seek(at);
     this.wire();
     this.highway.reset();
-    this.lastBeat = -1;
-    while (this.lastBeat + 1 < this.chart.beats.length && this.chart.beats[this.lastBeat + 1] <= at) this.lastBeat++;
+    this.show.from(at);
     this.hud.feedback.classList.remove('pop');
     // Everything on the HUD is drawn afresh for the new session.
     for (const k of Object.keys(this.hudCache) as (keyof typeof this.hudCache)[]) if (k !== 'odActive') this.hudCache[k] = -1;
@@ -583,36 +563,10 @@ export class PlayController {
       if (t > this.chart.duration + 0.5 && t > this.engine.duration) this.finish();
     }
 
-    // Beat accents for the track glow and background.
-    const beats = this.chart.beats;
-    let beat: 'none' | 'beat' | 'downbeat' = 'none';
-    while (this.lastBeat + 1 < beats.length && beats[this.lastBeat + 1] <= t) {
-      this.lastBeat++;
-      this.beatAt = now;
-      beat = this.downbeats.has(this.lastBeat) ? 'downbeat' : 'beat';
-    }
+    const f = this.show.frame(t, now, this.session.overdriveActive, !!this.stage);
     if (this.phase === 'playing' && this.session.overdriveActive)
-      this.rumble.overdriveTick(this.session.overdrive / this.odMeterAtStart, beat);
-    // Each beat swells the highway's light in quickly and lets it ebb away softly: a rise of a few
-    // hundredths of a second and a long fall, on the clock, so it is the same at any frame rate and
-    // dies away during a pause. The curve peaks at 1, about 0.05 s after the beat.
-    const since = (now - this.beatAt) / 1000;
-    const beatPulse = since >= 0 && since < 1.5 ? ((1 - Math.exp(-since / 0.02)) * Math.exp(-since / 0.2)) / 0.715 : 0;
-    const bands = this.meter.update(Math.min(0.1, Math.max(0, now - this.meterAt) / 1000));
-    this.meterAt = now;
-    const low = bands.low;
-    let stage: StageInput | null = null;
-    if (this.stage) {
-      const bar = barAt(this.barTimes, t);
-      const busy = bar >= 0 ? (this.barLevels[bar] ?? 0.3) : 0.15;
-      stage = {
-        intensity: busy * 0.75 + low * 0.25,
-        overdrive: this.session.overdriveActive,
-        barSeconds: this.chart.secondsPerBeat * 4,
-        bands,
-      };
-    }
-    return { beat, stage, pulse: beatPulse * 0.5 + low * 0.5 };
+      this.rumble.overdriveTick(this.session.overdrive / this.odMeterAtStart, f.beat);
+    return f;
   }
 
   /**
@@ -624,9 +578,8 @@ export class PlayController {
     if (!this.playback) return;
     this.frames = true;
     cancelAnimationFrame(this.raf);
-    this.meter.setAnalyser(this.bufferBands() as unknown as AnalyserNode);
-    this.meterAt = clock;
-    this.beatAt = -Infinity;
+    this.show.meter.setAnalyser(this.bufferBands() as unknown as AnalyserNode);
+    this.show.restartClock(clock);
     this.seekTo(REPLAY_START);
     this.setPhase('playing');
   }
@@ -759,7 +712,7 @@ export class PlayController {
     el.classList.toggle('leaving', leaving);
     const moving = !leaving && !reducedMotion();
     // Without a bar grid, fall back to seconds.
-    const bars = this.barTimes.length > 1 ? barsLeft(t, b.next, this.barTimes) : Math.max(1, Math.ceil(b.next - t));
+    const bars = this.show.barTimes.length > 1 ? barsLeft(t, b.next, this.show.barTimes) : Math.max(1, Math.ceil(b.next - t));
     if (bars === c.breakSec) {
       if (beat !== 'none' && moving) breakBeat(this.hud.breakRing);
       return;

@@ -170,6 +170,29 @@ export function findDownbeats(beatAccent: number[], beatsPerBar = 4): number[] {
   return out;
 }
 
+/**
+ * Bar starts given as times, as indices into the beat grid: each on the beat nearest to it, and the
+ * bars carried on at their usual length before the first and after the last one, so the whole grid
+ * has bars (the grid is longer than what the bar starts were found in).
+ */
+export function barsOnGrid(beats: number[], barTimes: number[]): number[] {
+  if (!beats.length || !barTimes.length) return [];
+  const at = new Set<number>();
+  let i = 0;
+  for (const t of [...barTimes].sort((a, b) => a - b)) {
+    while (i < beats.length - 1 && Math.abs(beats[i + 1] - t) <= Math.abs(beats[i] - t)) i++;
+    at.add(i);
+  }
+  const bars = [...at].sort((a, b) => a - b);
+  // The usual number of beats in a bar: the most frequent distance between bar starts.
+  const counts = new Map<number, number>();
+  for (let j = 1; j < bars.length; j++) counts.set(bars[j] - bars[j - 1], (counts.get(bars[j] - bars[j - 1]) ?? 0) + 1);
+  const usual = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0] ?? 4;
+  for (let b = bars[0] - usual; b >= 0; b -= usual) bars.unshift(b);
+  for (let b = bars[bars.length - 1] + usual; b < beats.length; b += usual) bars.push(b);
+  return bars;
+}
+
 const medianInterval = (b: number[]) => {
   const d = b
     .slice(1)

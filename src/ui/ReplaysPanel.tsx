@@ -7,6 +7,8 @@ import type { SongMeta } from '../storage/db';
 import type { ReplayMeta } from '../storage/replays';
 import { Hint, useHints } from './actions';
 import { Cover } from './Cover';
+import { exportOf, exportShort, exportStatus, useExports } from './ExportProgress';
+import { videoExports } from '../video/exports';
 import { Dialog } from './Dialog';
 import { DIFFICULTY_LABEL, ICON_STROKE, PART_ICON, PART_LABEL, Pips, Stars } from './icons';
 import { clock, replayDate } from './ReplayScreen';
@@ -53,6 +55,8 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 export function ReplaysPanel({ replays, songs, settings, actions, onSettings, commands }: Props) {
   const hints = useHints(settings);
   const byId = useMemo(() => new Map(songs.map((s) => [s.id, s])), [songs]);
+  /** The videos being made: a replay whose video is made shows how far it is on its row. */
+  const exports = useExports();
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [menu, setMenu] = useState<ReplayMeta | null>(null);
   const [asking, setAsking] = useState<ReplayMeta | null>(null);
@@ -121,6 +125,7 @@ export function ReplaysPanel({ replays, songs, settings, actions, onSettings, co
             {replays.map((r, i) => {
               const song = byId.get(r.songId);
               const Icon = PART_ICON[r.part];
+              const making = exportOf(exports, r.id);
               return (
                 <li
                   key={r.id}
@@ -132,7 +137,7 @@ export function ReplaysPanel({ replays, songs, settings, actions, onSettings, co
                     type="button"
                     className="song-row"
                     data-autofocus={r.id === startId ? '' : undefined}
-                    aria-label={`${r.title} by ${r.artist}, ${PART_LABEL[r.part]} on ${DIFFICULTY_LABEL[r.difficulty]}, played ${replayDate(r.date)}. Score ${r.results.score}, ${Math.round(r.results.accuracy * 100)} percent.${r.kept ? ' Kept.' : ''} Plays the replay.`}
+                    aria-label={`${r.title} by ${r.artist}, ${PART_LABEL[r.part]} on ${DIFFICULTY_LABEL[r.difficulty]}, played ${replayDate(r.date)}. Score ${r.results.score}, ${Math.round(r.results.accuracy * 100)} percent.${r.kept ? ' Kept.' : ''}${making ? ` ${exportStatus(making)}.` : ''} Plays the replay.`}
                     onFocus={() => setCurrentId(r.id)}
                     onPointerEnter={(e) => e.pointerType === 'mouse' && setCurrentId(r.id)}
                     onClick={() => (setCurrentId(r.id), watch(r))}
@@ -146,6 +151,7 @@ export function ReplaysPanel({ replays, songs, settings, actions, onSettings, co
                       </span>
                     </span>
                     <span className="song-side">
+                      {making && <span className="song-busy">{exportShort(making)}</span>}
                       {r.kept && (
                         <span className="replay-kept" role="img" aria-label="Kept">
                           <Pin strokeWidth={ICON_STROKE} aria-hidden />
@@ -155,6 +161,11 @@ export function ReplaysPanel({ replays, songs, settings, actions, onSettings, co
                       <Stars n={r.results.stars} />
                       <span className="replay-row-score">{r.results.score.toLocaleString()}</span>
                     </span>
+                    {making && (
+                      <span className="meter row-meter" aria-hidden>
+                        <span style={{ width: `${Math.round(making.progress * 100)}%` }} />
+                      </span>
+                    )}
                   </button>
                   <button
                     type="button"
@@ -243,11 +254,13 @@ export function ReplaysPanel({ replays, songs, settings, actions, onSettings, co
                 className="btn wide"
                 onClick={() => {
                   close();
-                  actions.exportVideo(menu);
+                  const making = exportOf(exports, menu.id);
+                  if (making) videoExports.cancel(making.id);
+                  else actions.exportVideo(menu);
                 }}
               >
                 <Film strokeWidth={ICON_STROKE} aria-hidden />
-                Export video
+                {exportOf(exports, menu.id) ? 'Cancel the video' : 'Export video'}
               </button>
               <button
                 type="button"
@@ -379,7 +392,7 @@ function ReplayCard({ replay: r, song, hints, onWatch, onExport, onKeep, onDelet
           Watch
         </button>
         <button type="button" className="btn" data-action="replay-export" onClick={onExport}>
-          <Hint kbd={keysOf('home.replayExport').kbd} {...hints} />
+          <Hint {...keysOf('home.replayExport')} {...hints} />
           <Film strokeWidth={ICON_STROKE} aria-hidden />
           Video
         </button>
