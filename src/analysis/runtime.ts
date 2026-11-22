@@ -13,14 +13,44 @@ async function fetchWasm(url: string): Promise<Uint8Array> {
   return new Uint8Array(await new Response(unpacked).arrayBuffer());
 }
 
+/** WebAssembly pages (64 KiB each) the runtime may grow to, largest first: 4, 2 and 1 GiB, then 512 MiB. */
+export const MEMORY_MAXIMA = [65536, 32768, 16384, 8192];
+
+/** The runtime's own memory: shared between its threads, and as large as its build allows (4 GiB). */
+const MEMORY_CALL = 'new WebAssembly.Memory({initial:256,maximum:65536,shared:!0})';
+/** What it tells its allocator it may grow to, in bytes (4 GiB less a page). */
+const HEAP_MAX = 'function rc(){return 4294901760}';
+
+/**
+ * The runtime's script, made to ask for less memory when the browser will not give it 4 GiB.
+ *
+ * A shared memory cannot move once it is made, so the browser sets its whole maximum aside at once,
+ * and iOS refuses 4 GiB ("RangeError: Out of memory") before any model is opened. The memory is now
+ * asked for at each of MEMORY_MAXIMA in turn, and the allocator told the maximum it got. A smaller
+ * memory is one the runtime's module accepts: its import only sets the largest it may be. Should a
+ * newer runtime build its memory differently, the script is left as it is (`patched` false).
+ */
+export function fitMemory(script: string): { script: string; patched: boolean } {
+  if (!script.includes(MEMORY_CALL) || !script.includes(HEAP_MAX)) return { script, patched: false };
+  const prelude =
+    `let __swHeapMax=4294901760;function __swMemory(){let last;for(const maximum of ${JSON.stringify(MEMORY_MAXIMA)}){` +
+    `try{const m=new WebAssembly.Memory({initial:256,maximum,shared:!0});__swHeapMax=maximum*65536-65536;return m}` +
+    `catch(e){if(!(e instanceof RangeError))throw e;last=e}}throw last}\n`;
+  return {
+    script: prelude + script.replace(MEMORY_CALL, '__swMemory()').replace(HEAP_MAX, 'function rc(){return __swHeapMax}'),
+    patched: true,
+  };
+}
+
 /**
  * Gets ONNX Runtime ready in a worker, before its first model is opened.
  *
  * The runtime's script and WebAssembly file are served next to the app (public/ort). The script
  * is handed over as a blob, because the runtime starts its threads from the script's own address:
  * from a blob that needs no request, and a request for an app file made by a thread of a worker
- * is never answered in the desktop app's window. The WebAssembly file comes gzip-compressed
- * (scripts/copy-models.mjs) and is handed over unpacked.
+ * is never answered in the desktop app's window, and patched to fit its memory to the device (see
+ * fitMemory). The WebAssembly file comes gzip-compressed (scripts/copy-models.mjs) and is handed
+ * over unpacked.
  */
 export async function loadRuntime(ort: typeof Ort, device: 'gpu' | 'cpu'): Promise<void> {
   const base = new URL(`${import.meta.env.BASE_URL}ort/`, self.location.href).href;
@@ -28,7 +58,9 @@ export async function loadRuntime(ort: typeof Ort, device: 'gpu' | 'cpu'): Promi
     fetch(`${base}ort-wasm-simd-threaded.asyncify.mjs`).then((r) => r.text()),
     fetchWasm(`${base}ort-wasm-simd-threaded.asyncify.wasm.gz`),
   ]);
-  ort.env.wasm.wasmPaths = { mjs: URL.createObjectURL(new Blob([script], { type: 'text/javascript' })) };
+  const fitted = fitMemory(script);
+  if (!fitted.patched) console.warn('the analysis runtime builds its memory in a way not known here: it asks for 4 GiB as it is');
+  ort.env.wasm.wasmPaths = { mjs: URL.createObjectURL(new Blob([fitted.script], { type: 'text/javascript' })) };
   ort.env.wasm.wasmBinary = binary;
   // A graphics card does the arithmetic itself; threads are for the processor path.
   if (device === 'gpu') ort.env.wasm.numThreads = 1;
