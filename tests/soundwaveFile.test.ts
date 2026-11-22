@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { ANALYSIS_VERSION } from '../src/analysis/types';
+import { readSongPackage } from '../src/storage/songFile';
 import {
   soundwaveAudio,
   soundwaveFileName,
@@ -103,5 +105,47 @@ describe('.soundwave files', () => {
     expect(soundwaveFileName({ artist: 'A', title: 'Why? <Live>: "2024"' })).toBe('A - Why Live 2024.soundwave');
     expect(soundwaveFileName({ artist: 'Unknown artist', title: 'Night Drive' })).toBe('Night Drive.soundwave');
     expect(soundwaveFileName({ artist: '', title: '' })).toBe('song.soundwave');
+  });
+});
+
+describe('a song file from an earlier version of the game', () => {
+  const analysis = (version: number) => ({
+    version,
+    data: {
+      version,
+      source: 'ml',
+      duration: 3,
+      tempo: 120,
+      beats: [0.5, 1, 1.5],
+      downbeats: [0],
+      drums: [],
+      bass: [],
+      lead: [],
+      vocals: [],
+      harmony: [],
+      sections: [],
+      energy: [],
+      energyHop: 0.1,
+      pitchSource: 'basic-pitch',
+    },
+  });
+  const file = (version: number) =>
+    writeSoundwave({
+      meta: { title: 'Old', artist: 'Test', duration: 3, fileName: 'old.wav' },
+      audio: new Blob([Uint8Array.from({ length: 2000 }, (_, i) => (i * 7) & 255)], { type: 'audio/wav' }),
+      analysis: analysis(version),
+    });
+
+  it('keeps its analysis aside, with its version, rather than chart from it as a current one', async () => {
+    const p = await readSongPackage(await file(ANALYSIS_VERSION - 1), 'old.soundwave');
+    expect(p.analysis).toBeUndefined();
+    expect(p.olderAnalysis?.version).toBe(ANALYSIS_VERSION - 1);
+    expect(p.olderAnalysis?.data.beats).toEqual([0.5, 1, 1.5]);
+  });
+
+  it('takes a current analysis as it is', async () => {
+    const p = await readSongPackage(await file(ANALYSIS_VERSION), 'new.soundwave');
+    expect(p.analysis?.beats).toEqual([0.5, 1, 1.5]);
+    expect(p.olderAnalysis).toBeUndefined();
   });
 });

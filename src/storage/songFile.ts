@@ -137,6 +137,11 @@ export interface SongPackage {
   meta: SongMeta;
   audio: Blob;
   analysis?: AnalysisResult;
+  /**
+   * An analysis an earlier version of the game made, with that version: it is not charted from
+   * where songs can be analyzed again, but a device that cannot analyze (a phone) plays by it.
+   */
+  olderAnalysis?: { version: number; data: AnalysisResult };
   edits?: SongEdits;
 }
 
@@ -161,7 +166,12 @@ export async function readSongPackage(file: Blob, fileName: string): Promise<Son
   };
   // Charts edited by hand come along; what is malformed in them is left out.
   const edits = c.edits && c.edits.version <= EDITS_VERSION ? sanitizeEdits(c.edits.data) : undefined;
-  return { meta, audio: c.audio, analysis: usableAnalysis(c.analysis), edits };
+  const analysis = usableAnalysis(c.analysis);
+  const older =
+    !analysis && c.analysis && c.analysis.version < ANALYSIS_VERSION && isAnalysisResult(c.analysis.data)
+      ? { version: c.analysis.version, data: c.analysis.data as AnalysisResult }
+      : undefined;
+  return { meta, audio: c.audio, analysis, ...(older ? { olderAnalysis: older } : {}), edits };
 }
 
 /** Adds a song read from a .soundwave file, with its analysis and edited charts when it came with usable ones. */
@@ -170,4 +180,7 @@ export async function storeSongPackage(p: SongPackage) {
   if (p.edits) await putEdits(p.meta.id, p.edits);
   await putSong(p.meta, await build(p.meta, p.audio, p.analysis, p.edits));
   if (p.analysis) await putAnalysis(analysisKey(p.meta.id, ANALYSIS_VERSION, p.analysis.source), p.meta.id, p.analysis);
+  // Kept under the version that made it, so it is never taken for a current one.
+  else if (p.olderAnalysis)
+    await putAnalysis(analysisKey(p.meta.id, p.olderAnalysis.version, p.olderAnalysis.data.source), p.meta.id, p.olderAnalysis.data);
 }
