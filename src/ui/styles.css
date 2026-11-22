@@ -6009,13 +6009,23 @@ a.btn {
   animation: none;
 }
 
-/* The controls: a pane at the right foot of the screen, the scorebox's twin on the other side. */
-.replay-dock {
+/* The controls: a pane at the right foot of the screen, the scorebox's twin on the other side,
+   with the video being made (when one is) standing on top of it. */
+.replay-stack {
   position: absolute;
   right: calc(1.6% + var(--safe-r));
   bottom: calc(3.5% + var(--safe-b));
   z-index: 5;
   width: clamp(21.5rem, 25vw, 27rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  pointer-events: none;
+}
+.replay-stack > * {
+  pointer-events: auto;
+}
+.replay-dock {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
@@ -6032,16 +6042,73 @@ a.btn {
     opacity 0.3s var(--ease),
     transform 0.4s var(--ease);
 }
-.replay.away .replay-dock {
+.replay.away :is(.replay-dock, .replay-export-box) {
   opacity: 0;
   transform: translateY(0.8rem);
   pointer-events: none;
 }
-:root[data-motion='reduced'] .replay-dock {
+:root[data-motion='reduced'] :is(.replay-dock, .replay-export-box) {
   transition: opacity 0.2s;
 }
-:root[data-motion='reduced'] .replay.away .replay-dock {
+:root[data-motion='reduced'] .replay.away :is(.replay-dock, .replay-export-box) {
   transform: none;
+}
+/* The video being made, while one is: a slim pane over the controls. */
+.replay-export-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.5rem 0.7rem 0.6rem;
+  border-radius: var(--r-l);
+  background: var(--panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-edge),
+    inset 0 1px 0 rgb(255 255 255 / 0.1);
+  animation: rise-in 0.35s var(--ease) backwards;
+  transition:
+    opacity 0.3s var(--ease),
+    transform 0.4s var(--ease);
+}
+.replay-export-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.replay-export-head svg {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  color: var(--pink);
+}
+.replay-export-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85rem;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.replay-export-more {
+  color: var(--ink-3);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+.replay-export-what {
+  color: var(--ink-2);
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.replay-export-bar {
+  height: 4px;
+}
+.replay-export-bar > span {
+  background: linear-gradient(90deg, #b3306f, var(--pink));
 }
 .replay-head {
   display: flex;
@@ -6556,73 +6623,7 @@ a.btn {
   }
 }
 
-/* Videos being made in the background: above the replays, and as a chip on the main menu. */
-.exports {
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  margin: 0 0 0.6rem;
-  padding: 0;
-  list-style: none;
-}
-.export-item {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-areas: 'icon text button' 'bar bar bar';
-  align-items: center;
-  gap: 0.3rem 0.7rem;
-  padding: 0.5rem 0.5rem 0.5rem 0.8rem;
-  border-radius: var(--r-m);
-  background: var(--panel);
-  box-shadow: inset 0 0 0 1px var(--glass-edge);
-  animation: rise-in 0.35s var(--ease) backwards;
-}
-.export-icon {
-  grid-area: icon;
-  width: 1.2rem;
-  height: 1.2rem;
-  color: var(--pink);
-}
-.export-item.saved .export-icon {
-  color: var(--ok);
-}
-.export-item.failed .export-icon,
-.export-item.cancelled .export-icon {
-  color: var(--ink-3);
-}
-.export-text {
-  grid-area: text;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.export-name {
-  font-weight: 800;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.export-what {
-  color: var(--ink-2);
-  font-size: 0.82rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.export-item.failed .export-what {
-  color: #ffb1bd;
-}
-.export-item > .btn {
-  grid-area: button;
-}
-.export-bar {
-  grid-area: bar;
-  height: 4px;
-}
-.export-bar > span {
-  background: linear-gradient(90deg, #b3306f, var(--pink));
-}
+/* While videos are being made in the background: a chip on the main menu. */
 .export-chip {
   display: inline-flex;
   align-items: center;
@@ -6651,7 +6652,7 @@ a.btn {
 /* Narrow screens and touch: the controls run along the foot of the screen, over the deck, and step
    aside while the replay plays. The score moves to the top, as it does for touch. */
 @media (max-width: 760px) {
-  .replay-dock {
+  .replay-stack {
     left: calc(0.6rem + var(--safe-l));
     right: calc(0.6rem + var(--safe-r));
     bottom: calc(0.6rem + var(--safe-b));
@@ -6669,7 +6670,7 @@ a.btn {
     display: none;
   }
 }
-:root[data-input='touch'] .replay-dock {
+:root[data-input='touch'] .replay-stack {
   left: calc(0.6rem + var(--safe-l));
   right: calc(var(--edge, 64px) + 1.6rem + var(--safe-r));
   bottom: calc(0.6rem + var(--safe-b));
@@ -6678,7 +6679,7 @@ a.btn {
   margin-inline: auto;
 }
 @media (max-width: 560px) {
-  :root[data-input='touch'] .replay-dock {
+  :root[data-input='touch'] .replay-stack {
     right: calc(0.6rem + var(--safe-r));
   }
   .replay-transport {
