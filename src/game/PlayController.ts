@@ -6,6 +6,7 @@ import { resolveGraphics } from './graphics';
 import { GameSession, type Results } from './GameSession';
 import { ReplayPlayback, ReplayRecorder, type ReplayInputs } from './replay';
 import { feedbackFor, ShowPulse } from './showPulse';
+import { FINALE_SECONDS, REPLAY_START } from './timing';
 import { BufferAnalyser } from '../audio/bufferAnalyser';
 import { Rumbler } from '../input/rumble';
 import { barsLeft, findBreaks, type Break } from './breaks';
@@ -51,10 +52,7 @@ export interface FrameJob {
 }
 
 const LEAD_IN = 3;
-/** Song time a replay starts at: a moment before the song, without a countdown. */
-export const REPLAY_START = -1.5;
-/** How long the stage celebrates after the last note before the result comes up, seconds. */
-export const FINALE_SECONDS = 4;
+export { FINALE_SECONDS, REPLAY_START };
 
 /**
  * Drives one play-through: audio, input, session and both renderers. Lives outside React
