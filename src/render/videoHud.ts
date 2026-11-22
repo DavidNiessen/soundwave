@@ -311,6 +311,27 @@ export function videoHudFrame(f: VideoFrameInfo): VideoHudFrame {
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
 /**
+ * The plain night behind the highway when the video has no stage, painted once for its size: a
+ * gradient filled anew on every frame is slow where the canvas is drawn without a graphics card.
+ */
+let night: { key: string; canvas: OffscreenCanvas | HTMLCanvasElement } | null = null;
+function nightSky(width: number, height: number) {
+  const key = `${width}x${height}`;
+  if (night?.key === key) return night.canvas;
+  const canvas = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(width, height) : document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const g = canvas.getContext('2d') as Ctx2D;
+  const fill = g.createLinearGradient(0, 0, 0, height);
+  fill.addColorStop(0, '#1a0f4c');
+  fill.addColorStop(1, '#05030f');
+  g.fillStyle = fill;
+  g.fillRect(0, 0, width, height);
+  night = { key, canvas };
+  return canvas;
+}
+
+/**
  * Lays one frame of a replay's video onto `g`: the stage (or the plain night without one), the
  * highway over it, and the HUD over both when `hud` is given.
  */
@@ -322,14 +343,7 @@ export function composeVideoFrame(
   highway: CanvasImageSource,
   hud: VideoHudFrame | null,
 ) {
-  if (stage) g.drawImage(stage, 0, 0, width, height);
-  else {
-    const night = g.createLinearGradient(0, 0, 0, height);
-    night.addColorStop(0, '#1a0f4c');
-    night.addColorStop(1, '#05030f');
-    g.fillStyle = night;
-    g.fillRect(0, 0, width, height);
-  }
+  g.drawImage(stage ?? nightSky(width, height), 0, 0, width, height);
   g.drawImage(highway, 0, 0, width, height);
   if (hud) drawVideoHud(g as CanvasRenderingContext2D, width, height, hud);
 }
