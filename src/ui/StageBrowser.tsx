@@ -40,7 +40,6 @@ import {
   type StageSettings,
 } from '../game/stages';
 import type { Settings } from '../game/settings';
-import { playSfx } from '../audio/sfx';
 import { menuPulse } from '../input/rumble';
 import { boostMenuStage } from '../render/aurora/menuStage';
 import { setPreviewStage } from '../render/stage/showStage';
@@ -383,7 +382,6 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): {
   const drop = () => {
     if (dropping) return;
     boostMenuStage(DROP_SECONDS);
-    playSfx('launch');
     menuPulse('launch');
     setDropping(true);
   };
