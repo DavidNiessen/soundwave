@@ -21,7 +21,8 @@
  *
  * Chunk types:
  *
- *     META  required. UTF-8 JSON: { title, artist, album?, duration, fileName, addedAt? }.
+ *     META  required. UTF-8 JSON: { title, artist, album?, duration, fileName, addedAt?, copyOf? }
+ *           (copyOf: on a server's smaller copy of a song for streaming, the id of the song it is of).
  *     COVR  optional. The cover image: u8 length m, m bytes of ASCII MIME type, then the image.
  *     ANLS  optional. The analysis: u16 analysis version, then gzip-compressed UTF-8 JSON of it.
  *     EDIT  optional. Charts made or changed by hand in the track editor, and the beat grid they sit
@@ -54,6 +55,8 @@ export interface SoundwaveMeta {
   duration: number;
   fileName: string;
   addedAt?: number;
+  /** A server's smaller copy of a song, for streaming: the id (audio hash) of the song it was made of. */
+  copyOf?: string;
 }
 
 export interface SoundwaveAnalysis {
@@ -161,6 +164,7 @@ export async function writeSoundwave(c: SoundwaveContents): Promise<Blob> {
     duration: c.meta.duration,
     fileName: c.meta.fileName,
     ...(c.meta.addedAt ? { addedAt: c.meta.addedAt } : {}),
+    ...(c.meta.copyOf ? { copyOf: c.meta.copyOf } : {}),
   };
   const parts: Uint8Array[] = [header, chunk('META', utf8.encode(JSON.stringify(meta)))];
   if (c.cover) parts.push(chunk('COVR', typed(c.cover.type || 'image/jpeg', new Uint8Array(await c.cover.arrayBuffer()))));
@@ -246,6 +250,7 @@ function parseMeta(data: Uint8Array): SoundwaveMeta {
     duration,
     fileName: text(raw.fileName, 'song'),
     ...(addedAt ? { addedAt } : {}),
+    ...(typeof raw.copyOf === 'string' && /^[0-9a-f]{64}$/.test(raw.copyOf) ? { copyOf: raw.copyOf } : {}),
   };
 }
 

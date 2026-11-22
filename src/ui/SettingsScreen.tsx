@@ -125,7 +125,7 @@ const FIELDS: Record<Tab, readonly (keyof Settings)[]> = {
   controller: ['glyphs', 'rumble', 'rumbleHits', 'rumbleMisses', 'rumbleSustains', 'rumbleOverdrive', 'ps5Haptics'],
   touch: ['touchHaptics', 'touchOverdriveSide'],
   shortcuts: ['keys4', 'keys5', 'overdriveKey', 'pad4', 'pad5', 'padOverdrive', 'bindings'],
-  online: ['displayName', 'postScores', 'discordJoin', 'shareSongs', 'shareLibrary', 'serverSongs'],
+  online: ['postScores', 'discordJoin', 'shareSongs', 'shareLibrary', 'serverSongs', 'streamQuality'],
   advanced: ['checkUpdates', 'discordStatus'],
 };
 
@@ -1716,11 +1716,20 @@ function Detail({ row }: { row: Row }) {
 
 function onlineSections(s: Settings, set: (patch: Partial<Settings>) => void): Section[] {
   const o = online.snapshot();
-  const onOff = (id: keyof Settings & string, label: string, help: string, value: boolean, change: (v: boolean) => void): Row => ({
+  const signedIn = !!o.account;
+  const onOff = (
+    id: keyof Settings & string,
+    label: string,
+    help: string,
+    value: boolean,
+    change: (v: boolean) => void,
+    disabled = false,
+  ): Row => ({
     kind: 'choice',
     id,
     label,
     help,
+    disabled,
     value: value ? 'on' : 'off',
     options: [
       { value: 'off', label: 'Off' },
@@ -1728,71 +1737,92 @@ function onlineSections(s: Settings, set: (patch: Partial<Settings>) => void): S
     ],
     set: (v) => change(v === 'on'),
   });
+  const where = o.info?.name ?? o.server?.replace(/^https?:\/\//, '');
   return [
     {
-      title: 'Playing together',
-      rows: [
-        {
-          kind: 'text',
-          id: 'displayName',
-          label: 'Display name',
-          help: 'The name others see in a session you host or join. A server uses your account’s name instead.',
-          value: s.displayName,
-          set: (v) => set({ displayName: v.slice(0, 24) }),
-        },
-        onOff(
-          'shareSongs',
-          'Send my party’s songs to players who lack them',
-          'In a party you host, a song a player does not have goes to them through the server, audio, charts and all, so they can play it. The server keeps it for a while, for your party’s players only. Off: players without a song sit it out.',
-          s.shareSongs,
-          (v) => set({ shareSongs: v }),
-        ),
-        onOff(
-          'shareLibrary',
-          'Share my songs with the server',
-          'Your songs go to the server you sign in to (where its admin takes songs), so everyone on it finds them in their library. Songs you add later go too. Off: nothing of yours is shared.',
-          s.shareLibrary,
-          (v) => set({ shareLibrary: v }),
-        ),
-        {
-          kind: 'choice',
-          id: 'serverSongs',
-          label: 'Songs from the server',
-          help: 'Stream plays another player’s song (or a party’s song you lack) straight from the server, without keeping it: your library stays yours. Download adds each one to your library, to play it offline later.',
-          value: s.serverSongs,
-          options: [
-            { value: 'stream', label: 'Stream' },
-            { value: 'download', label: 'Download' },
-          ],
-          set: (v) => set({ serverSongs: v as Settings['serverSongs'] }),
-        },
-      ],
-    },
-    {
-      title: 'Server',
+      title: 'Your server',
       rows: [
         {
           kind: 'info',
           id: 'serverInfo',
-          label: 'Server',
-          help: 'The Soundwave server you play on, if any.',
-          body: o.account
-            ? `Signed in as ${o.account.name} on ${o.info?.name ?? o.server}. Sign out, save your data or forget the server under Play together.`
+          label: signedIn ? `Signed in as ${o.account!.name}` : 'Not signed in',
+          help: 'The Soundwave server you play on. Connect, sign out or switch servers on the main menu’s Online tab.',
+          body: signedIn
+            ? `On ${where}${o.status === 'online' ? '' : ', connecting…'}`
             : o.server
-              ? `${o.info?.name ?? o.server}: not signed in.`
-              : 'No server yet. Connect to one under Play together.',
+              ? `${where} is your server, but you are not signed in. Sign in on the Online tab.`
+              : 'No server yet. Pick one on the main menu’s Online tab; the settings below apply once you are on one.',
         },
+      ],
+    },
+    {
+      title: 'Other players’ songs',
+      rows: [
+        {
+          kind: 'choice',
+          id: 'serverSongs',
+          label: 'Play them by',
+          help: 'How a song you do not have reaches you: one shared on the server, or one a party plays.',
+          value: s.serverSongs,
+          options: [
+            {
+              value: 'stream',
+              label: 'Streaming',
+              help: 'Plays without going into your library. Kept on this device for a while, so it starts at once next time.',
+            },
+            { value: 'download', label: 'Downloading', help: 'Goes into your library, to keep and to play offline.' },
+          ],
+          set: (v) => set({ serverSongs: v as Settings['serverSongs'] }),
+        },
+        {
+          kind: 'choice',
+          id: 'streamQuality',
+          label: 'Streaming quality',
+          help: 'Lower uses less data, for a slow or metered connection. A song the server has no smaller copy of yet comes as shared.',
+          disabled: s.serverSongs !== 'stream',
+          value: s.streamQuality,
+          options: [
+            { value: 'high', label: 'High', help: 'As it was shared. The best sound.' },
+            { value: 'medium', label: 'Medium', help: 'About 1 MB a minute. Hard to tell apart.' },
+            { value: 'low', label: 'Low', help: 'Under 1 MB a minute, for a weak connection.' },
+          ],
+          set: (v) => set({ streamQuality: v as Settings['streamQuality'] }),
+        },
+      ],
+    },
+    {
+      title: 'Your songs',
+      rows: [
+        onOff(
+          'shareLibrary',
+          'Share my library with the server',
+          'Your analysed songs go to the server, where its owner takes songs, so everyone there can play them. Songs you add later go too. Off: nothing of yours is shared.',
+          s.shareLibrary,
+          (v) => set({ shareLibrary: v }),
+        ),
+        onOff(
+          'shareSongs',
+          'Send my party’s songs to who lacks them',
+          'In a party you host, a song a player does not have reaches them through the server, so nobody sits it out. The server keeps it only for your party.',
+          s.shareSongs,
+          (v) => set({ shareSongs: v }),
+        ),
+      ],
+    },
+    {
+      title: 'Scores and friends',
+      rows: [
         onOff(
           'postScores',
-          'Send my scores to the leaderboards',
-          'While you are signed in, every song you finish goes to the server’s leaderboards with its run, which the server judges again to check the score. Off, nothing you play alone is sent.',
+          'Post my scores to the leaderboards',
+          'Every song you finish while signed in goes to the server’s leaderboards with its run, which the server checks by judging it again.',
           s.postScores,
           (v) => set({ postScores: v }),
         ),
         onOff(
           'discordJoin',
-          'Friends can join from Discord',
-          'Your Discord status gets a Join button, so Discord friends can join your session or party in one press. Never shown for a private one.',
+          'Let Discord friends join',
+          'Your party shows a Join button on your Discord status, and works with Discord’s invites and Ask to Join. Never for a private party. Desktop app only.',
           s.discordJoin,
           (v) => set({ discordJoin: v }),
         ),

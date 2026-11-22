@@ -386,10 +386,18 @@ function SongBoard({
   const [version, setVersion] = useState(0);
   const problemRef = useRef(onProblem);
   problemRef.current = onProblem;
+  // A run posted, shared or taken off this song's boards elsewhere: the board is fetched again, quietly.
+  useEffect(() => online.onChanged(['boards'], (songs) => (!songs || songs.has(song.id)) && setVersion((v) => v + 1)), [song.id]);
+  /** What the board on screen is of: a new one starts from Loading, a live refresh keeps the old one up meanwhile. */
+  const shownKey = useRef('');
   useEffect(() => {
     let live = true;
-    setBoard(null);
-    setNone(false);
+    const key = `${song.id}/${pick.part}/${pick.difficulty}/${week}`;
+    if (key !== shownKey.current) {
+      shownKey.current = key;
+      setBoard(null);
+      setNone(false);
+    }
     void (async () => {
       const chart = await analysisManager.chart(song.id, pick.part, pick.difficulty).catch(() => undefined);
       if (!live) return;
@@ -467,7 +475,9 @@ function SharedRuns({ library, onWatch, onProblem }: { library: SongMeta[]; onWa
   const problemRef = useRef(onProblem);
   problemRef.current = onProblem;
   useEffect(() => {
-    void online.sharedRuns().then(setShared, (e) => (setShared([]), problemRef.current((e as Error).message)));
+    const load = () => void online.sharedRuns().then(setShared, (e) => (setShared([]), problemRef.current((e as Error).message)));
+    load();
+    return online.onChanged(['replays'], load);
   }, []);
   const have = (id: string) => library.some((x) => x.id === id);
   const server = useSyncExternalStore(serverSongs.subscribe, serverSongs.snapshot);

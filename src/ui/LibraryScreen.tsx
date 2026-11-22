@@ -54,16 +54,39 @@ interface Props {
   actions: SongActions;
   /** Signed in to a server that takes songs: its songs the player lacks, and sharing their own. */
   server?: ServerLibrary;
+  /** Ready was pressed while setlist songs were still coming: how much of them has come, 0..1. */
+  gathering?: number | null;
+}
+
+/** How long the player rests on a server song before it starts coming. */
+const REST_MS = 600;
+
+/** How much of something has come, as a ring that fills. */
+export function ProgressRing({ value }: { value: number }) {
+  const r = 7;
+  const c = 2 * Math.PI * r;
+  return (
+    <svg className={`progress-ring ${value > 0 ? '' : 'waiting'}`} viewBox="0 0 18 18" aria-hidden>
+      <circle cx="9" cy="9" r={r} className="track" />
+      <circle cx="9" cy="9" r={r} className="fill" strokeDasharray={`${c * Math.max(0.06, value)} ${c}`} />
+    </svg>
+  );
 }
 
 /** The server's side of the library. */
 export interface ServerLibrary {
   /** The server's songs the player does not have. */
   songs: SharedSong[];
-  /** Songs being fetched now. */
-  busy: Record<string, true>;
+  /** Songs on their way (streamed or downloaded), with how much has come, 0..1. */
+  coming: Record<string, { progress: number; meta: SongMeta }>;
   /** Songs streamed and held now: they can be in the setlist. */
   held: Record<string, SongMeta>;
+  /** Songs that could not be streamed, with why. */
+  failed: Record<string, string>;
+  /** What is known of a server song (held, on its way or listed), for the setlist. */
+  known(id: string): SongMeta | null;
+  /** The player rested on a song (focus or the mouse, for a moment): it may start coming already. */
+  onRest(song: SharedSong): void;
   /** Pressing one streams it into the setlist (true) or downloads it into the library. */
   stream: boolean;
   /** The player's songs are shared to the server. */
@@ -134,6 +157,7 @@ export function LibraryScreen({
   onAdd,
   actions,
   server,
+  gathering,
 }: Props) {
   const [query, setQuery] = useState('');
   /** Songs picked for a menu that acts on several at once, and where a Shift-click range starts. */
@@ -179,7 +203,14 @@ export function LibraryScreen({
 
   const byId = useMemo(() => new Map(songs.map((s) => [s.id, s])), [songs]);
   const current = (currentId && byId.get(currentId)) || shown[0] || null;
-  const picked = setlist.map((id) => byId.get(id) ?? server?.held[id]).filter((s): s is SongMeta => !!s);
+  const picked = setlist.map((id) => byId.get(id) ?? server?.known(id)).filter((s): s is SongMeta => !!s);
+  // Resting on a server song for a moment starts it coming, so pressing it plays at once.
+  const restTimer = useRef(0);
+  const rest = (song: SharedSong) => {
+    clearTimeout(restTimer.current);
+    restTimer.current = window.setTimeout(() => server?.onRest(song), REST_MS);
+  };
+  useEffect(() => () => clearTimeout(restTimer.current), []);
   const setTime = formatTime(picked.reduce((t, s) => t + s.duration, 0));
 
   // The song the player is on plays its preview, and only while they are on it.
@@ -325,7 +356,15 @@ export function LibraryScreen({
     { id: 'search', label: 'Search', icon: Search, ...keysOf('library.search'), bar: false, run: () => search.current?.focus() },
     { id: 'sort', label: 'Sort', icon: ArrowUpDown, ...keysOf('library.sort'), bar: false, run: cycleSort },
     { id: 'add', label: 'Add songs', icon: Upload, ...keysOf('library.add'), bar: false, run: onAdd },
-    { id: 'ready', label: 'Ready up', icon: Play, ...keysOf('library.ready'), primary: true, disabled: picked.length === 0, run: onReady },
+    {
+      id: 'ready',
+      label: gathering !== null && gathering !== undefined ? `Getting the songs… ${Math.round(gathering * 100)}%` : 'Ready up',
+      icon: Play,
+      ...keysOf('library.ready'),
+      primary: true,
+      disabled: picked.length === 0 || (gathering !== null && gathering !== undefined),
+      run: onReady,
+    },
   ]);
 
   const sortLabel = SORTS.find(([id]) => id === sort)![1];
@@ -524,26 +563,37 @@ export function LibraryScreen({
           )}
           {server &&
             serverShown.map((x) => {
-              const busy = !!server.busy[x.id];
+              const coming = server.coming[x.id];
               const slot = setlist.indexOf(x.id);
               const full = setlist.length >= SET_MAX && slot < 0;
+              const failed = server.failed[x.id];
               return (
-                <li key={x.id} className={`song-item server-song ${slot >= 0 ? 'in-set' : ''}`}>
+                <li
+                  key={x.id}
+                  className={`song-item server-song ${slot >= 0 ? 'in-set' : ''} ${coming ? 'coming' : ''} ${failed && !coming ? 'failed' : ''}`}
+                >
                   <button
                     type="button"
                     className="song-row"
-                    disabled={busy}
                     aria-pressed={server.stream ? slot >= 0 : undefined}
                     aria-label={`${x.title} by ${x.artist}, on the server${x.by ? `, shared by ${x.by}` : ''}. ${
+                      coming ? `${Math.round(coming.progress * 100)}% here. ` : ''
+                    }${
                       !server.stream
-                        ? 'Press to download it.'
+                        ? coming
+                          ? 'Being downloaded.'
+                          : 'Press to download it.'
                         : slot >= 0
                           ? `In the setlist at ${slot + 1}. Press to remove.`
                           : full
                             ? 'The setlist is full.'
                             : 'Press to stream it into the setlist.'
                     }`}
-                    onClick={() => server.onPlay(x)}
+                    onClick={() => !(coming && !server.stream) && server.onPlay(x)}
+                    onFocus={() => server.stream && rest(x)}
+                    onBlur={() => clearTimeout(restTimer.current)}
+                    onPointerEnter={(e) => e.pointerType === 'mouse' && server.stream && rest(x)}
+                    onPointerLeave={() => clearTimeout(restTimer.current)}
                   >
                     <Cover title={x.title} />
                     <span className="song-text">
@@ -555,21 +605,16 @@ export function LibraryScreen({
                       </span>
                     </span>
                     <span className="server-song-act">
-                      {busy ? (
-                        <span className="dim">Fetching…</span>
+                      {coming ? (
+                        <ProgressRing value={coming.progress} />
                       ) : server.stream && slot >= 0 ? (
-                        <>
-                          <Check strokeWidth={ICON_STROKE} aria-hidden /> In set · {slot + 1}
-                        </>
+                        <Check strokeWidth={ICON_STROKE} aria-hidden />
                       ) : server.stream ? (
-                        <>
-                          <Plus strokeWidth={ICON_STROKE} aria-hidden /> Stream
-                        </>
+                        <Plus strokeWidth={ICON_STROKE} aria-hidden />
                       ) : (
-                        <>
-                          <Download strokeWidth={ICON_STROKE} aria-hidden /> Download
-                        </>
+                        <Download strokeWidth={ICON_STROKE} aria-hidden />
                       )}
+                      {!server.stream ? (coming ? 'Downloading' : 'Download') : slot >= 0 ? `In set · ${slot + 1}` : 'Add'}
                     </span>
                   </button>
                 </li>
@@ -608,7 +653,14 @@ export function LibraryScreen({
                           <span className="song-title">{s.title}</span>
                           <span className="song-artist">{s.artist}</span>
                         </span>
-                        <X className="slot-x" strokeWidth={ICON_STROKE} aria-hidden />
+                        {/* A song still coming from the server shows how far, where its remove mark goes. */}
+                        {server?.coming[s.id] ? (
+                          <span className="slot-x">
+                            <ProgressRing value={server.coming[s.id].progress} />
+                          </span>
+                        ) : (
+                          <X className="slot-x" strokeWidth={ICON_STROKE} aria-hidden />
+                        )}
                       </button>
                     ) : (
                       <div className="slot empty">

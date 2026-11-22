@@ -26,11 +26,11 @@ import {
   Users,
   type LucideIcon,
 } from 'lucide-react';
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { Settings } from '../game/settings';
 import { keysOf } from '../input/bindings';
 import { online } from '../net/client';
-import type { Invite, Role, SetSong, SharedSong, UserEntry } from '../net/protocol';
+import type { Invite, Role, SetSong, SharedSong, Topic, UserEntry } from '../net/protocol';
 import type { SongMeta } from '../storage/db';
 import { Hint, useActions, useHints, type Action } from './actions';
 import { Cover } from './Cover';
@@ -198,21 +198,31 @@ export function AdminScreen({
   const [rotation, setRotation] = useState<Loaded<SetSong[]>>(null);
   const [log, setLog] = useState<Loaded<LogEntry[]>>(null);
   const [reports, setReports] = useState<Loaded<Report[]>>(null);
-  const load = useCallback(() => {
-    if (!mod) return;
+  /** Each section's fetch, by the topic that says it changed. */
+  const fetchers = useMemo((): Partial<Record<Topic, () => void>> => {
+    if (!mod) return {};
     // A server older than the game may not answer some of these: the section says so.
     const fail = (e: unknown) => ({
       failed: /not found|404/i.test((e as Error).message)
         ? 'This server is older than your game and cannot show this. Its owner needs to update it.'
         : (e as Error).message,
     });
-    void online.songs('').then(setSongs, (e) => setSongs(fail(e)));
-    void online.users().then(setUsers, (e) => setUsers(fail(e)));
-    void online.showdownRotation().then(setRotation, (e) => setRotation(fail(e)));
-    void online.auditLog().then(setLog, (e) => setLog(fail(e)));
-    void online.songReports().then(setReports, (e) => setReports(fail(e)));
+    return {
+      songs: () => void online.songs('').then(setSongs, (e) => setSongs(fail(e))),
+      users: () => void online.users().then(setUsers, (e) => setUsers(fail(e))),
+      rotation: () => void online.showdownRotation().then(setRotation, (e) => setRotation(fail(e))),
+      log: () => void online.auditLog().then(setLog, (e) => setLog(fail(e))),
+      reports: () => void online.songReports().then(setReports, (e) => setReports(fail(e))),
+    };
   }, [mod]);
+  const load = useCallback(() => Object.values(fetchers).forEach((f) => f()), [fetchers]);
   useEffect(load, [load, section]);
+  // Live: each section is fetched again as soon as the server says it changed (another admin's
+  // edit, a report, a player coming online).
+  useEffect(() => {
+    const stops = Object.entries(fetchers).map(([t, f]) => online.onChanged([t as Topic], f));
+    return () => stops.forEach((stop) => stop());
+  }, [fetchers]);
 
   // A section opened by its key takes the focus to its place in the list, as a click does.
   const go = (id: Section) => {

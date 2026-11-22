@@ -7,13 +7,16 @@
  *
  * Files live in the data folder: songs/<id>.soundwave (whole songs), charts/<id>.json (details,
  * analysis and hand-made charts) and covers/<id> (the cover, which the Discord status can show).
+ * A whole song can have smaller copies for streaming, songs/<id>.medium.soundwave and
+ * <id>.low.soundwave: the server cannot make them itself (it has no audio encoder), so the game of
+ * whoever shared the song, or of an admin or moderator, makes and sends them (src/net/streamQuality.ts).
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readSoundwave, writeSoundwave } from '../../src/storage/soundwaveFile.ts';
-import type { SharedSong } from '../../src/net/protocol.ts';
+import { STREAM_QUALITIES, type SharedSong, type StreamQuality } from '../../src/net/protocol.ts';
 import { Refusal } from './accounts.ts';
 import type { Config } from './config.ts';
 import type { Store, UserRow } from './db.ts';
@@ -106,8 +109,18 @@ export class Songs {
     return this.store.db.prepare('SELECT * FROM songs WHERE id = ?').get(id) as SongRow | undefined;
   }
 
+  private copyPath(id: string, quality: Exclude<StreamQuality, 'high'>) {
+    return join(this.dirs.songs, `${id}.${quality}.soundwave`);
+  }
+
+  /** The smaller copies kept of a song. */
+  private copies(id: string): StreamQuality[] {
+    return STREAM_QUALITIES.filter((q) => q !== 'high' && existsSync(this.copyPath(id, q)));
+  }
+
   private shared(r: SongRow & { name?: string | null }): SharedSong {
     return {
+      qualities: r.audio ? this.copies(r.id) : [],
       id: r.id,
       uid: r.uid,
       hash: r.hash,
@@ -196,12 +209,35 @@ export class Songs {
     return !!this.row(id)?.audio;
   }
 
-  /** A whole song file to download, where the server keeps audio. */
-  file(id: string): Buffer {
+  /** A whole song file to download, where the server keeps audio: in `quality` where that copy is kept, else as shared. */
+  file(id: string, quality: StreamQuality = 'high'): { body: Buffer; quality: StreamQuality } {
     const r = this.row(id);
     if (!r) throw new Refusal(404, 'That song is not on this server.');
     if (!r.audio) throw new Refusal(404, 'This server keeps only the charts of shared songs: add your own copy of the song.');
-    return readFileSync(join(this.dirs.songs, `${id}.soundwave`));
+    if (quality !== 'high' && existsSync(this.copyPath(id, quality))) return { body: readFileSync(this.copyPath(id, quality)), quality };
+    return { body: readFileSync(join(this.dirs.songs, `${id}.soundwave`)), quality: 'high' };
+  }
+
+  /**
+   * A smaller copy of a song for streaming, sent by a game (whoever shared the song, the owner or a
+   * moderator): a song file whose details name the song it is of, smaller than the song as shared
+   * and as long. It replaces a copy kept before.
+   */
+  async putCopy(actor: UserRow, id: string, quality: Exclude<StreamQuality, 'high'>, body: Buffer) {
+    const r = this.row(id);
+    if (!r?.audio) throw new Refusal(404, 'That song is not on this server.');
+    if (r.uploader !== actor.id && !canModerate(actor))
+      throw new Refusal(403, 'Only whoever shared a song, the owner and moderators send its smaller copies.');
+    if (body.length >= r.size) throw new Refusal(400, 'A smaller copy has to be smaller than the song.');
+    let c;
+    try {
+      c = await readSoundwave(new Blob([new Uint8Array(body)]));
+    } catch (e) {
+      throw new Refusal(400, (e as Error).message || 'That is not a Soundwave song file.');
+    }
+    if (c.meta.copyOf !== id) throw new Refusal(400, 'That copy is of another song.');
+    if (Math.abs(c.meta.duration - r.duration) > 2) throw new Refusal(400, 'That copy is not as long as the song.');
+    writeFileSync(this.copyPath(id, quality), body);
   }
 
   /** A song's details, analysis and hand-made charts, for a player who has the same audio. */
@@ -233,12 +269,15 @@ export class Songs {
     const charts = JSON.parse(readFileSync(chartsPath, 'utf8')) as { meta: Record<string, unknown> };
     charts.meta = { ...charts.meta, title, artist };
     writeFileSync(chartsPath, JSON.stringify(charts));
-    if (r.audio) {
-      const path = join(this.dirs.songs, `${id}.soundwave`);
-      const c = await readSoundwave(new Blob([new Uint8Array(readFileSync(path))]));
-      const file = await writeSoundwave({ ...c, meta: { ...c.meta, title, artist } });
-      writeFileSync(path, new Uint8Array(await file.arrayBuffer()));
-    }
+    if (r.audio)
+      for (const path of [
+        join(this.dirs.songs, `${id}.soundwave`),
+        ...this.copies(id).map((q) => this.copyPath(id, q as 'medium' | 'low')),
+      ]) {
+        const c = await readSoundwave(new Blob([new Uint8Array(readFileSync(path))]));
+        const file = await writeSoundwave({ ...c, meta: { ...c.meta, title, artist } });
+        writeFileSync(path, new Uint8Array(await file.arrayBuffer()));
+      }
     this.store.db
       .prepare('UPDATE songs SET title = ?, artist = ?, hash = ? WHERE id = ?')
       .run(title, artist, this.fileHash(id, !!r.audio), id);
@@ -260,7 +299,13 @@ export class Songs {
     if (r.uploader !== actor.id && !mod) throw new Refusal(403, 'Only whoever shared a song, and the moderators, can remove it.');
     this.store.db.prepare('DELETE FROM songs WHERE id = ?').run(id);
     this.store.db.prepare('DELETE FROM reports WHERE song = ?').run(id);
-    for (const p of [join(this.dirs.songs, `${id}.soundwave`), join(this.dirs.charts, `${id}.json`), join(this.dirs.covers, id)])
+    for (const p of [
+      join(this.dirs.songs, `${id}.soundwave`),
+      this.copyPath(id, 'medium'),
+      this.copyPath(id, 'low'),
+      join(this.dirs.charts, `${id}.json`),
+      join(this.dirs.covers, id),
+    ])
       rmSync(p, { force: true });
     if (mod && r.uploader !== actor.id)
       this.store.log({

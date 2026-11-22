@@ -70,8 +70,6 @@ export interface Settings {
   checkUpdates: boolean;
   /** The desktop app shows what is being played on the player's Discord profile. */
   discordStatus: boolean;
-  /** The name shown in a local session (no accounts there). */
-  displayName: string;
   /** Finished songs go to the server's leaderboards, with their runs, while signed in. */
   postScores: boolean;
   /** Discord friends can join this player's session or party from their status (never a private one). */
@@ -80,10 +78,12 @@ export interface Settings {
   shareSongs: boolean;
   /**
    * Songs that come from a server (another player's shared song, or a party's song this player
-   * lacks): streamed (held for as long as they are played, never stored) or downloaded into the
+   * lacks): streamed (kept on the device for a while, never in the library) or downloaded into the
    * library.
    */
   serverSongs: 'stream' | 'download';
+  /** The quality songs are streamed in: as shared, or a smaller copy for a slow connection (src/net/streamQuality.ts). */
+  streamQuality: 'high' | 'medium' | 'low';
   /** This player's songs are shared to the servers they sign in to (where the server takes songs). */
   shareLibrary: boolean;
   /** The servers already asked whether to share this player's songs, by address. */
@@ -169,11 +169,11 @@ export const DEFAULT_SETTINGS: Settings = {
   videoExport: DEFAULT_VIDEO_EXPORT,
   checkUpdates: true,
   discordStatus: true,
-  displayName: '',
   postScores: true,
   discordJoin: false,
   shareSongs: true,
   serverSongs: 'stream',
+  streamQuality: 'high',
   shareLibrary: false,
   shareAsked: [],
   calibratedOn: null,
@@ -221,13 +221,14 @@ export function normalizeSettings(raw: Partial<Settings>): Settings {
   s.replayLimit = clampReplayLimit(Number(s.replayLimit));
   s.videoExport = normalizeVideoExport(s.videoExport);
   s.discordStatus = Boolean(s.discordStatus);
-  s.displayName = typeof s.displayName === 'string' ? s.displayName.slice(0, 24) : '';
+  delete (s as unknown as { displayName?: string }).displayName;
   s.postScores = s.postScores !== false;
   s.discordJoin = Boolean(s.discordJoin);
   s.shareSongs = s.shareSongs !== false;
   // Keeping a party's songs was the setting before songs could be streamed or downloaded.
   const legacy = (s as unknown as { keepPartySongs?: boolean }).keepPartySongs;
   if (s.serverSongs !== 'stream' && s.serverSongs !== 'download') s.serverSongs = legacy ? 'download' : 'stream';
+  if (s.streamQuality !== 'high' && s.streamQuality !== 'medium' && s.streamQuality !== 'low') s.streamQuality = 'high';
   delete (s as unknown as { keepPartySongs?: boolean }).keepPartySongs;
   s.shareLibrary = s.shareLibrary === true;
   s.shareAsked = Array.isArray(s.shareAsked) ? s.shareAsked.filter((x): x is string => typeof x === 'string').slice(-50) : [];

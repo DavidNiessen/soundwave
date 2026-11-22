@@ -175,6 +175,65 @@ describe('shared songs', () => {
     guest.ws.close();
   });
 
+  it('keep smaller copies for streaming from whoever shared a song, and hand them to who asks', async () => {
+    await start({ songSharing: 'songs' });
+    const ana = await signUp('Ana');
+    const bo = await signUp('Bo');
+    const f = await songFile(7);
+    expect((await api<SharedSong>('POST', '/songs', f.bytes, ana.access)).body.qualities).toEqual([]);
+    const copy = async (of: string, bytes = 1000, duration = 30) =>
+      new Uint8Array(
+        await (
+          await writeSoundwave({
+            meta: { title: 'Song 7', artist: 'Band', duration, fileName: 'song.mp3', copyOf: of },
+            audio: new Blob([new Uint8Array(bytes).fill(7)], { type: 'audio/mp4' }),
+          })
+        ).arrayBuffer(),
+      );
+    // Only its sharer (or the owner and moderators); of this song; smaller; as long.
+    expect((await api('PUT', `/songs/${f.id}/copies/low`, await copy(f.id), bo.access)).status).toBe(403);
+    expect((await api('PUT', `/songs/${f.id}/copies/low`, await copy('a'.repeat(64)), ana.access)).status).toBe(400);
+    expect((await api('PUT', `/songs/${f.id}/copies/low`, await copy(f.id, 9000), ana.access)).status).toBe(400);
+    expect((await api('PUT', `/songs/${f.id}/copies/low`, await copy(f.id, 1000, 12), ana.access)).status).toBe(400);
+    expect((await api('PUT', `/songs/${f.id}/copies/low`, await copy(f.id), ana.access)).status).toBe(200);
+    expect((await api<SharedSong[]>('GET', '/songs', undefined, bo.access)).body[0].qualities).toEqual(['low']);
+    // Asked for low: the copy. Asked for medium, which is not there: the song as shared. Each says which.
+    const low = await fetch(`${server.url}/songs/${f.id}/file?quality=low`, { headers: { Authorization: `Bearer ${bo.access}` } });
+    expect(low.headers.get('x-soundwave-quality')).toBe('low');
+    expect((await readSoundwave(await low.blob())).meta.copyOf).toBe(f.id);
+    const medium = await fetch(`${server.url}/songs/${f.id}/file?quality=medium`, { headers: { Authorization: `Bearer ${bo.access}` } });
+    expect(medium.headers.get('x-soundwave-quality')).toBe('high');
+  });
+
+  it('tell the players online what changed, the owner and moderators about players too', async () => {
+    await start({ songSharing: 'songs' });
+    const owner = await signUp('Owner', { invite: server.accounts.ownerCode });
+    const ana = await signUp('Ana');
+    const [o, a] = await Promise.all(
+      [owner, ana].map(async (s) => {
+        const ws = new WebSocket(server.url.replace('http', 'ws') + '/ws');
+        const got: ServerMessage[] = [];
+        ws.on('message', (d) => got.push(JSON.parse(d.toString())));
+        await new Promise((r) => ws.once('open', r));
+        ws.send(JSON.stringify({ type: 'hello', protocol: PROTOCOL_VERSION, token: s.access }));
+        return { ws, got };
+      }),
+    );
+    const topics = (who: { got: ServerMessage[] }) => new Set(who.got.flatMap((m) => (m.type === 'changed' ? m.topics : [])));
+    const settle = () => new Promise((r) => setTimeout(r, 400));
+    await settle();
+    o.got.length = a.got.length = 0;
+    await api('POST', '/songs', (await songFile(8)).bytes, ana.access);
+    await api('POST', '/mod/role', { name: 'Ana', role: 'moderator' }, owner.access);
+    await settle();
+    expect([...topics(a)]).toContain('songs');
+    expect([...topics(o)]).toEqual(expect.arrayContaining(['songs', 'users', 'log']));
+    // Ana hears of her new role at once.
+    expect(a.got.find((m) => m.type === 'you')).toMatchObject({ you: { name: 'Ana', role: 'moderator' } });
+    o.ws.close();
+    a.ws.close();
+  });
+
   it('do not pass a party’s songs on where the owner turned that off', async () => {
     await start({ partySongs: false });
     expect((await api<ServerInfo>('GET', '/info')).body.partySongs).toBe(false);

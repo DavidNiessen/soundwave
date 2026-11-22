@@ -139,6 +139,13 @@ the server (`uid`) and the SHA-256 of the file the server keeps (`hash`). Renami
 file anew, so its hash changes, and every game that downloaded it takes the new details over the
 next time it signs in: the server is the single point of truth for its songs.
 
+**Streaming quality.** A whole song can also be kept in two smaller copies for players on a slow
+connection (Settings → Online → Streaming quality): `medium` (AAC at 128 kbit/s) and `low`
+(64 kbit/s, or 96 where the encoder goes no lower). The server has no audio encoder, so it does not make them: the game of whoever shared
+the song, or of the owner or a moderator, makes them in the background (lined up with the song to
+the sample, so the notes stay in time) and sends them. Until a song has them, it streams as shared.
+They are kept next to the song (`songs/<id>.medium.soundwave`, `<id>.low.soundwave`) and go with it.
+
 ## A party's songs
 
 A player can only play a song they have. So, on by default, a party's songs are passed on through the
@@ -232,7 +239,8 @@ unless said otherwise.
 | `GET /showdown/rotation`, `POST /showdown/rotation`  | The Showdown rotation; set it (owner and moderators): `{ songs }`                  |
 | `GET /songs?q=…`, `POST /songs`                      | Shared songs; share one (the `.soundwave` file as the body)                        |
 | `POST /songs/:id/edit`                               | Rename a song (owner, moderators): its file and hash change, copies follow         |
-| `GET /songs/:id/file`, `GET /songs/:id/charts`       | A shared song's file, or its charts without the audio                              |
+| `GET /songs/:id/file`, `GET /songs/:id/charts`       | A shared song's file (`?quality=medium\|low` for a smaller copy), or its charts    |
+| `PUT /songs/:id/copies/:quality`                     | Send a smaller copy for streaming (its sharer, the owner, moderators)              |
 | `POST /songs/:id/report`, `DELETE /songs/:id`        | Report a song; remove it (its uploader, the owner, moderators)                     |
 | `GET /covers/:songId.jpg`                            | A shared song's cover (public with `publicCovers`)                                 |
 | `PUT /party/songs/:id`, `GET /party/songs/:id`       | Send one of your party's songs to the server; get it (party players only)          |
@@ -243,3 +251,9 @@ unless said otherwise.
 
 The messages are in [src/net/protocol.ts](../src/net/protocol.ts), shared with the game. A game and a
 server with different `PROTOCOL_VERSION`s refuse each other with a sentence saying which one to update.
+
+**Live updates.** Every game online hears, over its WebSocket, what changed on the server: a
+`changed` message names the topics (`songs`, `rotation`, `replays`, `boards`, `presence`, and for the
+owner and moderators `users`, `log` and `reports`), gathered over a quarter of a second, and the game
+fetches just those again. A player whose role an admin changed gets `you` with their account. Only
+the names of what changed are sent, never the data.

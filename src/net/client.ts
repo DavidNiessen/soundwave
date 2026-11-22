@@ -10,6 +10,7 @@
  */
 import {
   PROTOCOL_VERSION,
+  TOPICS,
   type Account,
   type ApiError,
   type Avatar,
@@ -34,6 +35,8 @@ import {
   type ShowdownOptions,
   type SignUp,
   type SongScore,
+  type StreamQuality,
+  type Topic,
   type WireChart,
 } from './protocol';
 import type { SoundwaveAnalysis, SoundwaveEdits, SoundwaveMeta } from '../storage/soundwaveFile';
@@ -194,6 +197,9 @@ class OnlineClient {
   private readonly boardListeners = new Set<() => void>();
   private readonly startListeners = new Set<(s: PartyStart) => void>();
   private readonly playListeners = new Set<(e: PlayEvent) => void>();
+  private readonly changeListeners = new Set<(topics: ReadonlySet<Topic>, songs: ReadonlySet<string> | null) => void>();
+  /** The connection has been up before: a new welcome is a reconnect, after which anything may have changed. */
+  private welcomed = false;
   private ws: WebSocket | null = null;
   private access: string | null = null;
   private refreshToken: string | null = null;
@@ -226,6 +232,23 @@ class OnlineClient {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   };
+
+  /**
+   * Live updates: `fn` runs whenever one of `topics` changes on the server (see protocol's Topic),
+   * and after a reconnect (anything may have changed meanwhile). `songs`: for `boards`, the songs
+   * whose boards changed, or null for any.
+   */
+  onChanged(topics: readonly Topic[], fn: (songs: ReadonlySet<string> | null) => void): () => void {
+    const l = (changed: ReadonlySet<Topic>, songs: ReadonlySet<string> | null) => {
+      if (topics.some((t) => changed.has(t))) fn(songs);
+    };
+    this.changeListeners.add(l);
+    return () => void this.changeListeners.delete(l);
+  }
+  private changed(topics: Iterable<Topic>, songs: ReadonlySet<string> | null) {
+    const set = new Set(topics);
+    for (const l of this.changeListeners) l(set, songs);
+  }
   readonly snapshot = () => this.state;
   readonly subscribeBoard = (fn: () => void) => {
     this.boardListeners.add(fn);
@@ -275,7 +298,16 @@ class OnlineClient {
    */
   private async request<T>(
     path: string,
-    init: { method?: string; body?: unknown; auth?: boolean; raw?: Blob; file?: boolean; progress?: (done: number) => void } = {},
+    init: {
+      method?: string;
+      body?: unknown;
+      auth?: boolean;
+      raw?: Blob;
+      file?: boolean;
+      progress?: (done: number) => void;
+      /** Reads the answer's headers. */
+      headers?: (h: Headers) => void;
+    } = {},
   ): Promise<T> {
     const server = this.state.server;
     if (!server) throw new Error('No server is chosen.');
@@ -301,6 +333,7 @@ class OnlineClient {
       if (e instanceof Error && e.name !== 'TypeError') throw e;
       throw new Error('The server could not be reached. Check the address and your connection.');
     }
+    if (res.ok) init.headers?.(res.headers);
     if (init.file && res.ok) return (init.progress ? await readWithProgress(res, init.progress) : await res.blob()) as T;
     const body = (await res.json().catch(() => ({}))) as T | ApiError;
     if (!res.ok) throw new Error((body as ApiError).error ?? `The server answered with an error (${res.status}).`);
@@ -430,6 +463,7 @@ class OnlineClient {
   /** Signs out of the server, which stays chosen. */
   signOut() {
     this.closing = true;
+    this.welcomed = false;
     this.access = null;
     this.refreshToken = null;
     this.save();
@@ -493,8 +527,26 @@ class OnlineClient {
     return this.request<SharedSong[]>(`/songs${query ? `?q=${encodeURIComponent(query)}` : ''}`, { auth: true });
   }
   /** A whole shared song, as its .soundwave file. */
-  downloadSong(id: string) {
-    return this.request<Blob>(`/songs/${id}/file`, { auth: true, file: true });
+  /**
+   * A shared song's file, in `quality` where the server keeps that copy (else as shared), and the
+   * quality it came in. `progress`: how much has come, 0..1.
+   */
+  async downloadSong(id: string, quality: StreamQuality = 'high', progress?: (done: number) => void) {
+    let came: StreamQuality = 'high';
+    const blob = await this.request<Blob>(`/songs/${id}/file${quality === 'high' ? '' : `?quality=${quality}`}`, {
+      auth: true,
+      file: true,
+      progress,
+      headers: (h) => {
+        const q = h.get('X-Soundwave-Quality');
+        if (q === 'medium' || q === 'low') came = q;
+      },
+    });
+    return { blob, quality: came };
+  }
+  /** Sends a smaller copy of a shared song for streaming (its sharer, the owner and moderators). */
+  sendSongCopy(id: string, quality: Exclude<StreamQuality, 'high'>, file: Blob) {
+    return this.request<{ ok: boolean }>(`/songs/${id}/copies/${quality}`, { method: 'PUT', raw: file, auth: true });
   }
   /** A shared song's cover picture. */
   songCover(id: string) {
@@ -666,6 +718,9 @@ class OnlineClient {
         );
         for (const m of this.pending.splice(0)) this.send(m);
         if (this.activity) this.send({ type: 'status', activity: this.activity });
+        // Back after a drop: whatever is on screen is fetched again.
+        if (this.welcomed) this.changed(TOPICS, null);
+        this.welcomed = true;
         this.sync();
         clearInterval(this.syncTimer);
         this.syncTimer = window.setInterval(() => this.sync(), SYNC_EVERY_MS);
@@ -694,6 +749,12 @@ class OnlineClient {
       }
       case 'board':
         this.setBoard({ songIndex: msg.songIndex, lines: msg.lines });
+        return;
+      case 'changed':
+        this.changed(msg.topics, msg.songs ? new Set(msg.songs) : null);
+        return;
+      case 'you':
+        if (this.state.account?.id === msg.you.id) this.set({ account: msg.you });
         return;
       case 'error':
         this.set({ error: msg.message });

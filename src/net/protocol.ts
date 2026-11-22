@@ -80,6 +80,15 @@ export interface Online {
 }
 
 /** A song in a server's library. */
+/**
+ * How a song is streamed: as it was shared ('high'), or a smaller copy for a slow connection
+ * ('medium', AAC at 128 kbit/s; 'low', at 64, or 96 where the encoder goes no lower).
+ */
+export type StreamQuality = 'high' | 'medium' | 'low';
+export const STREAM_QUALITIES: readonly StreamQuality[] = ['high', 'medium', 'low'];
+/** The bit rate of each smaller copy. */
+export const QUALITY_BITRATE: Record<Exclude<StreamQuality, 'high'>, number> = { medium: 128_000, low: 64_000 };
+
 export interface SharedSong {
   /** The hash of the song's audio: the same song is the same id everywhere. */
   id: string;
@@ -94,6 +103,11 @@ export interface SharedSong {
   size: number;
   /** The whole song can be downloaded; without it, only its charts, for a player with the same audio. */
   audio: boolean;
+  /**
+   * Smaller copies the server keeps for streaming, besides the song as shared ('high'): absent on an
+   * older server, and empty until a game has made them (see src/net/streamQuality.ts).
+   */
+  qualities?: StreamQuality[];
   cover: boolean;
   /** Who shared it (null once their account is gone). */
   by: string | null;
@@ -333,8 +347,22 @@ export type ClientMessage =
   /** The host makes the party private (never offered on Discord), or not. */
   | { type: 'private'; on: boolean };
 
+/**
+ * What can change on a server while a player looks at it. The server says which changed (`changed`)
+ * and the games showing them fetch them again, so every screen stays live without asking over and
+ * over. `users`, `log` and `reports` go to the owner and moderators only.
+ */
+export type Topic = 'songs' | 'reports' | 'users' | 'log' | 'rotation' | 'replays' | 'boards' | 'presence';
+export const TOPICS: readonly Topic[] = ['songs', 'reports', 'users', 'log', 'rotation', 'replays', 'boards', 'presence'];
+/** The topics only the owner and moderators are told about. */
+export const MOD_TOPICS: readonly Topic[] = ['users', 'log', 'reports'];
+
 export type ServerMessage =
   | { type: 'welcome'; you: Account; server: string; protocol: number }
+  /** These changed (gathered over a moment). `songs`: with `boards`, the songs whose boards did. */
+  | { type: 'changed'; topics: Topic[]; songs?: string[] }
+  /** The player's own account changed (an admin gave them another role). */
+  | { type: 'you'; you: Account }
   | { type: 'pong'; t: number; serverT: number }
   | { type: 'party'; party: PartyState | null }
   /** `at`: the server's clock (see `pong`) when the song's first moment plays. */

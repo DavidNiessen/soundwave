@@ -108,7 +108,7 @@ import { decodeRun, encodeRun } from '../net/runs';
 import { replayResults } from '../game/replay';
 import { joinSecret, online, partyId, parseInvite, parseJoinSecret, type PartyStart } from '../net/client';
 import { partySongs } from '../net/partySongs';
-import { serverSongs } from '../net/serverSongs';
+import { serverSongs, sharedMeta } from '../net/serverSongs';
 import { PARTY_MAX, type SharedSong, type WireChart } from '../net/protocol';
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { installUiSounds } from './uiSounds';
@@ -467,6 +467,7 @@ export function App() {
   // The party sees the songs held for it as songs the player has, beside their library.
   const held = useSyncExternalStore(partySongs.subscribe, partySongs.songs);
   const server = useSyncExternalStore(serverSongs.subscribe, serverSongs.snapshot);
+  const onlineState = useSyncExternalStore(online.subscribe, online.snapshot);
   const partyLibrary = useMemo(() => {
     const ids = Object.keys(held);
     const streamed = Object.values(server.held);
@@ -478,17 +479,36 @@ export function App() {
   }, [byId, held, server.held]);
   /** Per song, the parts it hardly has: they are not offered for playing. */
   const thin: ThinParts = useMemo(() => Object.fromEntries(Object.entries(status).map(([id, s]) => [id, s.thin])), [status]);
-  // Songs that were removed leave the setlist with them. A streamed song stays while it is held (it
-  // is gone once the game closes, and leaves the setlist then).
+  // Songs that were removed leave the setlist with them. A server's song stays while the server has
+  // it (streamed, on its way, or kept on this device to stream again); while the server's list has
+  // not come yet, its songs are left alone.
+  const serverWaiting = !!onlineState.server && onlineState.status !== 'off' && onlineState.status !== 'signed-out' && !server.ready;
   useEffect(() => {
-    if (!songs.length) return;
-    const kept = pruneSetlist(setlist, new Set([...songs.map((s) => s.id), ...Object.keys(server.held)]));
+    if (!songs.length || serverWaiting) return;
+    const onServer = server.list.map((x) => x.id);
+    const kept = pruneSetlist(
+      setlist,
+      new Set([...songs.map((s) => s.id), ...Object.keys(server.held), ...Object.keys(server.coming), ...onServer]),
+    );
     if (kept.length !== setlist.length) setSetlist(kept);
-  }, [songs, setlist, setSetlist, server.held]);
+  }, [songs, setlist, setSetlist, server.held, server.coming, server.list, serverWaiting]);
   const setSongs_ = useMemo(
-    () => setlist.map((id) => byId.get(id) ?? server.held[id]).filter((s): s is SongMeta => !!s),
-    [setlist, byId, server.held],
+    () =>
+      setlist
+        .map((id) => {
+          const listed = server.list.find((x) => x.id === id);
+          return byId.get(id) ?? server.held[id] ?? server.coming[id]?.meta ?? (listed ? sharedMeta(listed) : undefined);
+        })
+        .filter((s): s is SongMeta => !!s),
+    [setlist, byId, server.held, server.coming, server.list],
   );
+  // The setlist's songs from a server come in the background (from this device where they are kept),
+  // so they are ready by the time they are played.
+  useEffect(() => {
+    if (!server.ready) return;
+    void serverSongs.ensure(setlist.filter((id) => !byId.has(id)));
+  }, [server.ready, setlist, byId]);
+  useEffect(() => serverSongs.setQuality(settings.streamQuality), [settings.streamQuality]);
   /** A song the player can play: from the library (analysed, with notes), or streamed from the server. */
   const playable = (id: string) => (byId.has(id) && canPlay(analysisStatus[id])) || !!server.held[id];
   const setlistRef = useRef(setlist);
@@ -1107,7 +1127,6 @@ export function App() {
 
   /* Playing together ------------------------------------------------------------------------ */
 
-  const onlineState = useSyncExternalStore(online.subscribe, online.snapshot);
   // A server played on before is connected to again when the game starts. If it cannot be
   // reached, the game plays offline and the party screen says so.
   useEffect(() => {
@@ -1123,7 +1142,8 @@ export function App() {
     const party = online.snapshot().party;
     const song = party?.set[index];
     if (!party || !song) return;
-    if (!byId.has(song.id) || !canPlay(analysisStatus[song.id]))
+    if (!byId.has(song.id)) await serverSongs.ensure([song.id]);
+    if (!(byId.has(song.id) && canPlay(analysisStatus[song.id])) && !serverSongs.snapshot().held[song.id])
       return toast(`You need "${song.title}" in your library, with notes, to start it: everyone plays your charts.`);
     try {
       const made = new Map<string, Chart | null>();
@@ -1319,15 +1339,48 @@ export function App() {
         return;
       }
       if (setlistRef.current.length >= SET_MAX) return toast(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
-      await serverSongs.stream(song);
-      const now = setlistRef.current;
-      if (now.includes(song.id)) return;
-      if (now.length >= SET_MAX) return toast(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
-      setSetlist([...now, song.id]);
+      // In the setlist at once; it comes in the background, its progress on it.
+      setSetlist([...setlistRef.current, song.id]);
+      await serverSongs.stream(song).catch((e: Error) => {
+        setSetlist(setlistRef.current.filter((id) => id !== song.id));
+        throw new Error(`"${song.title}" could not be streamed: ${e.message}`);
+      });
     } catch (e) {
       toast((e as Error).message);
     }
   };
+  /**
+   * Ready from the library: on to the party, or to the set's lobby. Setlist songs still coming from
+   * the server are waited for first (the Ready button shows how far they are), then it goes on by itself.
+   */
+  const [waitingFor, setWaitingFor] = useState<string[] | null>(null);
+  const gathering = useMemo(() => {
+    if (!waitingFor) return null;
+    const parts = waitingFor.map((id) => (server.held[id] ? 1 : (server.coming[id]?.progress ?? 0)));
+    return parts.reduce((a, b) => a + b, 0) / Math.max(1, parts.length);
+  }, [waitingFor, server.held, server.coming]);
+  const readyFromLibrary = () => {
+    if (view.name === 'library' && view.from === 'party') return setView({ name: 'party' });
+    const missing = setlistRef.current.filter((id) => !byId.has(id) && !serverSongs.snapshot().held[id]);
+    if (!missing.length) return setView({ name: 'lobby', ids: setlistRef.current, from: 'library' });
+    setWaitingFor(missing);
+    void serverSongs.ensure(missing).finally(() => {
+      setWaitingFor(null);
+      if (viewRef.current.name === 'library') setView({ name: 'lobby', ids: setlistRef.current, from: 'library' });
+    });
+  };
+
+  // The smaller copies a slow connection streams (src/net/streamQuality.ts) are made by the game of
+  // whoever shared a song, or of an admin or moderator, in the background, never while a song plays.
+  useEffect(() => {
+    const me = onlineState.account;
+    if (!server.ready || !me) return;
+    void serverSongs.makeCopies(
+      { name: me.name, curator: me.role === 'owner' || me.role === 'moderator' },
+      (id) => (byIdRef.current.has(id) ? songFile(id) : null),
+      () => !['play', 'replay', 'export', 'editor'].includes(viewRef.current.name),
+    );
+  }, [server.ready, server.list, onlineState.account]);
   // A party's songs reach every player by themselves: the host's game sends a song someone lacks,
   // and the games without it download it from the server, held for the party or kept in the
   // library (src/net/partySongs.ts).
@@ -1749,7 +1802,8 @@ export function App() {
           onCurrent={setHighlight}
           onToggle={toggle}
           onDetails={setSheet}
-          onReady={() => setView(view.from === 'party' ? { name: 'party' } : { name: 'lobby', ids: setlist, from: 'library' })}
+          onReady={readyFromLibrary}
+          gathering={gathering}
           onBack={view.from === 'party' ? () => setView({ name: 'party' }) : goHome}
           onAdd={addSongs}
           actions={songActions}
@@ -1757,8 +1811,11 @@ export function App() {
             onlineState.account && (serverSharing || server.list.length > 0)
               ? {
                   songs: server.list.filter((x) => !byId.has(x.id)),
-                  busy: server.busy,
+                  coming: server.coming,
                   held: server.held,
+                  failed: server.failed,
+                  known: (id) => serverSongs.known(id),
+                  onRest: (x) => settings.serverSongs === 'stream' && serverSongs.prefetch(x),
                   stream: settings.serverSongs === 'stream',
                   sharing: settings.shareLibrary,
                   canShare: !!serverSharing,

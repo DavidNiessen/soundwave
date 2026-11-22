@@ -14,16 +14,16 @@ export function OnlineSidebar({ onBoards }: { onBoards(): void }) {
   const [people, setPeople] = useState<Online[]>([]);
   const signedIn = !!s.account && (s.status === 'online' || s.status === 'reconnecting');
 
-  // Asked again every half minute while the menu is open: nothing runs in the background otherwise.
+  // Fetched as the menu opens and again whenever the server says the scores or who is online changed.
   useEffect(() => {
     if (!signedIn) return;
-    const load = () => {
-      void online.topThisWeek().then(setTop, () => {});
-      void online.presence().then(setPeople, () => {});
-    };
-    load();
-    const t = window.setInterval(load, 30_000);
-    return () => clearInterval(t);
+    const top = () => void online.topThisWeek().then(setTop, () => {});
+    const people = () => void online.presence().then(setPeople, () => {});
+    top();
+    people();
+    const stopTop = online.onChanged(['boards'], top);
+    const stopPeople = online.onChanged(['presence'], people);
+    return () => (stopTop(), stopPeople());
   }, [signedIn]);
 
   if (!signedIn) return null;

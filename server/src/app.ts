@@ -8,7 +8,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { MESSAGE_MAX, PROTOCOL_VERSION, type ServerInfo, type ServerMessage } from '../../src/net/protocol.ts';
+import { MESSAGE_MAX, MOD_TOPICS, PROTOCOL_VERSION, type ServerInfo, type ServerMessage, type Topic } from '../../src/net/protocol.ts';
 import { Accounts, Refusal } from './accounts.ts';
 import type { Config } from './config.ts';
 import type { Store, UserRow } from './db.ts';
@@ -25,6 +25,8 @@ import { clientMessage } from './validate.ts';
 
 /** The most bytes an HTTP request's body may have (everything it carries is small). */
 const BODY_MAX = 64 * 1024;
+/** How long changes are gathered before players are told (see notify): a burst becomes one message. */
+const NOTIFY_MS = 250;
 /** A run's inputs are bigger: a long song at a high frame rate. */
 const RUN_MAX = 8 * 1024 * 1024;
 
@@ -59,10 +61,12 @@ class Binary {
   readonly type: string;
   readonly body: Buffer;
   readonly name: string | undefined;
-  constructor(type: string, body: Buffer, name?: string) {
+  readonly headers: Record<string, string>;
+  constructor(type: string, body: Buffer, name?: string, headers: Record<string, string> = {}) {
     this.type = type;
     this.body = body;
     this.name = name;
+    this.headers = headers;
   }
 }
 
@@ -124,6 +128,35 @@ export async function startServer(config: Config, store: Store, log: (line: stri
   const writeLimit = new RateLimit(30, 30);
 
   /** Closes a player's connection, telling them why. */
+  /*
+   * Live updates: what changed is gathered for a moment, then every player online is told which
+   * topics changed (the owner and moderators about their own topics too), and their games fetch
+   * those again. Nothing is pushed but the names of what changed.
+   */
+  const changed = new Set<Topic>();
+  const boardSongs = new Set<string>();
+  let flushTimer: ReturnType<typeof setTimeout> | null = null;
+  const notify = (topics: Topic[], songIds: string[] = []) => {
+    for (const t of topics) changed.add(t);
+    for (const id of songIds) boardSongs.add(id);
+    flushTimer ??= setTimeout(flush, NOTIFY_MS);
+  };
+  const flush = () => {
+    flushTimer = null;
+    const topics = [...changed];
+    const songIds = [...boardSongs];
+    changed.clear();
+    boardSongs.clear();
+    if (!topics.length) return;
+    const everyone = topics.filter((t) => !MOD_TOPICS.includes(t));
+    for (const id of sockets.keys()) {
+      const role = store.userById(id)?.role;
+      const theirs = role === 'owner' || role === 'moderator' ? topics : everyone;
+      if (theirs.length)
+        send(id, { type: 'changed', topics: theirs, ...(theirs.includes('boards') && songIds.length ? { songs: songIds } : {}) });
+    }
+  };
+
   const drop = (user: string, reason: string) => {
     const ws = sockets.get(user);
     if (!ws) return;
@@ -131,6 +164,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     sockets.delete(user);
     parties.leave(user);
     ws.close(4000, 'bye');
+    notify(['users', 'presence']);
   };
 
   const addressOf = (req: IncomingMessage) =>
@@ -158,7 +192,9 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     }),
     'POST /songs': async (req, _body, ip, _p, raw) => {
       if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many songs at once. Wait a minute.');
-      return songs.share(me(req), raw);
+      const shared = await songs.share(me(req), raw);
+      notify(['songs']);
+      return shared;
     },
     'GET /songs': (req) => (me(req), songs.list(new URL(req.url ?? '/', 'http://x').searchParams.get('q') ?? '')),
     'GET /mod/reports': (req) => songs.reports(me(req)),
@@ -169,9 +205,11 @@ export async function startServer(config: Config, store: Store, log: (line: stri
         .filter((p) => p.name)
         .sort((a, b) => a.name.localeCompare(b.name));
     },
-    'POST /auth/signup': (_req, body, ip) => {
+    'POST /auth/signup': async (_req, body, ip) => {
       if (!authLimit.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
-      return accounts.signUp(body);
+      const session = await accounts.signUp(body);
+      notify(['users']);
+      return session;
     },
     'POST /auth/signin': (_req, body, ip) => {
       if (!authLimit.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
@@ -191,6 +229,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       const u = me(req);
       accounts.deleteAccount(u);
       drop(u.id, 'Your account was deleted.');
+      notify(['users', 'presence', 'boards', 'replays']);
       return { ok: true };
     },
     'GET /me/export': (req) => {
@@ -216,13 +255,19 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       parties.setAvatar(u.id, a ?? undefined);
       return { avatar: a };
     },
-    'POST /scores': (req, body, ip) => {
+    'POST /scores': async (req, body, ip) => {
       if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many scores at once. Wait a minute.');
-      return scores.submit(me(req), body);
+      const taken = await scores.submit(me(req), body);
+      notify(['boards'], typeof body.songId === 'string' ? [body.songId] : []);
+      return taken;
     },
     'GET /boards/top': (req) => (me(req), scores.topThisWeek()),
     'GET /showdown/rotation': (req) => (me(req), rotation.songs()),
-    'POST /showdown/rotation': (req, body) => rotation.set(me(req), body.songs),
+    'POST /showdown/rotation': (req, body) => {
+      const set = rotation.set(me(req), body.songs);
+      notify(['rotation', 'log']);
+      return set;
+    },
     'GET /replays': (req) => {
       me(req);
       const song = new URL(req.url ?? '/', 'http://x').searchParams.get('song') ?? undefined;
@@ -238,22 +283,33 @@ export async function startServer(config: Config, store: Store, log: (line: stri
         u.id,
         `A moderator removed you from the server.${typeof body.reason === 'string' && body.reason ? ` Reason: ${body.reason}` : ''}`,
       );
+      notify(['users', 'log']);
       return { ok: true };
     },
     'POST /mod/ban': (req, body) => {
       const u = accounts.ban(me(req), body.name, body.hours, body.reason);
       drop(u.id, `You were banned from this server.${typeof body.reason === 'string' && body.reason ? ` Reason: ${body.reason}` : ''}`);
+      notify(['users', 'log']);
       return { ok: true };
     },
     'POST /mod/unban': (req, body) => {
       accounts.unban(me(req), body.name, body.reason);
+      notify(['users', 'log']);
       return { ok: true };
     },
     'POST /mod/role': (req, body) => {
       accounts.setRole(me(req), body.name, body.role);
+      // The player's game learns its new role at once (the Admin page appears, or goes).
+      const target = typeof body.name === 'string' ? store.userByName(body.name.trim()) : undefined;
+      if (target) send(target.id, { type: 'you', you: { id: target.id, name: target.name, role: target.role } });
+      notify(['users', 'log']);
       return { ok: true };
     },
-    'POST /mod/reset-password': async (req, body) => ({ password: await accounts.resetPassword(me(req), body.name) }),
+    'POST /mod/reset-password': async (req, body) => {
+      const password = await accounts.resetPassword(me(req), body.name);
+      notify(['log']);
+      return { password };
+    },
     'GET /mod/audit': (req) => accounts.audit(me(req)),
     'GET /mod/users': (req) => accounts.users(me(req), (id) => sockets.has(id)),
   };
@@ -269,7 +325,23 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     [
       'GET',
       /^\/songs\/([0-9a-f]{64})\/file$/,
-      (req, _b, _ip, [id]) => (me(req), new Binary('application/x-soundwave', songs.file(id), `${id}.soundwave`)),
+      (req, _b, _ip, [id]) => {
+        me(req);
+        // A smaller copy for streaming where one is asked for and kept; the song as shared otherwise.
+        const asked = new URL(req.url ?? '/', 'http://x').searchParams.get('quality');
+        const f = songs.file(id, asked === 'medium' || asked === 'low' ? asked : 'high');
+        return new Binary('application/x-soundwave', f.body, `${id}.soundwave`, { 'X-Soundwave-Quality': f.quality });
+      },
+    ],
+    [
+      'PUT',
+      /^\/songs\/([0-9a-f]{64})\/copies\/(medium|low)$/,
+      async (req, _b, ip, [id, quality], raw) => {
+        if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many songs at once. Wait a minute.');
+        await songs.putCopy(me(req), id, quality as 'medium' | 'low', raw);
+        notify(['songs']);
+        return { ok: true };
+      },
     ],
     [
       'PUT',
@@ -289,7 +361,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       (req, _b, _ip, [id]) => {
         const u = me(req);
         if (!parties.inSet(u.id, id)) throw new Refusal(403, 'Only the players of a party with this song in its set can get it.');
-        if (!partySongs.has(id) && songs.hasFile(id)) return new Binary('application/x-soundwave', songs.file(id), `${id}.soundwave`);
+        if (!partySongs.has(id) && songs.hasFile(id)) return new Binary('application/x-soundwave', songs.file(id).body, `${id}.soundwave`);
         return new Binary('application/x-soundwave', partySongs.get(id), `${id}.soundwave`);
       },
     ],
@@ -299,15 +371,25 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       /^\/songs\/([0-9a-f]{64})$/,
       (req, _b, _ip, [id]) => {
         songs.remove(me(req), id, new URL(req.url ?? '/', 'http://x').searchParams.get('reason'));
+        notify(['songs', 'reports', 'log', 'rotation']);
         return { ok: true };
       },
     ],
-    ['POST', /^\/songs\/([0-9a-f]{64})\/edit$/, (req, body, _ip, [id]) => songs.edit(me(req), id, body)],
+    [
+      'POST',
+      /^\/songs\/([0-9a-f]{64})\/edit$/,
+      (req, body, _ip, [id]) => {
+        const edited = songs.edit(me(req), id, body);
+        notify(['songs', 'log']);
+        return edited;
+      },
+    ],
     [
       'POST',
       /^\/songs\/([0-9a-f]{64})\/report$/,
       (req, body, _ip, [id]) => {
         songs.report(me(req), id, body.reason);
+        notify(['reports']);
         return { ok: true };
       },
     ],
@@ -328,6 +410,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       new RegExp(`^/scores/${ID}/share$`),
       (req, body, _ip, [id]) => {
         scores.share(me(req), id, body.shared !== false);
+        notify(['replays', 'boards']);
         return { ok: true };
       },
     ],
@@ -336,6 +419,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       new RegExp(`^/scores/${ID}$`),
       (req, _b, _ip, [id]) => {
         scores.remove(me(req), id, new URL(req.url ?? '/', 'http://x').searchParams.get('reason'));
+        notify(['boards', 'replays', 'log']);
         return { ok: true };
       },
     ],
@@ -359,7 +443,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Max-Age', '86400');
     // A file's size, readable by the game: a proxy that compresses answers drops Content-Length.
-    res.setHeader('Access-Control-Expose-Headers', 'X-File-Size');
+    res.setHeader('Access-Control-Expose-Headers', 'X-File-Size, X-Soundwave-Quality');
     // The game's page is cross-origin isolated (for analysis threads): answers must say they may be read there.
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     if (req.method === 'OPTIONS') return void res.writeHead(204).end();
@@ -387,7 +471,9 @@ export async function startServer(config: Config, store: Store, log: (line: stri
         break;
       }
     if (!route) return reply(res, 404, { error: 'There is nothing here.' });
-    const upload = (req.method === 'POST' && path === '/songs') || (req.method === 'PUT' && path.startsWith('/party/songs/'));
+    const upload =
+      (req.method === 'POST' && path === '/songs') ||
+      (req.method === 'PUT' && (path.startsWith('/party/songs/') || /^\/songs\/[0-9a-f]{64}\/copies\//.test(path)));
     const limit = path === '/scores' ? RUN_MAX : upload ? config.songMaxMb * 1024 * 1024 + 1 : BODY_MAX;
     try {
       let body: Record<string, unknown> = {};
@@ -418,6 +504,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
           'X-File-Size': answer.body.length,
           'Cache-Control': path.startsWith('/covers/') ? 'public, max-age=86400' : 'no-store',
           ...(answer.name ? { 'Content-Disposition': `attachment; filename="${answer.name}"` } : {}),
+          ...answer.headers,
         });
         return void res.end(answer.body);
       }
@@ -479,6 +566,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
               ...(params.get('serverPassword') ? { serverPassword: params.get('serverPassword')! } : {}),
             })
           : await accounts.signIn(name, password);
+      if (r.mode === 'signup') notify(['users']);
       const code = loginCodes.issue(session, r.challenge);
       const to = `${r.redirect}${r.redirect.includes('?') ? '&' : '?'}${new URLSearchParams({ code, state: r.state, server: config.publicUrl })}`;
       // The desktop app is opened by its own link from a page that says what happened; the web
@@ -547,12 +635,16 @@ export async function startServer(config: Config, store: Store, log: (line: stri
           before.close(4004, 'replaced');
         }
         sockets.set(user.id, ws);
+        notify(['users', 'presence']);
         say({ type: 'welcome', you: { id: user.id, name: user.name, role: user.role }, server: config.name, protocol: PROTOCOL_VERSION });
         parties.reconnected(user.id);
         return;
       }
       if (msg.type === 'hello') return;
-      if (msg.type === 'status') return void activity.set(user.id, msg.activity);
+      if (msg.type === 'status') {
+        activity.set(user.id, msg.activity);
+        return void notify(['presence']);
+      }
       // The avatar is only needed when the player comes into a party.
       const joining = msg.type === 'party-create' || msg.type === 'party-join';
       parties.handle({ id: user.id, name: user.name, avatar: joining ? profiles.avatarOf(user.id) : undefined }, msg);
@@ -563,6 +655,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
         sockets.delete(user.id);
         activity.delete(user.id);
         parties.disconnected(user.id);
+        notify(['users', 'presence']);
       }
     });
     ws.on('error', () => ws.close());
@@ -582,6 +675,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     parties,
     close: async () => {
       clearInterval(ticker);
+      if (flushTimer) clearTimeout(flushTimer);
       for (const ws of wss.clients) ws.terminate();
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await new Promise<void>((resolve) => http.close(() => resolve()));
