@@ -337,7 +337,9 @@ export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, 
       <section className="replay-dock" aria-label="Replay controls" data-nav-group="replay">
         <header className="replay-head">
           <div className="replay-what">
-            <span className="replay-title">{replay.title}</span>
+            <span className="replay-title" title={replay.title}>
+              {replay.title}
+            </span>
             <span className="replay-sub">
               {what} · {replayDate(replay.date)}
             </span>
@@ -347,7 +349,7 @@ export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, 
             <span className="replay-total"> / {clock(duration)}</span>
           </span>
         </header>
-        {silent && <p className="replay-note">The song is no longer in your library, so its replay plays without the music.</p>}
+        {silent && <p className="replay-note">Plays without music: the song is no longer in your library.</p>}
         <div
           ref={scrubRef}
           className="replay-scrub"
