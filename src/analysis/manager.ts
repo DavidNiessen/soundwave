@@ -101,6 +101,13 @@ export class AnalysisManager {
   private queue: string[] = [];
   private running = false;
   private listeners = new Set<Listener>();
+  /**
+   * The song being analyzed when the page last closed without the analysis ending: the browser
+   * most likely closed it for using too much memory (a phone's does). Until an analysis ends on
+   * this device again, no song is started by itself, or the page would close every time it opens;
+   * the player can still ask for any.
+   */
+  private died: string | null;
 
   /**
    * `separator` splits the song into stems first; every analysis in the game goes through it, and a
@@ -111,7 +118,10 @@ export class AnalysisManager {
     private readonly separator: StemAnalyzer | null = null,
     /** Analyses an earlier version of the game made, and whether this device can analyze (for tests). */
     private readonly env: ManagerEnv = defaultEnv,
-  ) {}
+  ) {
+    // Read before anything runs. It stays noted until an analysis ends (see pump).
+    this.died = env.running?.read() ?? null;
+  }
 
   subscribe = (l: Listener) => {
     this.listeners.add(l);
@@ -171,6 +181,7 @@ export class AnalysisManager {
   /** Loads a cached analysis if there is one; otherwise queues the song when `autoQueue` is set. */
   async check(id: string, autoQueue: boolean) {
     if (this.status[id]?.state === 'analyzing' || this.status[id]?.state === 'queued') return;
+    if (this.died) autoQueue = false;
     const [cached, edits] = await Promise.all([this.loadCached(id), this.editsOf(id)]);
     // It may have been queued while the storage was read.
     const now = this.status[id]?.state as AnalysisStatus['state'] | undefined;
@@ -186,6 +197,7 @@ export class AnalysisManager {
       return;
     }
     if (autoQueue) this.enqueue(id);
+    else if (id === this.died) this.set(id, { state: 'error', error: DIED });
     else this.set(id, { state: 'idle' });
   }
 
@@ -265,6 +277,8 @@ export class AnalysisManager {
       const abort = new AbortController();
       this.current = { id, abort };
       const stale = () => (this.generation.get(id) ?? 0) !== gen;
+      // Noted while it runs: should the page close before it ends, the next one knows (see `died`).
+      this.env.running?.write(id);
       try {
         const { result, stems } = await this.analyze(id, abort.signal);
         if (stale()) continue;
@@ -296,6 +310,9 @@ export class AnalysisManager {
         if (!stale()) this.set(id, { state: 'error', error: (e as Error).message });
       } finally {
         this.current = null;
+        // It ended (well or not) with the page still open: songs start by themselves again.
+        this.died = null;
+        this.env.running?.write(null);
       }
     }
     this.running = false;
@@ -431,11 +448,38 @@ export interface ManagerEnv {
   olderAnalyses(id: string): Promise<{ version: number; data: unknown }[]>;
   /** Whether this device can analyze songs at all (only not where analyzing is switched off). */
   canAnalyze(): Promise<boolean>;
+  /** Where the song being analyzed is noted, so that it outlives the page (none in tests). */
+  running?: { read(): string | null; write(id: string | null): void };
 }
+
+/** What a song the page closed on while analyzing it says. */
+export const DIED =
+  'The game closed while this song was being analyzed, most likely because this device ran out of memory. ' +
+  'Analyze it to try again, or analyze it on a computer and bring it over (export it, or with a library backup).';
+
+/** Kept out of library backups (see preferenceKeys): it says something of this device alone. */
+const RUNNING_KEY = 'soundwave.cache.analysis-running';
 
 const defaultEnv: ManagerEnv = {
   olderAnalyses: listAnalyses,
   canAnalyze: async () => (await analysisDevice()) !== 'none',
+  running: {
+    read() {
+      try {
+        return localStorage.getItem(RUNNING_KEY);
+      } catch {
+        return null;
+      }
+    },
+    write(id) {
+      try {
+        if (id) localStorage.setItem(RUNNING_KEY, id);
+        else localStorage.removeItem(RUNNING_KEY);
+      } catch {
+        /* storage unavailable: no guard */
+      }
+    },
+  },
 };
 
 const localAnalyzer: LocalAnalyzer = async (id, onProgress, signal, assist) => {
