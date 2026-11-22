@@ -199,6 +199,15 @@ export async function getAnalysis<T>(key: string): Promise<T | undefined> {
   return (await (await db()).get('analysis', key))?.data as T | undefined;
 }
 
+/** Every analysis kept for a song, whatever version of the game made it, with that version. */
+export async function listAnalyses(songId: string): Promise<{ version: number; data: unknown }[]> {
+  const rows = await (await db()).getAll('analysis', IDBKeyRange.bound(`${songId}:`, `${songId}:\uffff`));
+  return rows.flatMap((r) => {
+    const version = Number(r.key.slice(songId.length + 1).split(':')[0]);
+    return r.songId === songId && Number.isInteger(version) ? [{ version, data: r.data }] : [];
+  });
+}
+
 export async function deleteAnalyses(songId: string) {
   const tx = (await db()).transaction('analysis', 'readwrite');
   for (let c = await tx.store.openCursor(); c; c = await c.continue()) if (c.value.songId === songId) await c.delete();
