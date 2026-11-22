@@ -74,12 +74,12 @@ interface Props {
 }
 
 /** The main menu's tabs: playing sets, making charts, watching runs again, and picking the stage they are played on. */
-type Tab = 'play' | 'edit' | 'replays' | 'stage';
+type Tab = 'play' | 'edit' | 'stage' | 'replays';
 const TABS: [Tab, string, LucideIcon][] = [
   ['play', 'Play', Play],
   ['edit', 'Edit', PencilRuler],
-  ['replays', 'Replays', Clapperboard],
   ['stage', 'Stage', Theater],
+  ['replays', 'Replays', Clapperboard],
 ];
 const tabIndex = (t: Tab) => TABS.findIndex(([id]) => id === t);
 /**
