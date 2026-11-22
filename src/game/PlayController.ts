@@ -242,6 +242,8 @@ export class PlayController {
     const keys = chart.lanes === 5 ? settings.keys5 : settings.keys4;
     const handlers: InputHandlers = {
       press: (lane, ts) => {
+        // The light flashes for every press, a note there or not, from the countdown on.
+        if (this.phase === 'playing' || this.phase === 'countdown') this.light?.press(lane, this.clock);
         if (this.phase !== 'playing') return;
         recorder.press(lane, this.engine.time(ts));
       },
@@ -294,7 +296,6 @@ export class PlayController {
       if (fb) this.flashFeedback(fb.text, fb.kind, fb.delta);
       if (e.type === 'hit') {
         this.rumble.hit(e.lane, e.grade);
-        this.light?.noteHit(e.lane, this.clock);
         if (chart.notes[e.noteIndex].dur > 0) this.rumble.sustainStart(e.lane);
       } else if (e.type === 'miss') {
         this.rumble.miss(e.lane);

@@ -1,8 +1,8 @@
 /**
  * The light bar around a PlayStation controller's touchpad (DualSense, DualSense Edge, DualShock 4)
- * during a song. It follows the rails of the highway: a dim violet between notes, a flash in a
- * lane's colour on every note hit in that lane, gold for as long as the streak holds the top
- * multiplier, and light blue while overdrive lasts. Each of those wins over the ones before it.
+ * during a song: off, so that a flash stands out, a flash in a lane's colour every time that lane
+ * is pressed (a note there or not), gold for as long as the streak holds the top multiplier, and
+ * light blue while overdrive lasts. Each of those wins over the ones before it.
  *
  * The light is set natively by the desktop app (src-tauri/src/lightbar.rs), on a USB cable only: by
  * Bluetooth setting it would stop the game reading the controller's buttons.
@@ -29,7 +29,8 @@ export const LANE_LIGHT: readonly Rgb[] = [
   { r: 0, g: 70, b: 255 },
   { r: 255, g: 55, b: 0 },
 ];
-export const IDLE_LIGHT: Rgb = { r: 26, g: 10, b: 80 };
+/** Between flashes the light is off. */
+export const IDLE_LIGHT: Rgb = { r: 0, g: 0, b: 0 };
 export const GOLD_LIGHT: Rgb = { r: 255, g: 125, b: 0 };
 export const OVERDRIVE_LIGHT: Rgb = { r: 40, g: 165, b: 255 };
 
@@ -40,7 +41,7 @@ const STEADY = 0.62;
 
 export interface LightState {
   now: number;
-  /** The last note hit: its lane and when (ms, on `now`'s clock). */
+  /** The last lane pressed and when (ms, on `now`'s clock). */
   hit: { lane: number; at: number } | null;
   /** When the last beat fell, while overdrive lasts. */
   beatAt: number;
@@ -64,7 +65,7 @@ const scale = (c: Rgb, k: number): Rgb => mix({ r: 0, g: 0, b: 0 }, c, k);
 export function lightColor(s: LightState): Rgb {
   const flash = s.hit ? fade(s.now, s.hit.at) : 0;
   if (s.overdrive || s.fullStreak) {
-    // Gold and blue hold the colour: a hit, and in overdrive the beat, only brighten it.
+    // Gold and blue hold the colour: a press, and in overdrive the beat, only brighten it.
     const kick = Math.max(flash, s.overdrive ? fade(s.now, s.beatAt) : 0);
     return scale(s.overdrive ? OVERDRIVE_LIGHT : GOLD_LIGHT, STEADY + (1 - STEADY) * kick);
   }
@@ -117,8 +118,8 @@ export class LightShow {
     if (!s.lightbar) this.release();
   }
 
-  /** A note was hit in `lane` (`now` on the clock `frame` runs on). */
-  noteHit(lane: number, now: number) {
+  /** `lane` was pressed, whether or not a note was there (`now` on the clock `frame` runs on). */
+  press(lane: number, now: number) {
     this.hit = { lane, at: now };
   }
 

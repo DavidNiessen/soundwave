@@ -1200,7 +1200,7 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
                 toggle(
                   'lightbar',
                   'Light bar',
-                  `The light around the touchpad flashes in a lane’s colour on every note you hit there, glows gold while your streak holds the top multiplier, and light blue in overdrive. ${lightNote}`.trim(),
+                  `The light around the touchpad flashes in a lane’s colour every time you press that lane, glows gold while your streak holds the top multiplier, and light blue in overdrive. ${lightNote}`.trim(),
                   s.lightbar,
                   (v) => set({ lightbar: v }),
                 ),
