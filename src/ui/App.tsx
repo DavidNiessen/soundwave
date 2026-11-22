@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { setDiscordEnabled, showScene } from '../app/discord';
+import { findStage } from '../game/stages';
+import { setActiveStage } from '../render/stage/showStage';
 import { analysisManager, canPlay } from '../analysis/manager';
 import { stemModel } from '../analysis/separation/model';
 import { analysisDevice, isHandheld, type AnalysisDevice } from '../analysis/separation/support';
@@ -52,6 +54,7 @@ import {
   type BestScore,
   type SongMeta,
 } from '../storage/db';
+import { getMedia } from '../storage/stageMedia';
 import { newReplayId, type ReplayData, type ReplayMeta } from '../storage/replays';
 import { soundwaveFileName, isSoundwaveFile } from '../storage/soundwaveFile';
 import { chooseSaveTarget, saveSongFile, watchOpenedFiles, type SaveTarget } from '../storage/share';
@@ -59,6 +62,8 @@ import { videoFileName, type VideoExportSettings } from '../game/videoExport';
 import { songSamples, type VideoPlan } from '../game/videoRender';
 import { resolveGraphics } from '../game/graphics';
 import { videoExports } from '../video/exports';
+import type { VideoJob } from '../video/protocol';
+import { stageLook, type StageDef } from '../game/stages';
 import { ExportVideoDialog, VideoExportScreen } from './VideoExport';
 import { readSongPackage, songFile, storeNewSong, storeSongPackage, updateSongMeta } from '../storage/songFile';
 import { ActionBar, useActions } from './actions';
@@ -80,6 +85,7 @@ import { PlayScreen } from './PlayScreen';
 import { ReplayScreen } from './ReplayScreen';
 import { ResultsScreen, SummaryScreen, type SetResult } from './ResultsScreen';
 import { SettingsScreen } from './SettingsScreen';
+import { StageBackdrop } from './StageBackdrop';
 import type { SongActions } from './SongMenu';
 import { SongSheet } from './SongSheet';
 import { MetadataSheet } from './MetadataSheet';
@@ -148,6 +154,16 @@ const DEPTH: Record<View['name'], number> = {
   results: 4,
   summary: 5,
 };
+
+/** What stands behind the highway in a replay's video: the player's stage, as far as a worker can draw it. */
+async function videoBackdrop(def: StageDef): Promise<VideoJob['backdrop']> {
+  const b = def.backdrop;
+  if (b.kind === 'venue') return { kind: 'venue', venue: def.venueId, look: stageLook(def) };
+  if (b.kind === 'gradient') return { kind: 'gradient', colors: [b.from, b.to], dim: def.dim };
+  // The player's file, read here: the worker has no way into the page's stage files.
+  const file = b.media ? await getMedia(b.media) : null;
+  return file ? { kind: b.kind, file: file.blob, dim: def.dim } : { kind: 'night' };
+}
 
 /** Silence the length of a song, for a replay whose song has left the library (a low rate keeps it small). */
 function silence(seconds: number): AudioBuffer {
@@ -708,6 +724,7 @@ export function App() {
                 music: video.music && !silent,
                 trackSpeed: settings.trackSpeed,
                 graphics: resolveGraphics(settings.graphics),
+                backdrop: await videoBackdrop(findStage(settings.stage, settings.stage.active)),
                 video,
                 plan,
               },
@@ -1006,6 +1023,10 @@ export function App() {
     }
   };
 
+  // Every stage (the menus' and the song's) is the player's stage; the stage browser shows the ones
+  // it tries out over it (see showStage).
+  useEffect(() => setActiveStage(findStage(settings.stage, settings.stage.active)), [settings.stage]);
+
   // The player's Discord profile shows where they are and what they play (desktop app; src/app/discord.ts).
   useEffect(() => setDiscordEnabled(settings.discordStatus), [settings.discordStatus]);
   useEffect(() => {
@@ -1219,6 +1240,7 @@ export function App() {
           replays={replays}
           replayActions={replayActions}
           onSettings={() => setView({ name: 'settings', back: view })}
+          onStages={(stage) => updateSettings({ ...settings, stage })}
           onExit={canExit() ? () => setExitAsk(true) : undefined}
           update={update.state === 'available' ? update.version : undefined}
           onUpdate={() => setAppCard('update')}
@@ -1230,6 +1252,7 @@ export function App() {
     content = (
       <div className={`menu on-${view.name}`}>
         <MenuBackground graphics={settings.graphics} onReady={onStage} />
+        <StageBackdrop />
         <div className="veil" aria-hidden />
         {/* One entrance per screen change; the stage behind it stays. */}
         {booted && (

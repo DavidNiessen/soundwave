@@ -1,7 +1,8 @@
 import { detectGpu } from '../../game/graphics';
-import { AuroraStage } from '../aurora/AuroraStage';
 import { loadVenue, watchVenue } from '../aurora/assets';
+import { Stage } from './Stage';
 import type { Beat, FromStage, StageInput, StageRate, ToStage } from './protocol';
+import type { StageLook } from './look';
 
 /** How often a frozen stage still draws, ms (so a resized window is not left blank). */
 const FROZEN_MS = 500;
@@ -11,13 +12,15 @@ const nextFrame: (cb: () => void) => unknown =
 
 /** One stage and what the page last told it. */
 interface Slot {
-  stage: AuroraStage | null;
+  stage: Stage | null;
   input: StageInput;
   /** A beat heard since the last frame (a downbeat outranks a beat). */
   beat: Beat | 'none';
   rate: StageRate;
   lastFrozen: number;
   size: { width: number; height: number; dpr: number };
+  /** A look that came while the stage was still being built. */
+  look: StageLook | null;
   disposed: boolean;
   canvas: HTMLCanvasElement | OffscreenCanvas;
   /** Every frame drawn is copied to the page (a video is being recorded). */
@@ -42,15 +45,17 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
   let frames = 0;
 
   // One loop for every stage held (only while one changes over to another are there two).
+  /** A stage being recorded draws even while hidden or covered: the video needs its frames. */
+  const capturing = () => [...slots.values()].some((s) => s.capture);
   const loop = () => {
     looping = false;
-    if (!visible || !slots.size) return;
+    if (!slots.size || (!visible && !capturing())) return;
     looping = true;
     nextFrame(loop);
     frames++;
     const now = performance.now();
     for (const [id, slot] of slots) {
-      if (!slot.stage || slot.stepped) continue;
+      if (!slot.stage || slot.stepped || (!visible && !slot.capture)) continue;
       if (slot.rate === 'frozen') {
         if (now - slot.lastFrozen < FROZEN_MS) continue;
         slot.lastFrozen = now;
@@ -59,7 +64,7 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
     }
   };
   const wake = () => {
-    if (looping || !visible || !slots.size) return;
+    if (looping || !slots.size || (!visible && !capturing())) return;
     looping = true;
     nextFrame(loop);
   };
@@ -94,6 +99,7 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
       rate: 'full',
       lastFrozen: 0,
       size: { width: m.width, height: m.height, dpr: m.dpr },
+      look: null,
       disposed: false,
       canvas: m.canvas,
       capture: false,
@@ -101,9 +107,9 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
       stepped: false,
     };
     slots.set(m.id, slot);
-    let stage: AuroraStage;
+    let stage: Stage;
     try {
-      stage = await AuroraStage.create(m.canvas, m.graphics, m.options);
+      stage = await Stage.create(m.canvas, m.graphics, m.options);
     } catch (err) {
       slots.delete(m.id);
       const message = err instanceof Error ? err.message : String(err);
@@ -111,6 +117,7 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
       return;
     }
     if (slot.disposed) return stage.dispose();
+    if (slot.look) stage.setLookOptions(slot.look);
     stage.setSize(slot.size.width, slot.size.height, slot.size.dpr);
     await stage.prepare();
     if (slot.disposed) return stage.dispose();
@@ -155,14 +162,28 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
       case 'rate':
         slot.rate = m.rate;
         break;
+      case 'look':
+        slot.look = m.look;
+        slot.stage?.setLookOptions(m.look);
+        // Seen at once on a stage that only draws now and then (under a screen).
+        if (slot.rate === 'frozen' && slot.stage) draw(slot);
+        break;
+      case 'screen':
+        if (slot.stage) slot.stage.setScreenFrame(m.frame);
+        else m.frame?.close();
+        break;
       case 'overdrive':
         slot.stage?.overdriveStart();
+        break;
+      case 'drop':
+        slot.stage?.drop(m.seconds);
         break;
       case 'finale':
         slot.stage?.finale(m.seconds);
         break;
       case 'capture':
         slot.capture = m.on;
+        wake();
         break;
       case 'step': {
         slot.stepped = true;

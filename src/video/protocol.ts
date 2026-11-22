@@ -1,5 +1,7 @@
 import type { Chart } from '../chart/types';
 import type { GraphicsSettings } from '../game/graphics';
+import type { StageLook } from '../render/stage/look';
+import type { VenueId } from '../render/venues/catalog';
 import type { ReplayInputs } from '../game/replay';
 import type { VideoExportSettings } from '../game/videoExport';
 import type { SongSamples, VideoPlan } from '../game/videoRender';
@@ -18,6 +20,17 @@ export interface VideoJob {
   trackSpeed: number;
   /** The stage's graphics, as the page resolved them. */
   graphics: GraphicsSettings;
+  /**
+   * What stands behind the highway: the player's stage (its venue, picked already when it is
+   * Random, and its look), or a gradient, picture or video of their own, or the plain night.
+   */
+  backdrop:
+    | { kind: 'venue'; venue: VenueId; look: StageLook }
+    /** `dim`: how much it is darkened, as behind the highway in the game. */
+    | { kind: 'gradient'; colors: [string, string]; dim: number }
+    /** The player's picture or video file (a Blob is handed to the worker without being copied). */
+    | { kind: 'image' | 'video'; file: Blob; dim: number }
+    | { kind: 'night' };
   video: VideoExportSettings;
   plan: Extract<VideoPlan, { kind: 'frames' }>;
 }

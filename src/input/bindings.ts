@@ -13,15 +13,17 @@
 import type { PadInput } from './pads';
 
 /** Where a shortcut works. */
-export type Area = 'menus' | 'home' | 'library' | 'lobby' | 'results' | 'settings' | 'song' | 'replay' | 'editor';
+export type Area = 'menus' | 'lists' | 'home' | 'library' | 'lobby' | 'results' | 'settings' | 'stages' | 'song' | 'replay' | 'editor';
 
 export const AREAS: { id: Area; label: string }[] = [
   { id: 'menus', label: 'Every menu' },
+  { id: 'lists', label: 'Songs, stages and replays' },
   { id: 'home', label: 'Main menu' },
   { id: 'library', label: 'Music library' },
   { id: 'lobby', label: 'Before a song' },
   { id: 'results', label: 'After a song' },
   { id: 'settings', label: 'Settings' },
+  { id: 'stages', label: 'Stages' },
   { id: 'song', label: 'Playing a song' },
   { id: 'replay', label: 'Watching a replay' },
   { id: 'editor', label: 'Track editor' },
@@ -57,6 +59,12 @@ export const COMMANDS: Command[] = [
     { id: 'menus.tabPrev', label: 'Previous tab', key: 'KeyQ', pad: 'b4' },
     { id: 'menus.tabNext', label: 'Next tab', key: 'KeyE', pad: 'b5' },
   ]),
+  // The same in every list of things of the player's: the music library, the Stage tab, the Replays tab.
+  ...cmd('lists', [
+    { id: 'lists.options', label: 'Options (the right-click menu)', key: 'KeyO', pad: 'b2', mouse: 'm1' },
+    { id: 'lists.select', label: 'Select or deselect', key: 'KeyX', pad: 'b3' },
+    { id: 'lists.delete', label: 'Delete', key: 'Delete', key2: 'Backspace' },
+  ]),
   ...cmd('home', [
     { id: 'home.settings', label: 'Settings', key: 'KeyS', pad: 'b9' },
     { id: 'home.add', label: 'Add songs', key: 'KeyA', pad: 'b3' },
@@ -64,14 +72,10 @@ export const COMMANDS: Command[] = [
     { id: 'home.search', label: 'Search tracks', key: 'Slash' },
     { id: 'home.update', label: 'Update the game', key: 'KeyU' },
     { id: 'home.install', label: 'Get the app', key: 'KeyI' },
-    { id: 'home.replayOptions', label: 'Replay options', key: 'KeyO', pad: 'b2', mouse: 'm1' },
     { id: 'home.replayKeep', label: 'Keep a replay', key: 'KeyK' },
-    { id: 'home.replayDelete', label: 'Delete a replay', key: 'Delete', key2: 'Backspace' },
     { id: 'home.replayExport', label: 'Export a replay’s video', key: 'KeyV', pad: 'b11' },
   ]),
   ...cmd('library', [
-    { id: 'library.options', label: 'Song options', key: 'KeyO', pad: 'b2', mouse: 'm1' },
-    { id: 'library.select', label: 'Select a song', key: 'KeyX', pad: 'b3' },
     { id: 'library.details', label: 'Song details', key: 'KeyD' },
     { id: 'library.search', label: 'Search', key: 'Slash' },
     { id: 'library.sort', label: 'Sort', key: 'KeyS', pad: 'b7' },
@@ -95,6 +99,14 @@ export const COMMANDS: Command[] = [
     { id: 'results.part4', label: 'Next song: drums', key: 'Digit4' },
   ]),
   ...cmd('settings', [{ id: 'settings.reset', label: 'Restore defaults', key: 'KeyR', pad: 'b3' }]),
+  ...cmd('stages', [
+    // New stage sits where the library's Add songs does; Customize is in a stage's menu for a controller.
+    { id: 'stages.new', label: 'New stage', key: 'KeyN', pad: 'b8' },
+    { id: 'stages.edit', label: 'Customize the stage', key: 'KeyC' },
+    { id: 'stages.drop', label: 'Test the drop', key: 'KeyT', pad: 'b9' },
+    { id: 'stages.random', label: 'Random colours', key: 'KeyR', pad: 'b10' },
+    { id: 'stages.undo', label: 'Undo', key: 'Ctrl+KeyZ' },
+  ]),
   ...cmd('song', [{ id: 'song.pause', label: 'Pause', key: 'KeyP', pad: 'b9' }]),
   // The speed is changed with the tab buttons (Q and E, the shoulder buttons).
   ...cmd('replay', [
@@ -228,20 +240,54 @@ export const MODIFIER_CODES = new Set([
   'MetaRight',
 ]);
 
-/** Other commands in the same area (or in every menu) that answer to the same input. */
+/** Areas the lists' shortcuts (Options, Select, Delete) work beside, and the main menu's that share the Replays tab with them. */
+const WITH_LISTS: readonly Area[] = ['library', 'stages'];
+const besideLists = (c: Command) => WITH_LISTS.includes(c.area) || c.id.startsWith('home.replay');
+
+/** Other commands in the same area (or in every menu, or a list beside it) that answer to the same input. */
 export function clashes(id: string, kind: 'key' | 'pad' | 'mouse'): Command[] {
   const c = BY_ID.get(id);
   const mine = bound(id)[kind];
   if (!c || !mine) return [];
-  const near = (o: Command) => o.area === c.area || o.area === 'menus' || (c.area === 'menus' && o.area !== 'song' && o.area !== 'editor');
+  const near = (o: Command) =>
+    o.area === c.area ||
+    o.area === 'menus' ||
+    (c.area === 'menus' && o.area !== 'song' && o.area !== 'editor') ||
+    (c.area === 'lists' && besideLists(o)) ||
+    (o.area === 'lists' && besideLists(c));
   return COMMANDS.filter((o) => o.id !== id && near(o) && (bound(o.id)[kind] === mine || (kind === 'key' && bound(o.id).key2 === mine)));
 }
+
+/**
+ * Shortcuts that became one for every list: a change the player made to one of them carries over
+ * (the music library's first, as it came first).
+ */
+const MOVED: Record<string, string> = {
+  'library.options': 'lists.options',
+  'stages.options': 'lists.options',
+  'home.replayOptions': 'lists.options',
+  'library.select': 'lists.select',
+  'stages.select': 'lists.select',
+  'stages.delete': 'lists.delete',
+  'home.replayDelete': 'lists.delete',
+};
 
 /** Keeps only bindings of known commands, with inputs of the right shape. */
 export function normalizeBindings(raw: unknown): BindingOverrides {
   const out: BindingOverrides = {};
   if (!raw || typeof raw !== 'object') return out;
-  for (const [id, v] of Object.entries(raw as Record<string, unknown>)) {
+  const stored = raw as Record<string, unknown>;
+  const order = Object.keys(MOVED);
+  const entries = Object.entries(stored)
+    // An old id waits behind the others, in MOVED's order; one whose new id is stored too is dropped.
+    .sort(([a], [b]) => order.indexOf(a) - order.indexOf(b))
+    .flatMap(([id, v]): [string, unknown][] => {
+      const to = MOVED[id];
+      if (!to) return [[id, v]];
+      return to in stored ? [] : [[to, v]];
+    });
+  for (const [id, v] of entries) {
+    if (id in out) continue;
     if (!BY_ID.has(id) || !v || typeof v !== 'object') continue;
     const o = v as Record<string, unknown>;
     const entry: BindingOverrides[string] = {};

@@ -14,6 +14,8 @@ import { GamepadInput, KeyboardInput, TouchInput, type InputHandlers } from './i
 import { WINDOWS } from './judge';
 import { GOLD_STARS, MAX_MULTIPLIER, multiplierFor, STREAK_PER_MULTIPLIER } from './scoring';
 import { highwaySpeed, type Settings } from './settings';
+import { stageVenue } from './stages';
+import type { VenueId } from '../render/venues/catalog';
 
 export interface HudRefs {
   score: HTMLElement;
@@ -100,6 +102,8 @@ export class PlayController {
   private stageHost: HTMLElement | null = null;
   /** The graphics the newest stage was built with, as JSON. */
   private graphicsKey = '';
+  /** The venue of the stage in use. */
+  private venue: VenueId;
   private readonly input: KeyboardInput | null = null;
   private readonly padInput: GamepadInput | null = null;
   private readonly touchInput: TouchInput | null = null;
@@ -206,6 +210,7 @@ export class PlayController {
     this.graphicsKey = JSON.stringify(resolveGraphics(settings.graphics));
     const stageDrawn = stageHost ? new Promise<void>((resolve) => (this.stageSettled = resolve)) : Promise.resolve();
     this.ready = this.highway.ready.then(() => stageDrawn);
+    this.venue = stageVenue(settings.stage);
     if (stageHost) {
       // Built once the highway is ready to draw: both compile their shaders in the same GPU process,
       // and the highway, which the player needs first, should not queue behind the stage's.
@@ -355,7 +360,9 @@ export class PlayController {
     this.highway.speed = highwaySpeed(s.trackSpeed);
     this.rumble.update(this.rumbleSettings(s));
     const key = JSON.stringify(resolveGraphics(s.graphics));
-    if (key === this.graphicsKey) return;
+    const venue = stageVenue(s.stage);
+    if (key === this.graphicsKey && venue === this.venue) return;
+    this.venue = venue;
     this.graphicsKey = key;
     if (this.stageHost) this.buildStage();
   }
@@ -368,7 +375,7 @@ export class PlayController {
   private buildStage() {
     const pending = this.stage !== this.shownStage ? this.stage : null;
     pending?.dispose();
-    const stage = new StageView(this.stageHost!, JSON.parse(this.graphicsKey), { mode: 'play', part: this.chart.part });
+    const stage = new StageView(this.stageHost!, JSON.parse(this.graphicsKey), { mode: 'play', part: this.chart.part, venue: this.venue });
     if (this.isFrozen) stage.setRate('frozen');
     this.stage = stage;
     if (this.stageTaker) stage.capture(this.stageTaker);

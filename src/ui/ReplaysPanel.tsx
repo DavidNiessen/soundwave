@@ -402,7 +402,7 @@ function ReplayCard({ replay: r, song, hints, onWatch, onExport, onKeep, onDelet
           {r.kept ? 'Kept' : 'Keep'}
         </button>
         <button type="button" className="btn" data-action="replay-delete" aria-label="Delete this replay" onClick={onDelete}>
-          <Hint kbd={keysOf('home.replayDelete').kbd} {...hints} />
+          <Hint kbd={keysOf('lists.delete').kbd} {...hints} />
           <Trash2 strokeWidth={ICON_STROKE} aria-hidden />
           Delete
         </button>

@@ -1,5 +1,5 @@
 /**
- * The library backup: every song, best score, replay and setting in one file, to move the game to
+ * The library backup: every song, best score, replay, setting and stage file in one file, to move the game to
  * another computer or keep it safe.
  *
  * The file is laid out like a song file (src/storage/soundwaveFile.ts): a 12-byte header, then
@@ -21,6 +21,9 @@
  *     RPLY  repeated. A saved replay's file (src/storage/replays.ts): its result, the chart it was
  *           played on and the run. Backups from before replays have none; readers that do not know
  *           the chunk pass it by.
+ *     MDIA  repeated. A video or picture the player's stages use (src/storage/stageMedia.ts): a
+ *           u32 length, that many bytes of UTF-8 JSON { id, name, type, addedAt }, then the file's
+ *           bytes. Backups from before stages have none.
  *     SONG  repeated, last. A whole song file, exactly as it would be exported on its own: details,
  *           cover, analysis, hand-edited charts and the audio.
  *
@@ -31,6 +34,7 @@ import { DIFFICULTIES, PARTS, type Difficulty, type Part } from '../chart/types'
 import { GOLD_STARS } from '../game/scoring';
 import { getReplay, getSong, listAllScores, listReplays, listSongs, putReplay, submitScore, type BestScore } from './db';
 import { readReplay, writeReplay } from './replays';
+import { listMedia, restoreMedia, type StageMedia } from './stageMedia';
 import { readSongPackage, songFile, storeSongPackage } from './songFile';
 
 export const BACKUP_EXT = '.soundwave-backup';
@@ -141,6 +145,37 @@ export interface BackupInput {
   songs: (Blob | (() => Promise<Blob>))[];
   /** Each saved replay's file, or how to get it (absent: none). */
   replays?: (Blob | (() => Promise<Blob | null>))[];
+  /** The stages' videos and pictures (absent: none). */
+  media?: StageMedia[];
+}
+
+/** A stage file as a chunk's payload: the length of its details, the details, then the file. */
+function mediaPayload(m: StageMedia): Blob {
+  const head = utf8.encode(JSON.stringify({ id: m.id, name: m.name, type: m.type, addedAt: m.addedAt }));
+  const len = new Uint8Array(4);
+  new DataView(len.buffer).setUint32(0, head.length, true);
+  return new Blob([len, head, m.blob]);
+}
+
+/** A stage file back from its chunk's payload, or null when it does not read as one. */
+async function readMediaPayload(data: Blob): Promise<StageMedia | null> {
+  if (data.size < 4) return null;
+  const len = new DataView((await read(data, 0, 4)).buffer).getUint32(0, true);
+  if (len > MAX_SMALL || 4 + len > data.size) return null;
+  try {
+    const head = JSON.parse(new TextDecoder().decode(await read(data, 4, len))) as Partial<StageMedia>;
+    if (typeof head.id !== 'string' || !head.id.startsWith('media-')) return null;
+    const type = typeof head.type === 'string' ? head.type : '';
+    return {
+      id: head.id,
+      name: typeof head.name === 'string' ? head.name : '',
+      type,
+      addedAt: finite(head.addedAt) ? head.addedAt : Date.now(),
+      blob: data.slice(4 + len, data.size, type),
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** Lays a backup out. The song files are referenced, not copied. */
@@ -158,6 +193,7 @@ export async function packBackup(b: BackupInput, onSong?: (done: number) => void
   parts.push(...(await chunk('PREF', json(b.preferences))));
   parts.push(...(await chunk('SCOR', json(b.scores))));
   for (const r of replays) parts.push(...(await chunk('RPLY', r)));
+  for (const m of b.media ?? []) parts.push(...(await chunk('MDIA', mediaPayload(m))));
   for (let i = 0; i < b.songs.length; i++) {
     const s = b.songs[i];
     parts.push(...(await chunk('SONG', typeof s === 'function' ? await s() : s)));
@@ -178,7 +214,14 @@ export async function writeBackup(onProgress?: (p: BackupProgress) => void): Pro
     return whole ? writeReplay(whole) : null;
   });
   const file = await packBackup(
-    { createdAt: Date.now(), preferences: readPreferences(), scores: await listAllScores().catch(() => []), songs, replays },
+    {
+      createdAt: Date.now(),
+      preferences: readPreferences(),
+      scores: await listAllScores().catch(() => []),
+      songs,
+      replays,
+      media: await listMedia(),
+    },
     (done) => onProgress?.({ done, total }),
   );
   return { file, songs: total };
@@ -289,6 +332,8 @@ export interface BackupContents {
   songs: Blob[];
   /** Each saved replay's file, a slice of the backup. */
   replays: Blob[];
+  /** The stages' videos and pictures. */
+  media: StageMedia[];
   scores: Omit<BestScore, 'key' | 'date'>[];
   preferences: Record<string, string>;
 }
@@ -308,6 +353,19 @@ export async function readBackup(file: Blob): Promise<BackupContents> {
     replays: (await Promise.all(refs.filter((r) => r.type === 'RPLY').map((r) => payload(file, r).catch(() => null)))).filter(
       (r): r is Blob => r !== null,
     ),
+    // A stage file whose checksum does not match is left out.
+    media: (
+      await Promise.all(
+        refs
+          .filter((r) => r.type === 'MDIA')
+          .map((r) =>
+            payload(file, r).then(
+              (data) => readMediaPayload(data),
+              () => null,
+            ),
+          ),
+      )
+    ).filter((m): m is StageMedia => m !== null),
     scores: cleanScores(
       await smallJson(
         file,
@@ -330,6 +388,8 @@ export interface RestoreResult {
   failed: number;
   /** Replays added (ones already here are left as they are). */
   replays: number;
+  /** Stage videos and pictures added. */
+  media: number;
 }
 
 /**
@@ -338,7 +398,7 @@ export interface RestoreResult {
  * backup's preferences replace this device's. The caller reloads the game afterwards.
  */
 export async function restoreBackup(b: BackupContents, onProgress?: (p: BackupProgress) => void): Promise<RestoreResult> {
-  const result: RestoreResult = { added: 0, kept: 0, failed: 0, replays: 0 };
+  const result: RestoreResult = { added: 0, kept: 0, failed: 0, replays: 0, media: 0 };
   onProgress?.({ done: 0, total: b.songs.length });
   for (let i = 0; i < b.songs.length; i++) {
     try {
@@ -361,6 +421,14 @@ export async function restoreBackup(b: BackupContents, onProgress?: (p: BackupPr
       if (await putReplay(await readReplay(r))) result.replays++;
     } catch (e) {
       console.warn('could not restore a replay from the backup', e);
+    }
+  }
+  // The stages' files, before the preferences that name them.
+  for (const m of b.media) {
+    try {
+      if (await restoreMedia(m)) result.media++;
+    } catch (e) {
+      console.warn('could not restore a stage file from the backup', e);
     }
   }
   // Scores only for songs the library now has.

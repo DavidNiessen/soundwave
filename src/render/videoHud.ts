@@ -310,21 +310,26 @@ export function videoHudFrame(f: VideoFrameInfo): VideoHudFrame {
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
+/** The plain night behind the highway, top to bottom. */
+const NIGHT: [string, string] = ['#1a0f4c', '#05030f'];
+
 /**
- * The plain night behind the highway when the video has no stage, painted once for its size: a
- * gradient filled anew on every frame is slow where the canvas is drawn without a graphics card.
+ * The gradient behind the highway when the video has no 3D stage (the plain night, or the player's
+ * own colours), painted once for its size: a gradient filled anew on every frame is slow where the
+ * canvas is drawn without a graphics card.
  */
 let night: { key: string; canvas: OffscreenCanvas | HTMLCanvasElement } | null = null;
 function nightSky(width: number, height: number) {
-  const key = `${width}x${height}`;
+  const [from, to] = NIGHT;
+  const key = `${width}x${height}:${from}:${to}`;
   if (night?.key === key) return night.canvas;
   const canvas = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(width, height) : document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const g = canvas.getContext('2d') as Ctx2D;
   const fill = g.createLinearGradient(0, 0, 0, height);
-  fill.addColorStop(0, '#1a0f4c');
-  fill.addColorStop(1, '#05030f');
+  fill.addColorStop(0, from);
+  fill.addColorStop(1, to);
   g.fillStyle = fill;
   g.fillRect(0, 0, width, height);
   night = { key, canvas };
@@ -332,8 +337,8 @@ function nightSky(width: number, height: number) {
 }
 
 /**
- * Lays one frame of a replay's video onto `g`: the stage (or the plain night without one), the
- * highway over it, and the HUD over both when `hud` is given.
+ * Lays one frame of a replay's video onto `g`: the stage (or the player's own backdrop in its
+ * place; without either, the plain night), the highway over it, and the HUD over both when `hud` is given.
  */
 export function composeVideoFrame(
   g: Ctx2D,

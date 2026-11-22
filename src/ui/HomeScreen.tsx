@@ -12,6 +12,7 @@ import {
   Power,
   Search,
   Settings as SettingsIcon,
+  Sparkles,
   Upload,
   Download,
   MonitorDown,
@@ -31,6 +32,7 @@ import { useGlyphStyle } from '../input/usePads';
 import { Hint, useActions } from './actions';
 import { Mosaic } from './Cover';
 import { ICON_STROKE } from './icons';
+import { useStageBrowser } from './StageBrowser';
 import { TrackPicker, type TrackPickerProps } from './TrackPicker';
 import { ReplaysPanel, type ReplayActions, type ReplayCommands } from './ReplaysPanel';
 import { ExportsChip } from './ExportProgress';
@@ -59,6 +61,8 @@ interface Props {
   replays: ReplayMeta[];
   replayActions: ReplayActions;
   onSettings(): void;
+  /** The player's stages changed in the Stage tab. */
+  onStages(next: Settings['stage']): void;
   /** Asks whether to close the game (absent where the game cannot close itself, as in a browser tab). */
   onExit?(): void;
   /** The version of an update that is ready to install, when the desktop app found one. */
@@ -69,11 +73,12 @@ interface Props {
   settings: Settings;
 }
 
-/** The parts of the main menu: playing sets, making charts, and watching runs again. */
-type Tab = 'play' | 'edit' | 'replays';
+/** The main menu's tabs: playing sets, making charts, watching runs again, and picking the stage they are played on. */
+type Tab = 'play' | 'edit' | 'stage' | 'replays';
 const TABS: [Tab, string, LucideIcon][] = [
   ['play', 'Play', Play],
   ['edit', 'Edit', PencilRuler],
+  ['stage', 'Stage', Sparkles],
   ['replays', 'Replays', Clapperboard],
 ];
 const tabIndex = (t: Tab) => TABS.findIndex(([id]) => id === t);
@@ -103,6 +108,7 @@ export function HomeScreen({
   replays,
   replayActions,
   onSettings,
+  onStages,
   onExit,
   update,
   onUpdate,
@@ -162,57 +168,62 @@ export function HomeScreen({
   opening.current ??= new Set([...sets.map((s) => s.id), ...(empty ? ['add'] : [])]);
   const late = (id: string) => (opening.current!.has(id) ? '' : 'late');
 
+  const stage = useStageBrowser({ stages: settings.stage, settings, on: tab === 'stage', onChange: onStages });
+
   useActions([
-    ...(tab === 'play'
-      ? [{ id: 'add', label: importing ? `Importing ${importing}…` : 'Add songs', icon: Upload, ...keysOf('home.add'), run: onAdd }]
-      : tab === 'replays'
-        ? replays.length
-          ? [
+    ...(tab === 'stage'
+      ? stage.actions
+      : tab === 'play'
+        ? [{ id: 'add', label: importing ? `Importing ${importing}…` : 'Add songs', icon: Upload, ...keysOf('home.add'), run: onAdd }]
+        : tab === 'replays'
+          ? replays.length
+            ? [
+                {
+                  id: 'replay-options',
+                  label: 'Options',
+                  icon: Ellipsis,
+                  ...keysOf('lists.options'),
+                  run: () => replayCommands.current?.options(),
+                },
+                {
+                  id: 'replay-export',
+                  label: 'Export video',
+                  icon: Film,
+                  ...keysOf('home.replayExport'),
+                  bar: false,
+                  run: () => replayCommands.current?.exportVideo(),
+                },
+                {
+                  id: 'replay-keep',
+                  label: 'Keep',
+                  icon: Pin,
+                  ...keysOf('home.replayKeep'),
+                  bar: false,
+                  run: () => replayCommands.current?.keep(),
+                },
+                {
+                  id: 'replay-delete',
+                  label: 'Delete',
+                  icon: Trash2,
+                  ...keysOf('lists.delete'),
+                  bar: false,
+                  run: () => replayCommands.current?.remove(),
+                },
+              ]
+            : []
+          : [
               {
-                id: 'replay-options',
-                label: 'Options',
-                icon: Ellipsis,
-                ...keysOf('home.replayOptions'),
-                run: () => replayCommands.current?.options(),
-              },
-              {
-                id: 'replay-export',
-                label: 'Export video',
-                icon: Film,
-                ...keysOf('home.replayExport'),
+                id: 'search',
+                label: 'Search',
+                icon: Search,
+                ...keysOf('home.search'),
                 bar: false,
-                run: () => replayCommands.current?.exportVideo(),
+                run: () => document.querySelector<HTMLInputElement>('.track-picker input[type=search]')?.focus(),
               },
-              {
-                id: 'replay-keep',
-                label: 'Keep',
-                icon: Pin,
-                ...keysOf('home.replayKeep'),
-                bar: false,
-                run: () => replayCommands.current?.keep(),
-              },
-              {
-                id: 'replay-delete',
-                label: 'Delete',
-                icon: Trash2,
-                ...keysOf('home.replayDelete'),
-                bar: false,
-                run: () => replayCommands.current?.remove(),
-              },
-            ]
-          : []
-        : [
-            {
-              id: 'search',
-              label: 'Search',
-              icon: Search,
-              ...keysOf('home.search'),
-              bar: false,
-              run: () => document.querySelector<HTMLInputElement>('.track-picker input[type=search]')?.focus(),
-            },
-            { id: 'new', label: 'New track', icon: FilePlus2, ...keysOf('home.new'), primary: true, run: () => setPicks((n) => n + 1) },
-          ]),
-    { id: 'settings', label: 'Settings', icon: SettingsIcon, ...keysOf('home.settings'), run: onSettings },
+              { id: 'new', label: 'New track', icon: FilePlus2, ...keysOf('home.new'), primary: true, run: () => setPicks((n) => n + 1) },
+            ]),
+    // The Stage tab has its own actions; Settings has nothing to do with it there.
+    ...(tab === 'stage' ? [] : [{ id: 'settings', label: 'Settings', icon: SettingsIcon, ...keysOf('home.settings'), run: onSettings }]),
     ...(update
       ? [{ id: 'update', label: `Update to ${update}`, icon: Download, ...keysOf('home.update'), bar: false, run: onUpdate }]
       : []),
@@ -220,7 +231,7 @@ export function HomeScreen({
       ? [{ id: 'install-app', label: 'Get the app', icon: MonitorDown, ...keysOf('home.install'), bar: false, run: onInstallApp }]
       : []),
     // Esc and the controller's back button: there is nowhere further back than out.
-    ...(onExit ? [{ id: 'exit', label: 'Exit', icon: Power, kbd: 'Escape', bar: false, run: onExit }] : []),
+    ...(onExit && !stage.editing ? [{ id: 'exit', label: 'Exit', icon: Power, kbd: 'Escape', bar: false, run: onExit }] : []),
   ]);
 
   const tabRow = useSlide<HTMLDivElement>(tab);
@@ -283,7 +294,9 @@ export function HomeScreen({
         role="tabpanel"
         aria-labelledby={`home-tab-${tab}`}
       >
-        {tab === 'replays' ? (
+        {tab === 'stage' ? (
+          stage.view
+        ) : tab === 'replays' ? (
           <ReplaysPanel
             replays={replays}
             songs={songs}
