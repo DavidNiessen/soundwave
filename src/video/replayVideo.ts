@@ -146,7 +146,13 @@ export async function makeReplayVideo(job: VideoJob, hooks: VideoHooks): Promise
               deck,
             })
           : null;
-        composeVideoFrame(g, width, height, stage ? stageCanvas : null, hwCanvas, hud);
+        // Handed over as pictures rather than read from the canvases: reading a WebGL canvas into a
+        // 2D one in a worker can copy it through the processor, slowly.
+        const stagePicture = stage && stageCanvas ? stageCanvas.transferToImageBitmap() : null;
+        const highwayPicture = hwCanvas.transferToImageBitmap();
+        composeVideoFrame(g, width, height, stagePicture, highwayPicture, hud);
+        stagePicture?.close();
+        highwayPicture.close();
         await encoder.frame(i);
         // The encoder's promises can keep this loop going without ever giving the worker's messages
         // a turn: it lets them in now and then, so a pause or a cancel is heard at once.
