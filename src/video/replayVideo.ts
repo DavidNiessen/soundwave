@@ -148,6 +148,9 @@ export async function makeReplayVideo(job: VideoJob, hooks: VideoHooks): Promise
           : null;
         composeVideoFrame(g, width, height, stage ? stageCanvas : null, hwCanvas, hud);
         await encoder.frame(i);
+        // The encoder's promises can keep this loop going without ever giving the worker's messages
+        // a turn: it lets them in now and then, so a pause or a cancel is heard at once.
+        if (i % 4 === 0) await new Promise((r) => setTimeout(r, 0));
 
         if (i % 10 === 0) {
           const spent = (performance.now() - began + worked) / 1000;
