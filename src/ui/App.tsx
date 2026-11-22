@@ -658,7 +658,7 @@ export function App() {
     () =>
       videoExports.onFinished((item) => {
         if (item.state === 'saved') toast(`The video of ${item.title} is saved as ${item.fileName}.`);
-        else if (item.state === 'failed') toast(`The video of ${item.title} could not be made: ${item.error}`);
+        else if (item.state === 'failed') toast(`The video of ${item.title} could not be exported: ${item.error}`);
       }),
     [toast],
   );
@@ -716,7 +716,7 @@ export function App() {
             playSfx('add');
           } catch (e) {
             await target.abort().catch(() => {});
-            toast(`The video could not be made: ${(e as Error).message}`);
+            toast(`The video could not be exported: ${(e as Error).message}`);
           }
           return;
         }

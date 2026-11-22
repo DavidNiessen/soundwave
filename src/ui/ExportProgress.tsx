@@ -21,7 +21,7 @@ export function exportStatus(i: ExportItem): string {
     case 'waiting':
       return 'Waits for the video before it';
     case 'rendering':
-      return `Making the video · ${pct(i.progress)}${i.speed ? ` · ${i.speed.toFixed(1)}× the song’s speed` : ''}`;
+      return `Exporting the video · ${pct(i.progress)}${i.speed ? ` · ${i.speed.toFixed(1)}× the song’s speed` : ''}`;
     case 'held':
       return `Waits while a song plays · ${pct(i.progress)}`;
     case 'saving':
@@ -29,7 +29,7 @@ export function exportStatus(i: ExportItem): string {
     case 'saved':
       return `Saved as ${i.fileName}`;
     case 'failed':
-      return `Not made: ${i.error ?? 'something went wrong'}`;
+      return `Not exported: ${i.error ?? 'something went wrong'}`;
     case 'cancelled':
       return 'Cancelled';
   }
@@ -48,7 +48,7 @@ export function ExportBox({ replayId }: { replayId: string }) {
   const item = exportOf(items, replayId) ?? items.find((i) => i.state === 'rendering' || i.state === 'saving') ?? items[0];
   if (!item) return null;
   return (
-    <section className="replay-export-box" aria-label="Video being made">
+    <section className="replay-export-box" aria-label="Video being exported">
       <div className="replay-export-head">
         <Film strokeWidth={ICON_STROKE} aria-hidden />
         <span className="replay-export-title">{item.title}</span>
@@ -74,7 +74,7 @@ export function ExportsChip() {
     <span
       className="export-chip"
       role="status"
-      aria-label={`Making ${active.length === 1 ? 'a video' : `${active.length} videos`}: ${exportStatus(now)}`}
+      aria-label={`Exporting ${active.length === 1 ? 'a video' : `${active.length} videos`}: ${exportStatus(now)}`}
     >
       <Film strokeWidth={ICON_STROKE} aria-hidden />
       {now.state === 'saving' ? 'Saving video' : `Video ${pct(now.progress)}`}

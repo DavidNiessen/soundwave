@@ -162,7 +162,7 @@ class VideoExports {
     const id = this.items.find((i) => (i.state === 'waiting' || i.state === 'held') && this.queued.has(i.id))?.id;
     if (!id) return this.stopWorker();
     const w = this.getWorker();
-    if (!w) return this.fail(id, 'this device cannot make videos in the background');
+    if (!w) return this.fail(id, 'this device cannot export videos in the background');
     this.running = id;
     const { job } = this.queued.get(id)!;
     this.patch(id, { state: this.held ? 'held' : 'rendering' });

@@ -154,7 +154,7 @@ export function ExportVideoDialog({ replay, silent, settings: s, onChange, onSta
               </p>
             )
           ) : (
-            <p className="error">This browser cannot make video. The desktop app, Chrome, Edge and Safari can.</p>
+            <p className="error">This browser cannot export video. The desktop app, Chrome, Edge and Safari can.</p>
           )}
           <button
             type="button"
@@ -164,7 +164,7 @@ export function ExportVideoDialog({ replay, silent, settings: s, onChange, onSta
             onClick={() => plan && onStart({ ...s, music }, plan)}
           >
             <Film strokeWidth={ICON_STROKE} aria-hidden />
-            {plan?.kind === 'live' ? 'Record video' : 'Make video'}
+            Export video
           </button>
           <button type="button" className="btn quiet wide" data-sfx="back" onClick={close}>
             Cancel
@@ -444,7 +444,7 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
 
   const status = {
     preparing: 'Getting the stage ready…',
-    recording: plan.kind === 'frames' ? (speed ? `Rendering · ${speed.toFixed(1)}× the song’s speed` : 'Rendering') : 'Recording',
+    recording: speed ? `Exporting · ${speed.toFixed(1)}× the song’s speed` : 'Exporting',
     paused: 'Paused while the game is in the background',
     saving: 'Saving the video…',
     saved: 'Saved',
@@ -489,12 +489,12 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
             <span ref={barRef} style={{ width: stage === 'saved' ? '100%' : '0%' }} />
           </span>
           {stage === 'saved' && <p className="hint">{fileName} is saved.</p>}
-          {stage === 'failed' && <p className="error">The video could not be made: {error}</p>}
+          {stage === 'failed' && <p className="error">The video could not be exported: {error}</p>}
           {working && stage !== 'saving' && (
             <p className="hint">
               {plan.kind === 'frames'
-                ? 'Each frame is drawn and encoded as fast as this device can; the song does not play meanwhile.'
-                : 'The video is recorded as the replay plays. Keep the game in front until it is done; the song plays along.'}
+                ? 'The video is exported as fast as this device can; the song does not play meanwhile.'
+                : 'The video is exported as the replay plays. Keep the game in front until it is done; the song plays along.'}
             </p>
           )}
           {working ? (
