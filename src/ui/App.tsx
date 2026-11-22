@@ -657,10 +657,8 @@ export function App() {
   useEffect(
     () =>
       videoExports.onFinished((item) => {
-        if (item.state === 'saved') {
-          playSfx('best');
-          toast(`The video of ${item.title} is saved as ${item.fileName}.`);
-        } else if (item.state === 'failed') toast(`The video of ${item.title} could not be made: ${item.error}`);
+        if (item.state === 'saved') toast(`The video of ${item.title} is saved as ${item.fileName}.`);
+        else if (item.state === 'failed') toast(`The video of ${item.title} could not be made: ${item.error}`);
       }),
     [toast],
   );
@@ -716,7 +714,6 @@ export function App() {
               target,
             );
             playSfx('add');
-            toast(`Making the video of ${meta.title} in the background. Its progress is in the Replays tab.`);
           } catch (e) {
             await target.abort().catch(() => {});
             toast(`The video could not be made: ${(e as Error).message}`);
