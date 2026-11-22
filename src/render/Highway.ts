@@ -44,14 +44,28 @@ const arrived = (far: number) => {
   return p * p * (3 - 2 * p);
 };
 
+/** A canvas's size in CSS pixels and how the deck sits on it (see Highway's `layout`). */
+export interface HighwayLayout {
+  width: number;
+  height: number;
+  /** Device pixels per CSS pixel. */
+  dpr: number;
+  /** The share of the width the strike line takes at least (touch asks for one), 0 for none. */
+  deckShare: number;
+  /** Where the strike line sits, as a share of the height. */
+  strike: number;
+  pads: 'pill' | 'square';
+}
+
 const MAX_TAILS = 128;
 const MAX_LINES = 96;
 const MAX_PARTICLES = 600;
 
 function radialTexture() {
-  const c = document.createElement('canvas');
+  // An OffscreenCanvas where there is no page (a video is being made in a worker).
+  const c = typeof document === 'undefined' ? new OffscreenCanvas(64, 64) : document.createElement('canvas');
   c.width = c.height = 64;
-  const g = c.getContext('2d')!;
+  const g = c.getContext('2d') as CanvasRenderingContext2D;
   const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
   grad.addColorStop(0, 'rgba(255,255,255,1)');
   grad.addColorStop(0.35, 'rgba(255,255,255,0.55)');
@@ -714,9 +728,15 @@ export class Highway {
     return LENGTH / this.speed;
   }
 
+  /**
+   * `layout`: the canvas's size and how the deck sits on it. Without it, both are read from the
+   * canvas on the page (its size and its CSS --strike, --pads and --deck-share); a video made in
+   * a worker, with no page, gives them.
+   */
   constructor(
-    private readonly canvas: HTMLCanvasElement,
+    private readonly canvas: HTMLCanvasElement | OffscreenCanvas,
     private readonly chart: Chart,
+    private readonly layout?: () => HighwayLayout,
   ) {
     this.lanes = chart.lanes;
     this.width = this.lanes * LANE_W;
@@ -725,7 +745,7 @@ export class Highway {
     this.padLight = new Float32Array(this.lanes);
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+    this.renderer.setPixelRatio(Math.min(2, this.view().dpr));
     this.renderer.setClearColor(0x000000, 0);
 
     this.scene.add(this.root);
@@ -1003,17 +1023,32 @@ export class Highway {
     return (i - (this.lanes - 1) / 2) * LANE_W;
   }
 
+  /** The canvas's size in CSS pixels and how the deck sits on it: given, or read from the page. */
+  private view(): HighwayLayout {
+    if (this.layout) return this.layout();
+    const c = this.canvas as HTMLCanvasElement;
+    const css = getComputedStyle(c);
+    return {
+      width: c.clientWidth || window.innerWidth,
+      height: c.clientHeight || window.innerHeight,
+      dpr: window.devicePixelRatio || 1,
+      deckShare: Number.parseFloat(css.getPropertyValue('--deck-share')) || 0,
+      strike: Number.parseFloat(css.getPropertyValue('--strike')) || STRIKE_AT,
+      pads: css.getPropertyValue('--pads').trim() === 'square' ? 'square' : 'pill',
+    };
+  }
+
   resize() {
-    const w = this.canvas.clientWidth || window.innerWidth;
-    const h = this.canvas.clientHeight || window.innerHeight;
+    const view = this.view();
+    const w = view.width;
+    const h = view.height;
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     // How much of the width the strike line takes: under half on a wide screen, nearly all of it
     // on a tall one, where the lanes also have to be wide enough for fingers.
     const a = this.camera.aspect;
-    const css = getComputedStyle(this.canvas);
     // A layout played by touch asks for a minimum share (--deck-share), on wide screens too.
-    const asked = Number.parseFloat(css.getPropertyValue('--deck-share')) || 0;
+    const asked = view.deckShare;
     const share = Math.max(asked, WIDE_SHARE + (TALL_SHARE - WIDE_SHARE) * Math.min(1, Math.max(0, (1.5 - a) / (1.5 - 0.65))));
     // The camera's distance: 5 lanes pull it back a little, a narrow screen brings it in. Without
     // a share asked for, a screen wider than 3:2 keeps the deck at its size and gains room at the sides.
@@ -1027,8 +1062,8 @@ export class Highway {
     this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
     this.camera.updateMatrixWorld();
-    const strike = Number.parseFloat(css.getPropertyValue('--strike')) || STRIKE_AT;
-    this.setPadStyle(css.getPropertyValue('--pads').trim() === 'square' ? 'square' : 'pill');
+    const strike = view.strike;
+    this.setPadStyle(view.pads);
     // What --strike places: the strike line itself, or for touch the foot of the square targets.
     const anchor = this.padStyle === 'square' ? PAST + 0.16 : 0;
     const now = ((1 - new THREE.Vector3(0, 0, anchor).project(this.camera).y) / 2) * h;
@@ -1071,8 +1106,7 @@ export class Highway {
    * the player's side of the strike line (0 = on the line).
    */
   padScreenPositions(z = 0): { x: number; y: number }[] {
-    const w = this.canvas.clientWidth;
-    const h = this.canvas.clientHeight;
+    const { width: w, height: h } = this.size();
     this.camera.updateMatrixWorld();
     return Array.from({ length: this.lanes }, (_, i) => {
       const p = new THREE.Vector3(this.laneX(i), 0, z).project(this.camera);
@@ -1085,7 +1119,7 @@ export class Highway {
    * of the canvas (or at the deck's front edge, should that come first).
    */
   footRow(margin: number): { x: number; y: number }[] {
-    const h = this.canvas.clientHeight || 1;
+    const h = this.size().height || 1;
     const eye = this.camera.position;
     this.camera.updateMatrixWorld();
     this.v
@@ -1102,8 +1136,8 @@ export class Highway {
    * foot is nearest.
    */
   laneAt(x: number, y: number): number {
-    const w = this.canvas.clientWidth || 1;
-    const h = this.canvas.clientHeight || 1;
+    const w = this.size().width || 1;
+    const h = this.size().height || 1;
     const eye = this.camera.position;
     this.v
       .set((x / w) * 2 - 1, 1 - (y / h) * 2, 0.5)
@@ -1118,6 +1152,13 @@ export class Highway {
       if (Math.abs(p.x - x) < Math.abs(all[best].x - x)) best = i;
     });
     return best;
+  }
+
+  /** The canvas's size in CSS pixels (cheaper than the whole layout: positions are asked for often). */
+  private size(): { width: number; height: number } {
+    if (this.layout) return this.layout();
+    const c = this.canvas as HTMLCanvasElement;
+    return { width: c.clientWidth, height: c.clientHeight };
   }
 
   setLaneDown(lane: number, down: boolean) {
