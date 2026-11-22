@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   dismiss,
   dismissAll,
+  dismissNewest,
   hold,
   LEAVE_MS,
   lifeOf,
@@ -82,6 +83,15 @@ describe('notifications', () => {
     expect(live()).toHaveLength(1);
     vi.advanceTimersByTime(1);
     expect(live()).toHaveLength(0);
+  });
+
+  it('dismisses the newest first, bringing the one behind it forward', () => {
+    notify.info('A');
+    notify.info('B');
+    expect(dismissNewest()).toBe(true);
+    expect(live().map((n) => n.text)).toEqual(['A']);
+    expect(dismissNewest()).toBe(true);
+    expect(dismissNewest()).toBe(false);
   });
 
   it('is dismissed one at a time or all at once', () => {

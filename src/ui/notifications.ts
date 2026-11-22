@@ -127,6 +127,13 @@ export function dismissAll(): boolean {
   return live.length > 0;
 }
 
+/** Dismisses the newest notification, bringing the one behind it forward. Returns whether there was one. */
+export function dismissNewest(): boolean {
+  const n = items.filter((x) => !x.leaving).at(-1);
+  if (n) dismiss(n.id);
+  return !!n;
+}
+
 /**
  * Stops (true) or restarts (false) the clocks of every notification: while the pointer rests on
  * them, or the window is out of sight, nothing goes before it has been read.
@@ -163,7 +170,7 @@ export function onRaised(fn: (n: Notification) => void): () => void {
 
 /** Clears everything at once, with no fading out (for tests). */
 export function resetNotifications() {
-  for (const id of [...timers.keys()]) stopTimer(id);
+  for (const id of timers.keys()) stopTimer(id);
   items = [];
   held = false;
   emit();
