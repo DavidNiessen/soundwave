@@ -1,4 +1,5 @@
 import {
+  Bell,
   Clapperboard,
   Ellipsis,
   FilePlus2,
@@ -30,6 +31,7 @@ import { backInput } from '../input/pads';
 import { menuPulse } from '../input/rumble';
 import { useGlyphStyle } from '../input/usePads';
 import { Hint, useActions } from './actions';
+import { notify, type Tone } from './notify';
 import { Mosaic } from './Cover';
 import { ICON_STROKE } from './icons';
 import { useStageBrowser } from './StageBrowser';
@@ -92,6 +94,19 @@ const total = (songs: SongMeta[]) => formatTime(songs.reduce((t, s) => t + s.dur
 /** "3 songs · 9:12", or just "3 songs" while the length is not known yet. */
 const summary = (songs: SongMeta[]) => [count(songs.length), total(songs)].filter(Boolean).join(' · ');
 const count = (n: number) => `${n} ${n === 1 ? 'song' : 'songs'}`;
+
+/** Sample messages for the development-only Test notification action, one per tone in turn. */
+const TEST_NOTIFICATIONS: [Tone, string][] = [
+  ['error', 'Could not import live-set.flac: the file ends before its audio does.'],
+  ['warning', `The setlist holds ${SET_MAX} songs. Take one out to add another.`],
+  ['success', 'Saved "Night Drive" as a Soundwave song file.'],
+  ['info', '"Night Drive" is already in your library.'],
+];
+let testNotificationAt = 0;
+function testNotification() {
+  const [tone, text] = TEST_NOTIFICATIONS[testNotificationAt++ % TEST_NOTIFICATIONS.length];
+  notify(text, tone);
+}
 
 export function HomeScreen({
   songs,
@@ -229,6 +244,10 @@ export function HomeScreen({
       : []),
     ...(onInstallApp
       ? [{ id: 'install-app', label: 'Get the app', icon: MonitorDown, ...keysOf('home.install'), bar: false, run: onInstallApp }]
+      : []),
+    // Development only: shows a notification of each tone in turn, to check how they look and stack.
+    ...(import.meta.env.DEV && tab !== 'stage'
+      ? [{ id: 'dev-notify', label: 'Test notification', icon: Bell, kbd: 'KeyB', pad: 'b10' as const, run: testNotification }]
       : []),
     // Esc and the controller's back button: there is nowhere further back than out.
     ...(onExit && !stage.editing ? [{ id: 'exit', label: 'Exit', icon: Power, kbd: 'Escape', bar: false, run: onExit }] : []),
