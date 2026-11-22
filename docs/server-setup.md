@@ -20,7 +20,8 @@ memory, and disk space for the songs it holds if you turn song sharing on.
 4. [Invite your friends](#4-invite-your-friends)
 5. [Choose your settings](#5-choose-your-settings)
 6. [Run it day to day](#6-run-it-day-to-day): updates, backups, moderation
-7. [Troubleshooting](#7-troubleshooting)
+7. [Lost your admin identity?](#7-lost-your-admin-identity)
+8. [Troubleshooting](#8-troubleshooting)
 
 The full list of settings and the API are in [server/README.md](../server/README.md).
 
@@ -32,8 +33,8 @@ The full list of settings and the API are in [server/README.md](../server/README
 | **A VPS with Docker Compose** | Any Linux server you control                            | Docker, a domain pointing at the server, and Caddy (or another proxy) for HTTPS |
 | **Your own PC**               | Playing with people in the same house, or trying it out | Node 24.7 or newer, or Docker                                                   |
 
-**The game needs HTTPS for any server outside your own network**, so passwords never travel in the
-clear. On your own network (addresses like `192.168.x.x`, `10.x.x.x`, `something.local` or
+**The game needs HTTPS for any server outside your own network**, so sign-ins and invites never
+travel in the clear. On your own network (addresses like `192.168.x.x`, `10.x.x.x`, `something.local` or
 `localhost`) plain HTTP is fine. Coolify and Caddy get the certificate for you.
 
 ## 2. Install it
@@ -44,7 +45,7 @@ clear. On your own network (addresses like `192.168.x.x`, `10.x.x.x`, `something
    (`https://github.com/DavidNiessen/soundwave`). Coolify reads the `docker-compose.yml` in its root.
 2. Give the service a domain, for example `https://play.example.com`. Coolify routes it to the
    server's port, gets the HTTPS certificate, and passes the address on to the server as its public
-   address (it goes into invite links and the sign-in page).
+   address (it goes into invite and recovery links).
 3. Set the environment variables you want (see [step 5](#5-choose-your-settings)). At least:
    - `SOUNDWAVE_NAME`: what players see, for example `Friday Night Band`.
    - `SOUNDWAVE_MODE`: `invite` (the default), `password` or `public`.
@@ -152,29 +153,34 @@ The first time it starts, the server prints a **set-up code**:
 Friday Night Band is running on port 7420 (invite mode).
 Players connect to https://play.example.com
 
-This server has no owner yet. Make the owner account in the game: connect to the server,
-choose "Make an account", and enter this set-up code as the invite. It works once.
+This server has no admin yet. Become it in the game: connect to the server, type your name,
+and enter this set-up code as the invite before you press Join. It works once.
   Set-up code: 7c1fQ2-…
 ```
 
 1. In Soundwave, open the **Online** tab and type your server's address (`play.example.com`), then
    press **Connect**.
-2. Choose **I'm new here: make an account**. The game opens your server's own sign-up page in your
-   browser, where your password manager can save the new password.
-3. Pick a name and a password (at least 8 characters), and enter the **set-up code** in the invite
-   field.
-4. You come back to the game signed in, as the server's **owner** (shown as Admin). The code is
-   spent: nobody else can use it.
+2. Type the name you want on your server, and enter the **set-up code** in the invite field.
+3. Press **Join**. You are signed in as the server's **admin** (its owner). The code is spent:
+   nobody else can use it.
 
-The owner can do everything on the **Admin** page (`M` on the Online tab), and names moderators
-and more admins. Every admin can do all of it; an admin can only step down themselves, and the
-server always keeps at least one.
+There is no password. Your game signs you in with its **identity**, a key it keeps on your device
+(in Windows Credential Manager or the macOS keychain in the app, in the browser's storage in the
+web game). The game asks you once to back it up: do it (Settings → Online → Your identity → Back
+up), and keep the file and its passphrase apart from this computer. It is the way back to your
+accounts on a new device, and the way back in to your server if this device is lost. Without it, see
+[step 7](#7-lost-your-admin-identity).
+
+An admin can do everything on the **Admin** page (`M` on the Online tab), and names moderators and
+more admins. Every admin can do all of it; an admin can only step down themselves, and the server
+always keeps at least one.
 
 ## 4. Invite your friends
 
-How people get an account depends on the server's mode (`SOUNDWAVE_MODE`):
+Who can join depends on the server's mode (`SOUNDWAVE_MODE`). Players never pick a password of
+their own: their game's identity signs them in.
 
-| Mode       | Who can make an account                                                |
+| Mode       | Who can join                                                           |
 | ---------- | ---------------------------------------------------------------------- |
 | `invite`   | Only people with an invite link (the default)                          |
 | `password` | Anyone with the server's password (`SOUNDWAVE_PASSWORD`), or an invite |
@@ -200,16 +206,16 @@ Set these as environment variables (in Coolify, in `.env`, or before the command
 `soundwave-server.json` in the data folder. Environment variables win. The ones you are most likely
 to want:
 
-| Variable                 | Default                         | What it does                                                                                             |
-| ------------------------ | ------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `SOUNDWAVE_NAME`         | `Soundwave server`              | The name players see.                                                                                    |
-| `SOUNDWAVE_DESCRIPTION`  |                                 | One line about the server.                                                                               |
-| `SOUNDWAVE_MODE`         | `invite`                        | Who can make an account: `invite`, `password` or `public`.                                               |
-| `SOUNDWAVE_PASSWORD`     |                                 | The server's password, in `password` mode.                                                               |
-| `SOUNDWAVE_PUBLIC_URL`   | Coolify's domain                | The address players use (`https://…`). Invite links and the sign-in page use it. Set it outside Coolify. |
-| `SOUNDWAVE_SONG_SHARING` | `off`                           | `songs` lets players share whole songs, `charts` everything but the audio. See below.                    |
-| `SOUNDWAVE_PARTY_SONGS`  | `true`                          | Pass a party's songs on to players who don't have them.                                                  |
-| `SOUNDWAVE_WEB_GAME`     | `https://soundwave.niessen.dev` | The web game invite links offer, and the only website sign-in sends players back to.                     |
+| Variable                 | Default                         | What it does                                                                                       |
+| ------------------------ | ------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `SOUNDWAVE_NAME`         | `Soundwave server`              | The name players see.                                                                              |
+| `SOUNDWAVE_DESCRIPTION`  |                                 | One line about the server.                                                                         |
+| `SOUNDWAVE_MODE`         | `invite`                        | Who can join: `invite`, `password` or `public`.                                                    |
+| `SOUNDWAVE_PASSWORD`     |                                 | The server's password, which joining needs in `password` mode.                                     |
+| `SOUNDWAVE_PUBLIC_URL`   | Coolify's domain                | The address players use (`https://…`). Invite and recovery links carry it. Set it outside Coolify. |
+| `SOUNDWAVE_SONG_SHARING` | `off`                           | `songs` lets players share whole songs, `charts` everything but the audio. See below.              |
+| `SOUNDWAVE_PARTY_SONGS`  | `true`                          | Pass a party's songs on to players who don't have them.                                            |
+| `SOUNDWAVE_WEB_GAME`     | `https://soundwave.niessen.dev` | The web game invite links offer, and the only website sign-in sends players back to.               |
 
 The rest (song size limits, the party song cache, public covers for Discord) is in
 [server/README.md](../server/README.md#settings). Restart the server after changing a setting;
@@ -241,9 +247,13 @@ copy `soundwave.db` together with its `-wal` and `-shm` files.
 **Moderation.** On the **Admin** page:
 
 - **Players**: find anyone, remove them, ban them (an hour, a day, a week or for good), lift a ban.
-  An admin can also set anyone's role (Player, Moderator or Admin) and reset a forgotten password
-  (there are no emails: you pass the new one on). Admins are not moderated: each steps down
-  themselves (pick yourself in the list), and the last admin cannot.
+  An admin can also set anyone's role (Player, Moderator or Admin), and make a **recovery link** for
+  a player who lost their identity (a new device with no backup, cleared browser data). The link
+  works once, for a week: send it to that player only. Opened in their game, it gives them their
+  account back with that game's identity, and signs out the old one everywhere. Admins are not
+  moderated: each steps down themselves (pick yourself in the list), and the last admin cannot.
+  Another admin's recovery link comes from the server's command line (see
+  [step 7](#7-lost-your-admin-identity)).
 - **Moderation log**: everything the owner and moderators did, with the reasons.
 - **Reported songs**: songs players asked to have taken down, to remove everywhere at once.
 - **Possible duplicates**: songs that sound like the same song twice (an MP3 and a FLAC of it, say),
@@ -256,19 +266,42 @@ copy `soundwave.db` together with its `-wal` and `-shm` files.
 the server and its database work. Docker and Coolify use it to know when the server is up, and
 show it as unhealthy when it stops answering.
 
-## 7. Troubleshooting
+## 7. Lost your admin identity?
+
+Your backup brings it back (Settings → Online → Your identity → Bring back). Without one, another
+admin can make you a recovery link when you are the server's only admin; otherwise, and when there is
+nobody else, the server makes one itself. Having the server's files is the right to it, so it needs
+no account. Run the server's command line where the server runs:
+
+```bash
+docker exec soundwave node server/src/cli.ts recover "Your name"      # Docker, the container named soundwave
+docker compose exec soundwave node server/src/cli.ts recover "Your name"   # Docker Compose
+node server/src/cli.ts recover "Your name"                           # Node, from the repository folder
+```
+
+In Coolify, open the service's **Terminal** and run `node server/src/cli.ts recover "Your name"`.
+With Node, give the command the same `SOUNDWAVE_DATA` and `SOUNDWAVE_PUBLIC_URL` the server runs
+with. It prints a link that works once, for a week. Open it on the device whose game should have the
+account (or paste it into the Online tab's address field): the account takes that game's identity.
+Back that one up this time.
+
+Forgot your exact name? `node server/src/cli.ts admins` lists the server's admins.
+
+## 8. Troubleshooting
 
 | What you see                                                                | What it means, and what to do                                                                                                                                                      |
 | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | "Servers outside your own network need HTTPS"                               | You typed `http://` for an internet address. Put HTTPS in front of the server (Coolify or Caddy), and connect with `https://` or just the domain.                                  |
 | The game cannot reach the server                                            | Open `https://<your-server>/info` in a browser. Nothing: check DNS, the proxy, and the firewall (80 and 443 open). JSON: the server works, so check the address typed in the game. |
 | "This server needs a newer version of Soundwave" or "runs an older version" | The game and the server differ. Update whichever the sentence names.                                                                                                               |
-| No **Sign in with your browser** button, only the in-game form              | The server is older than the browser sign-in. Update it. `https://<your-server>/login` answers "There is nothing here." on an old server.                                          |
+| "This server is older than your game"                                       | The server is from before identities. Update it.                                                                                                                                   |
+| A player made an account with a password, before identities                 | They choose **I have an account here with a password** and sign in once more (in the game or the browser). The account takes their identity, and the password is deleted.          |
 | Signing in in the browser works, but the game never picks it up             | Desktop: the browser has to be allowed to open Soundwave (it asks the first time). Web game: `SOUNDWAVE_WEB_GAME` must be the address you play on.                                 |
+| A player lost their identity                                                | An admin makes them a recovery link (Admin → Players). For yourself as an admin, see [step 7](#7-lost-your-admin-identity).                                                        |
 | Invite links point at `localhost`                                           | `SOUNDWAVE_PUBLIC_URL` is not set. Set it to the address players use, and restart.                                                                                                 |
 | Parties never connect, but signing in works                                 | The proxy does not pass WebSockets on (`/ws`). Caddy does by default; for nginx see [step 2B](#b-docker-compose-on-a-vps).                                                         |
 | "Too many tries. Wait a minute"                                             | The sign-in rate limit. Behind a proxy, make sure `SOUNDWAVE_TRUST_PROXY=true`, or every player counts as the proxy.                                                               |
-| The set-up code is gone, and nobody is the owner                            | It is printed again on every start until the owner account exists: restart and read the logs.                                                                                      |
+| The set-up code is gone, and nobody is the admin                            | It is printed again on every start until the server has an admin: restart and read the logs.                                                                                       |
 | A Players section on the Admin page says the server is too old              | Update the server.                                                                                                                                                                 |
 
 Still stuck? [Open an issue](https://github.com/DavidNiessen/soundwave/issues) with what the server

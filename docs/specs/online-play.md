@@ -204,7 +204,7 @@ shipped as a Docker image and as a single binary.
 
 | Feature          | Description                                                                                                                                              |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Accounts**     | A username and password. Sign in once per device; the game keeps a token.                                                                                |
+| **Accounts**     | A name and the player's identity (see Sign-in below): no password. The game signs in with its key and keeps a token.                                     |
 | **Parties**      | Level 1's sessions over the internet: invite friends on the server, play sets together. Any signed-in player can host one, the browser version included. |
 | **Leaderboards** | Per song, chart, part and difficulty; per server; all time and this week.                                                                                |
 | **Song sharing** | A server library of songs that players add (see [3.4](#34-song-sharing-and-copyright)).                                                                  |
@@ -370,10 +370,25 @@ what it hands out. So the server gives its owner the tools to run it responsibly
   would need a second copy of the judging code and a heavier setup.
 - **Storage:** SQLite by default (one file, easy to back up) and Postgres optionally. Shared songs and covers live
   in a folder or S3-compatible storage.
-- **Sign-in (decided):** username and password only. Nothing external, no third-party accounts. The owner can reset
-  a forgotten password from the admin view, since there are no emails.
+- **Sign-in (decided, replacing passwords):** an **identity** per installation of the game, nothing external, no
+  third-party accounts, no emails.
+  - The game keeps one 32-byte secret: in the system's secret store in the desktop app (Windows Credential
+    Manager, the macOS keychain; a file only its user reads on Linux), in the browser's storage in the web game.
+  - For each server it makes an Ed25519 key from the secret (HKDF-SHA256, salt `soundwave-identity-v1`, info =
+    the server's permanent id from `/info`), so a server keeps one public key per player and two servers cannot
+    match their players up.
+  - Signing in is a challenge (single-use, two minutes) signed with the key; joining is the same proof with a
+    name, under the server's join mode.
+  - Backup: the secret in a small file locked with a passphrase (PBKDF2-SHA256, 600 000 rounds, AES-GCM),
+    brought back on any installation. The game asks for one after the first join.
+  - A lost identity with no backup: an admin makes a one-time **recovery link** (a week) that gives the account
+    the identity of the game it is opened in, and ends the old one's sign-ins. An admin's own, when there are
+    several admins, comes from the server's command line (`node server/src/cli.ts recover <name>`), so no admin
+    can take over another.
+  - Accounts made with a password before identities sign in with it once more, then take the identity and the
+    password is deleted.
 - **Security:**
-  - **Passwords:** hashed with Argon2id.
+  - **Keys:** the server keeps only public keys; old password hashes (Argon2id) go when their account moves over.
   - **Tokens:** short-lived access tokens plus a refresh token.
   - **Limits:** rate limits on sign-in and uploads.
   - **TLS:** HTTPS/WSS is required for anything but `localhost`. The docs show it behind Caddy, which gets certificates
@@ -595,7 +610,8 @@ host/server → client
 
 **Server HTTP (level 2):**
 
-- **Accounts:** `POST /auth/signup | signin | refresh`, `DELETE /me`.
+- **Accounts:** `POST /auth/challenge | key | signup | recover | refresh`, `POST /me/name`, `DELETE /me`
+  (`/auth/signin` and `POST /me/key` only move password accounts over).
 - **Leaderboards:** `GET /boards/:songId/:chartId/:part/:difficulty`, `POST /scores`.
 - **Shared songs:** `GET /songs?query=`, `POST /songs`, `GET /songs/:id`.
 - **Covers:** `GET /covers/:songId.jpg`.

@@ -40,7 +40,9 @@ A replay can be kept (`K`, or from its options with `O` or the left face button)
 
 ## Playing together
 
-The **Online** tab of the main menu plays with friends on a Soundwave server. Anyone can run one ([docs/server-setup.md](server-setup.md)); every server is self-hosted by someone, and none is run by the project. Type the server's address or paste the invite link you were sent (an invite link also opens the game by itself, in the app or the browser), then sign in: the game opens the server's own sign-in page in your browser, where your password manager works, and brings you back signed in. (The in-game form is there too.)
+The **Online** tab of the main menu plays with friends on a Soundwave server. Anyone can run one ([docs/server-setup.md](server-setup.md)); every server is self-hosted by someone, and none is run by the project. Type the server's address or paste the invite link you were sent (an invite link also opens the game by itself, in the app or the browser), then join with the name you want there: no password. Your game has an **identity**, a key it keeps on your device (Windows Credential Manager or the macOS keychain in the app, the browser's storage in the web game), and signs you in with it, on every server, from then on. Each server sees a key of its own, so servers cannot tell they see the same player. Signing out holds it back until you sign in again.
+
+Back your identity up when the game asks (or any time in Settings → Online → Your identity): a small file locked with a passphrase you pick. Keep both apart from this device. **Bring back** on another device or a new installation, and every server signs you in again. Lost it with no backup? An admin of the server can send you a **recovery link**: open it in your game (or paste it into the Online tab's address field) and the account takes that game's identity. An account made with a password before identities signs in with it once more (**I have an account here with a password**), takes the identity, and the password is deleted. Rename yourself on a server under your account on the Online tab.
 
 Signed in, the Online tab is your place on the server: start a party (`C`) or join one with its code (like `B7KQX`, `J`), the leaderboards (`G`), your look on stage (`V`, edited right there on your band member), invites, and for the server's owner and moderators the **Admin** page (`M`). Your character stands beside it under your nametag.
 
@@ -57,11 +59,11 @@ While you are signed in, every song you finish goes to the server's leaderboards
 
 In the desktop app, Discord friends can join your party from your status, from an invite you post in a chat, or by asking to join (see [Discord status and Join from Discord](#discord-status-and-join-from-discord)).
 
-Nothing is sent anywhere until you connect to a server. It keeps your name, a hash of your password and what its features need, and **Save my data** downloads all of it.
+Nothing is sent anywhere until you connect to a server. It keeps your name, your identity's public key for it (never anything secret) and what its features need, and **Save my data** downloads all of it.
 
 ## Running a server
 
-A server is one small Node program with everything in one folder: on Coolify, with Docker Compose behind HTTPS, or on your own PC for your own network. **[docs/server-setup.md](server-setup.md)** walks through it step by step: installing it, becoming its owner with the set-up code it prints, inviting friends, its settings, updates, backups and troubleshooting. [server/README.md](../server/README.md) is the reference for every setting and the API.
+A server is one small Node program with everything in one folder: on Coolify, with Docker Compose behind HTTPS, or on your own PC for your own network. **[docs/server-setup.md](server-setup.md)** walks through it step by step: installing it, becoming its admin with the set-up code it prints, getting back in if you lose your identity, inviting friends, its settings, updates, backups and troubleshooting. [server/README.md](../server/README.md) is the reference for every setting and the API.
 
 ## Track editor
 
