@@ -127,6 +127,7 @@ fn file_kind(kind: &str) -> Result<(&'static str, &'static str), String> {
         "backup" => Ok(("Soundwave library backup", "soundwave-backup")),
         "video-mp4" => Ok(("MP4 video", "mp4")),
         "video-webm" => Ok(("WebM video", "webm")),
+        "identity" => Ok(("Soundwave identity", "soundwave-id")),
         _ => Err(format!("unknown kind of file: {kind}")),
     }
 }
@@ -146,6 +147,7 @@ pub async fn save_file_begin(
     let title = match kind.as_str() {
         "backup" => "Export library",
         "video-mp4" | "video-webm" => "Export video",
+        "identity" => "Back up your identity",
         _ => "Export song",
     };
     let Some(chosen) = app

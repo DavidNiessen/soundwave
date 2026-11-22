@@ -1,15 +1,19 @@
 /**
  * Accounts on a server: making one (as the server's mode allows), signing in, staying signed in,
  * invites, and what owners and moderators can do (docs/specs/online-play.md, 3.2).
+ *
+ * A player signs in with their identity (identity.ts): no password. Accounts made with a password
+ * before identities sign in with it once more, and their game gives the account its key then
+ * (`linkKey`), which deletes the password. A player who lost their identity gets a recovery link
+ * from an admin (or from the server's command line, cli.ts) that binds their new one.
  */
 import { randomBytes, randomUUID } from 'node:crypto';
-import type { Account, Invite, Role, Session, SignUp, UserEntry } from '../../src/net/protocol.ts';
+import type { Account, Invite, Recovery, Role, Session, SignUp, UserEntry } from '../../src/net/protocol.ts';
 import {
   ACCESS_TTL_MS,
   checkPassword,
   cleanName,
   hashPassword,
-  passwordProblem,
   randomToken,
   REFRESH_TTL_MS,
   sha256,
@@ -18,6 +22,11 @@ import {
 } from './auth.ts';
 import type { Config } from './config.ts';
 import { FOREVER, type Store, type UserRow } from './db.ts';
+import { Identities } from './identity.ts';
+
+/** How long a recovery link works. */
+const RECOVERY_MS = 7 * 24 * 60 * 60_000;
+const NAME_RULE = 'A name has 2 to 24 letters, digits, spaces, dots, dashes or underscores.';
 
 /** A request that cannot be done, with the status to answer and a sentence for the player. */
 export class Refusal extends Error {
@@ -33,9 +42,12 @@ const canModerate = (r: Role) => r === 'owner' || r === 'moderator';
 
 /** The link an invite travels as: the server's own join page, which opens the game. */
 export const inviteLink = (server: string, code: string) => `${server}/join?invite=${encodeURIComponent(code)}`;
+/** The link a recovery travels as: the server's join page, which opens the game. */
+export const recoveryLink = (server: string, code: string) => `${server}/join?recover=${encodeURIComponent(code)}`;
 
 export class Accounts {
   readonly signer: Signer;
+  readonly identities: Identities;
   /** The code the owner signs up with, while the server has no owner (printed when it starts). */
   readonly ownerCode: string | undefined;
   /** Hashes a password that matches no account, so signing in as nobody takes as long as signing in. */
@@ -54,6 +66,7 @@ export class Accounts {
       store.setMeta('secret', secret);
     }
     this.signer = new Signer(Buffer.from(secret, 'base64url'));
+    this.identities = new Identities(store, now);
     if (!store.hasOwner()) {
       let code = store.getMeta('owner-code');
       if (!code || !store.invite(code)) {
@@ -66,13 +79,13 @@ export class Accounts {
     this.decoy = hashPassword(randomToken());
   }
 
-  /** Makes an account, if the server's mode lets this request make one, and signs it in. */
+  /** Makes an account for an identity, if the server's mode lets this request make one, and signs it in. */
   async signUp(req: Partial<SignUp>): Promise<Session> {
     const name = cleanName(req.name);
-    if (!name) throw new Refusal(400, 'A name has 2 to 24 letters, digits, spaces, dots, dashes or underscores.');
-    const problem = passwordProblem(req.password);
-    if (problem) throw new Refusal(400, problem);
+    if (!name) throw new Refusal(400, NAME_RULE);
     if (this.store.userByName(name)) throw new Refusal(409, 'That name is taken on this server. Pick another one.');
+    const pubkey = this.identities.check(req);
+    if (this.store.userByKey(pubkey)) throw new Refusal(409, 'You have an account here already. Sign in instead.');
     const now = this.now();
     let role: Role = 'player';
     const mode = this.config.mode;
@@ -87,16 +100,86 @@ export class Accounts {
       if (!invite) throw new Refusal(403, 'That invite has run out or was used up. Ask for a new link.');
       role = invite.role === 'owner' ? 'owner' : 'player';
     }
-    const user = { id: randomUUID(), name, hash: await hashPassword(req.password!), role, created: now };
+    const user = { id: randomUUID(), name, hash: '', pubkey, role, created: now };
     this.store.addUser(user);
     if (role === 'owner')
       this.store.log({ at: now, actor: user.id, action: 'owner', target: user.id, reason: 'Signed up with the set-up code' });
     return this.issue(this.store.userById(user.id)!);
   }
 
-  async signIn(name: unknown, password: unknown): Promise<Session> {
+  /** Signs in with an identity. An unknown key is a 404: the game offers to make an account then. */
+  keySignIn(proof: unknown): Session {
+    const user = this.store.userByKey(this.identities.check(proof));
+    if (!user) throw new Refusal(404, 'You have no account on this server yet.');
+    this.checkBan(user);
+    return this.issue(user);
+  }
+
+  /**
+   * An account made with a password, signed in with it once more: it takes the player's identity
+   * from now on, and the password is deleted.
+   */
+  linkKey(user: UserRow, proof: unknown) {
+    const pubkey = this.identities.check(proof);
+    const other = this.store.userByKey(pubkey);
+    if (other && other.id !== user.id) throw new Refusal(409, `Your identity has another account here already: ${other.name}.`);
+    this.store.setKey(user.id, pubkey);
+  }
+
+  /** A player changes their own name on this server. */
+  rename(user: UserRow, wanted: unknown): Account {
+    const name = cleanName(wanted);
+    if (!name) throw new Refusal(400, NAME_RULE);
+    const taken = this.store.userByName(name);
+    if (taken && taken.id !== user.id) throw new Refusal(409, 'That name is taken on this server. Pick another one.');
+    this.store.rename(user.id, name);
+    if (name !== user.name)
+      this.store.log({ at: this.now(), actor: user.id, action: 'rename', target: user.id, reason: `was ${user.name}` });
+    return account(this.store.userById(user.id)!);
+  }
+
+  /**
+   * A one-time link that binds a player's new identity to their account, for one who lost theirs:
+   * an admin makes it (`actor`), or the server's command line (no actor: whoever runs it runs the server).
+   */
+  makeRecovery(actor: UserRow | null, name: unknown): Recovery {
+    if (actor && actor.role !== 'owner') throw new Refusal(403, 'Only an admin makes recovery links.');
     const user = typeof name === 'string' ? this.store.userByName(name.trim()) : undefined;
-    const ok = typeof password === 'string' && password.length <= 200 && (await checkPassword(password, user?.hash ?? (await this.decoy)));
+    if (!user) throw new Refusal(404, 'There is no player with that name on this server.');
+    if (actor && user.id !== actor.id && user.role === 'owner' && this.store.owners() > 1)
+      throw new Refusal(403, 'Another admin’s recovery link comes from the server itself (its command line), not from an admin.');
+    const code = randomToken(18);
+    const expires = this.now() + RECOVERY_MS;
+    this.store.addRecovery(code, user.id, expires);
+    this.store.log({
+      at: this.now(),
+      actor: actor?.id ?? user.id,
+      action: 'recovery link',
+      target: user.id,
+      reason: actor ? '' : 'from the command line',
+    });
+    return { code, link: recoveryLink(this.config.publicUrl, code), expires };
+  }
+
+  /** A recovery link used: the account takes the new identity, and its old sign-ins end. */
+  recover(code: unknown, proof: unknown): Session {
+    const pubkey = this.identities.check(proof);
+    const id = typeof code === 'string' ? this.store.takeRecovery(code, this.now()) : undefined;
+    const user = id ? this.store.userById(id) : undefined;
+    if (!user) throw new Refusal(403, 'That recovery link has run out or was used. Ask an admin for a new one.');
+    const other = this.store.userByKey(pubkey);
+    if (other && other.id !== user.id) throw new Refusal(409, `Your identity has another account here already: ${other.name}.`);
+    this.store.setKey(user.id, pubkey);
+    this.store.dropRefreshes(user.id);
+    this.checkBan(user);
+    return this.issue(this.store.userById(user.id)!);
+  }
+
+  /** Signs in with a password: only accounts made before identities, to move them over (see linkKey). */
+  async signIn(name: unknown, password: unknown): Promise<Session> {
+    const found = typeof name === 'string' ? this.store.userByName(name.trim()) : undefined;
+    const user = found?.hash ? found : undefined;
+    const ok = typeof password === 'string' && password.length <= 200 && (await checkPassword(password, user?.hash || (await this.decoy)));
     if (!user || !ok) throw new Refusal(401, 'That name and password do not match an account on this server.');
     this.checkBan(user);
     return this.issue(user);
@@ -224,17 +307,6 @@ export class Accounts {
     this.store.log({ at: this.now(), actor: actor.id, action: `role ${role === 'owner' ? 'admin' : role}`, target: user.id, reason: '' });
   }
 
-  /** The owner resets a forgotten password (there are no emails): a new one to pass on. */
-  async resetPassword(actor: UserRow, name: unknown): Promise<string> {
-    if (actor.role !== 'owner') throw new Refusal(403, 'Only an admin resets passwords.');
-    const user = this.target(actor, name);
-    const password = randomToken(9);
-    this.store.setHash(user.id, await hashPassword(password));
-    this.store.dropRefreshes(user.id);
-    this.store.log({ at: this.now(), actor: actor.id, action: 'reset password', target: user.id, reason: '' });
-    return password;
-  }
-
   /** Every account, for the admin's list of players (bans still running shown as such). */
   users(actor: UserRow, online: (id: string) => boolean): UserEntry[] {
     if (!canModerate(actor.role)) throw new Refusal(403, 'Only admins and moderators can see the players.');
@@ -264,10 +336,10 @@ export class Accounts {
   export(user: UserRow) {
     return {
       about:
-        'Everything this Soundwave server holds about your account. Your password is stored only as an Argon2id hash, ' +
-        'which is left out; sign-ins are stored only as hashes of their tokens.',
+        'Everything this Soundwave server holds about your account. You sign in with your identity: the server keeps ' +
+        'only its public key for this server, below. Sign-ins are stored only as hashes of their tokens.',
       server: { name: this.config.name, address: this.config.publicUrl },
-      account: { id: user.id, name: user.name, role: user.role, created: new Date(user.created).toISOString() },
+      account: { id: user.id, name: user.name, role: user.role, created: new Date(user.created).toISOString(), publicKey: user.pubkey },
       ban: user.banned_until
         ? { until: user.banned_until >= FOREVER ? 'for ever' : new Date(user.banned_until).toISOString(), reason: user.ban_reason }
         : null,

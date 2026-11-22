@@ -2,6 +2,7 @@ mod audio_out;
 mod browser;
 mod discord;
 mod haptics;
+mod identity;
 mod song_files;
 mod touchpad;
 
@@ -87,6 +88,8 @@ pub fn run() {
             discord::discord_take_join,
             discord::discord_answer,
             browser::open_in_browser,
+            identity::identity_load,
+            identity::identity_save,
             haptics::haptics_available,
             haptics::haptics_play,
             haptics::haptics_update,

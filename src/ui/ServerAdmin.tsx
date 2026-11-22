@@ -578,14 +578,16 @@ function Players({ users, owner, me, onChange }: { users: UserEntry[] | null; ow
   const [hours, setHours] = useState<number | null>(24);
   const [note, setNote] = useState<string | null>(null);
   const [asking, setAsking] = useState<null | { title: string; hint: string; yes: string; run(): void }>(null);
+  /** A recovery link just made, to copy and send. */
+  const [recovery, setRecovery] = useState<{ name: string; link: string } | null>(null);
   const q = query.trim().toLowerCase();
   const shown = (users ?? []).filter((u) => !q || u.name.toLowerCase().includes(q));
   const user = users?.find((u) => u.name === picked);
 
   const act = (what: Parameters<typeof online.moderate>[0], extra: Record<string, unknown>, done: string) =>
     void online.moderate(what, { name: picked, reason, ...extra }).then(
-      (r) => {
-        setNote(r.password ? `${picked}’s new password: ${r.password}. Pass it on to them.` : done);
+      () => {
+        setNote(done);
         setReason('');
         onChange();
       },
@@ -768,15 +770,19 @@ function Players({ users, owner, me, onChange }: { users: UserEntry[] | null; ow
                         className="btn"
                         onClick={() =>
                           setAsking({
-                            title: `Reset ${user.name}’s password?`,
-                            hint: 'Their old password stops working and they are signed out. You get a new one to pass on.',
-                            yes: 'Reset it',
-                            run: () => act('reset-password', {}, ''),
+                            title: `A recovery link for ${user.name}?`,
+                            hint: 'For a player who lost their identity. Whoever opens the link in their game gets this account, with that game’s identity: send it only to them. It works once, for a week.',
+                            yes: 'Make the link',
+                            run: () =>
+                              void online.recoveryLink(user.name).then(
+                                (r) => setRecovery({ name: user.name, link: r.link }),
+                                (e) => setNote((e as Error).message),
+                              ),
                           })
                         }
                       >
                         <KeyRound strokeWidth={ICON_STROKE} aria-hidden />
-                        Reset password
+                        Recovery link
                       </button>
                     </>
                   )}
@@ -784,6 +790,20 @@ function Players({ users, owner, me, onChange }: { users: UserEntry[] | null; ow
               </>
             )}
             {note && <p className="hint admin-note">{note}</p>}
+            {recovery && recovery.name === user.name && (
+              <div className="admin-recovery">
+                <p className="hint">Send this to {recovery.name} only. It works once, for a week:</p>
+                <code className="party-invite">{recovery.link}</code>
+                <button
+                  type="button"
+                  className="btn small"
+                  onClick={() => void navigator.clipboard?.writeText(recovery.link).then(() => setNote('Copied.'))}
+                >
+                  <Copy strokeWidth={ICON_STROKE} aria-hidden />
+                  Copy the link
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>

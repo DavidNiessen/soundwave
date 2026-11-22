@@ -8,13 +8,14 @@ import { inDesktopApp } from '../game/displayMode';
 import { BACKUP_EXT, BACKUP_MIME } from './backup';
 import { SOUNDWAVE_EXT, SOUNDWAVE_MIME } from './soundwaveFile';
 
-export type SaveKind = 'song' | 'backup' | 'video-mp4' | 'video-webm';
+export type SaveKind = 'song' | 'backup' | 'video-mp4' | 'video-webm' | 'identity';
 
 const TYPES: Record<SaveKind, { description: string; mime: string; ext: string }> = {
   song: { description: 'Soundwave song', mime: SOUNDWAVE_MIME, ext: SOUNDWAVE_EXT },
   backup: { description: 'Soundwave library backup', mime: BACKUP_MIME, ext: BACKUP_EXT },
   'video-mp4': { description: 'MP4 video', mime: 'video/mp4', ext: '.mp4' },
   'video-webm': { description: 'WebM video', mime: 'video/webm', ext: '.webm' },
+  identity: { description: 'Soundwave identity', mime: 'application/json', ext: '.soundwave-id' },
 };
 
 /** How much is handed to the desktop app in one message. */

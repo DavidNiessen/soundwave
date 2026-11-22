@@ -8,16 +8,21 @@ import type { Config } from './config.ts';
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
 /** The query an invite hands the game: which server, and the code. */
-export const joinQuery = (server: string, code: string) => `server=${encodeURIComponent(server)}&invite=${encodeURIComponent(code)}`;
+export const joinQuery = (server: string, code: string, kind: 'invite' | 'recover' = 'invite') =>
+  `server=${encodeURIComponent(server)}&${kind}=${encodeURIComponent(code)}`;
 
-export function joinPage(config: Config, code: string, valid: boolean): string {
+/**
+ * `kind`: an invite (the default), or a recovery link an admin made for a player who lost their
+ * identity (it binds their new one to their account).
+ */
+export function joinPage(config: Config, code: string, valid: boolean, kind: 'invite' | 'recover' = 'invite'): string {
   const name = esc(config.name);
-  const query = joinQuery(config.publicUrl, code);
+  const query = joinQuery(config.publicUrl, code, kind);
   const app = `soundwave://join?${query}`;
   const web = `${config.webGameUrl}/?${query}`;
-  const link = `${config.publicUrl}/join?invite=${encodeURIComponent(code)}`;
+  const link = `${config.publicUrl}/join?${kind}=${encodeURIComponent(code)}`;
   const body = valid
-    ? `<p>You are invited to play Soundwave together on <strong>${name}</strong>.</p>
+    ? `<p>${kind === 'recover' ? `This link gives you back your account on <strong>${name}</strong>, with the identity of the game you open it in. It works once.` : `You are invited to play Soundwave together on <strong>${name}</strong>.`}</p>
        <a class="btn primary" href="${esc(app)}">Open in the Soundwave app</a>
        <a class="btn" href="${esc(web)}">Play in your browser</a>
        <p class="small">Nothing happens when you open the app? In Soundwave, choose <strong>Play together</strong> and paste this link:</p>

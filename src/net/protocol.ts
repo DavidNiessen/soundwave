@@ -8,7 +8,7 @@
  */
 
 /** Raised whenever a message changes in a way an older game or server would misread. */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 /** The most players in one party. */
 export const PARTY_MAX = 16;
 /** How long a dropped player keeps their place in a party, ms. */
@@ -67,8 +67,11 @@ export interface ServerInfo {
   /**
    * The server has a sign-in page of its own (`GET /login`) the game opens in the browser, so the
    * browser's password manager works; the game trades the code it hands back (`POST /auth/exchange`).
+   * Only for accounts made with a password before identities, to move them over.
    */
   browserLogin?: boolean;
+  /** This server's own id, which a player's key for it is made from (server/src/identity.ts). */
+  id: string;
 }
 
 export type SongSharing = 'off' | 'charts' | 'songs';
@@ -153,13 +156,34 @@ export interface Session {
 }
 
 /** `POST /auth/signup`. Which of the extra fields are needed depends on the server's mode. */
-export interface SignUp {
+/**
+ * Proof that the game holds a player's identity for this server (server/src/identity.ts): its public
+ * key for the server, a challenge the server gave (`POST /auth/challenge`), and the challenge signed
+ * with the key (Ed25519, of `signInMessage`). All base64url.
+ */
+export interface KeyProof {
+  publicKey: string;
+  nonce: string;
+  signature: string;
+}
+
+/** What a game signs to sign in: the server's id and its challenge, so a signature fits one server and one try. */
+export const signInMessage = (serverId: string, nonce: string) => `soundwave-sign-in\n${serverId}\n${nonce}`;
+
+/** `POST /auth/signup`: an account made for an identity. */
+export interface SignUp extends KeyProof {
   name: string;
-  password: string;
   /** The server's password (mode `password`). */
   serverPassword?: string;
   /** An invite's code (it lets its holder in, whatever the mode), or the owner's set-up code. */
   invite?: string;
+}
+
+/** `POST /mod/recovery`: a one-time link that binds a player's new identity to their account. */
+export interface Recovery {
+  code: string;
+  link: string;
+  expires: number;
 }
 
 /** `POST /invites`: an invite, and the link it travels as (the server's join page). */

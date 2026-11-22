@@ -106,13 +106,17 @@ import { BoardsScreen } from './Boards';
 import { AdminScreen } from './ServerAdmin';
 import { decodeRun, encodeRun } from '../net/runs';
 import { replayResults } from '../game/replay';
-import { joinSecret, online, partyId, parseInvite, parseJoinSecret, type PartyStart } from '../net/client';
+import { joinSecret, online, partyId, parseInvite, parseJoinSecret, parseRecovery, type PartyStart } from '../net/client';
 import { partySongs } from '../net/partySongs';
 import { serverSongs, sharedMeta } from '../net/serverSongs';
+import { identity } from '../net/identity';
+import { IdentityDialog } from './IdentityDialog';
 import { PARTY_MAX, type SharedSong, type WireChart } from '../net/protocol';
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { installUiSounds } from './uiSounds';
 
+/** The identity (its creation time) the player was last asked to back up. */
+const BACKUP_ASKED = 'soundwave.identity-backup-asked';
 type LobbyView = { name: 'lobby'; ids: string[]; from: 'home' | 'library' };
 /** A song open in the track editor; `tested` is how the last test play of its chart went. */
 type EditorView = { name: 'editor'; song: SongMeta; back: View; tested?: Results };
@@ -565,6 +569,16 @@ export function App() {
   inviteRef.current = (text) => {
     // A browser sign-in coming back (soundwave://auth?code=…): the game trades its code.
     if (/^soundwave:\/\/auth/i.test(text)) return void finishSignInRef.current(text);
+    // A recovery link: the account it is for takes this game's identity.
+    const recovery = parseRecovery(text);
+    if (recovery)
+      return void online.recover(recovery.server, recovery.code).then(
+        () => {
+          toast(`Your account on ${online.snapshot().info?.name ?? 'the server'} is back, with this game’s identity.`);
+          if (!['play', 'replay', 'export', 'editor'].includes(viewRef.current.name)) goOnline();
+        },
+        (e: Error) => toast(e.message),
+      );
     const invite = parseInvite(text);
     if (!invite) return;
     void online.useInvite(invite).then(
@@ -600,10 +614,11 @@ export function App() {
         history.replaceState(history.state, '', here.pathname + here.search + here.hash);
         return;
       }
-      if (!here.searchParams.has('invite')) return;
+      if (!here.searchParams.has('invite') && !here.searchParams.has('recover')) return;
       inviteRef.current(here.href);
       // The invite is not left in the address, where a reload or a shared tab would carry it on.
       here.searchParams.delete('invite');
+      here.searchParams.delete('recover');
       here.searchParams.delete('server');
       history.replaceState(history.state, '', here.pathname + here.search + here.hash);
       return;
@@ -1425,6 +1440,26 @@ export function App() {
     setView({ name: 'home' });
   };
   /** Back to the main menu's Online tab (from a screen it opened, or a party that ended). */
+  // The identity is loaded as the game starts, so a server played on signs in with it by itself.
+  const me = useSyncExternalStore(identity.subscribe, identity.snapshot);
+  useEffect(() => void identity.load().then((had) => had && online.resume()), []);
+  /**
+   * Signed in with an identity that has no backup: asked once (per identity) to back it up, since a
+   * lost device or cleared browser data would otherwise lose every account.
+   */
+  const [askBackup, setAskBackup] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
+  useEffect(() => {
+    if (!onlineState.account || !me || me.backedUp) return;
+    try {
+      if (localStorage.getItem(BACKUP_ASKED) === String(me.created)) return;
+      localStorage.setItem(BACKUP_ASKED, String(me.created));
+    } catch {
+      return;
+    }
+    setAskBackup(true);
+  }, [onlineState.account, me]);
+
   const goOnline = useCallback(() => {
     showOnlineTab();
     setView({ name: 'home' });
@@ -1979,6 +2014,26 @@ export function App() {
           onClose={() => setSheet(null)}
         />
       )}
+      {askBackup && (
+        <Dialog title="Back up your identity" variant="card" closeLabel="Later" onClose={() => setAskBackup(false)}>
+          {(close) => (
+            <div className="pause-card">
+              <h2 className="display">Back up your identity?</h2>
+              <p className="hint">
+                It signs you in to {onlineState.info?.name ?? 'this server'} and every server you join, with no password. If this device is
+                lost or the game’s data cleared, a backup is the way back to your accounts. You can do it any time under Settings → Online.
+              </p>
+              <button type="button" className="btn wide" data-sfx="back" onClick={close}>
+                Later
+              </button>
+              <button type="button" className="btn primary wide" data-autofocus onClick={() => (close(), setBackingUp(true))}>
+                Back it up now
+              </button>
+            </div>
+          )}
+        </Dialog>
+      )}
+      {backingUp && <IdentityDialog kind="export" onClose={() => setBackingUp(false)} onDone={(m) => toast(m)} />}
       {metaSong && (
         <MetadataSheet
           song={byId.get(metaSong.id) ?? metaSong}

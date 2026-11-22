@@ -11,7 +11,10 @@ export interface UserRow {
   name: string;
   /** The name in lower case: names are unique whatever their case. */
   name_key: string;
+  /** The password's hash, for an account made before identities and not moved over yet; '' otherwise. */
   hash: string;
+  /** The public key of the player's identity for this server (base64url), once they have one. */
+  pubkey: string | null;
   role: Role;
   created: number;
   /** Banned until this time (ms), or null; Infinity is stored as a very large number. */
@@ -85,7 +88,16 @@ export class Store {
         reason TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS recoveries (
+        code TEXT PRIMARY KEY,
+        user TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires INTEGER NOT NULL
+      );
     `);
+    // Identities came after passwords: a server from before gets the column for keys.
+    const cols = (this.db.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name);
+    if (!cols.includes('pubkey')) this.db.exec('ALTER TABLE users ADD COLUMN pubkey TEXT');
+    this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_pubkey ON users(pubkey)');
   }
 
   close() {
@@ -113,8 +125,33 @@ export class Store {
 
   addUser(u: Omit<UserRow, 'name_key' | 'banned_until' | 'ban_reason'>) {
     this.db
-      .prepare('INSERT INTO users (id, name, name_key, hash, role, created) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(u.id, u.name, u.name.toLowerCase(), u.hash, u.role, u.created);
+      .prepare('INSERT INTO users (id, name, name_key, hash, pubkey, role, created) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(u.id, u.name, u.name.toLowerCase(), u.hash, u.pubkey, u.role, u.created);
+  }
+
+  userByKey(pubkey: string): UserRow | undefined {
+    return this.db.prepare('SELECT * FROM users WHERE pubkey = ?').get(pubkey) as UserRow | undefined;
+  }
+
+  /** Gives an account an identity's key: from then on it signs in with it, and its password (if any) is gone. */
+  setKey(id: string, pubkey: string) {
+    this.db.prepare("UPDATE users SET pubkey = ?, hash = '' WHERE id = ?").run(pubkey, id);
+  }
+
+  rename(id: string, name: string) {
+    this.db.prepare('UPDATE users SET name = ?, name_key = ? WHERE id = ?').run(name, name.toLowerCase(), id);
+  }
+
+  addRecovery(code: string, user: string, expires: number) {
+    this.db.prepare('DELETE FROM recoveries WHERE user = ?').run(user);
+    this.db.prepare('INSERT INTO recoveries (code, user, expires) VALUES (?, ?, ?)').run(code, user, expires);
+  }
+
+  /** Takes a recovery code out (they are single-use): the account it is for, if it is still good. */
+  takeRecovery(code: string, now: number): string | undefined {
+    const row = this.db.prepare('DELETE FROM recoveries WHERE code = ? RETURNING user, expires').get(code) as
+      { user: string; expires: number } | undefined;
+    return row && row.expires > now ? row.user : undefined;
   }
 
   hasOwner(): boolean {

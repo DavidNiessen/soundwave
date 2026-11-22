@@ -41,6 +41,8 @@ import { Hint, keyName, useActions, useHints } from './actions';
 import { online } from '../net/client';
 import { Calibration } from './Calibration';
 import { Dialog } from './Dialog';
+import { IdentityDialog } from './IdentityDialog';
+import { identity as identityStore, type IdentityState } from '../net/identity';
 import { ICON_STROKE } from './icons';
 import { deleteAllReplays } from '../storage/db';
 import { REPLAY_LIMIT } from '../storage/replays';
@@ -407,6 +409,11 @@ export function SettingsScreen({ settings, model, device, onChange, onBack, inSo
     if (ok) setOutputs(await listOutputs());
   };
 
+  const me = useSyncExternalStore(identityStore.subscribe, identityStore.snapshot);
+  useEffect(() => void identityStore.load(), []);
+  const [identityDialog, setIdentityDialog] = useState<'export' | 'import' | null>(null);
+  const [identityNote, setIdentityNote] = useState<string | null>(null);
+
   const resetTab = () => {
     const patch: Partial<Settings> = {};
     for (const f of FIELDS[tab]) (patch as Record<string, unknown>)[f] = structuredClone(DEFAULT_SETTINGS[f]);
@@ -437,6 +444,8 @@ export function SettingsScreen({ settings, model, device, onChange, onBack, inSo
     outputs,
     outputsRefused,
     askOutputs: () => void askOutputs(),
+    identity: me,
+    openIdentity: setIdentityDialog,
   });
   const rows = sections.flatMap((s) => s.rows);
   const active = rows.find((r) => r.id === activeId) ?? rows[0];
@@ -555,6 +564,20 @@ export function SettingsScreen({ settings, model, device, onChange, onBack, inSo
           )}
         </Dialog>
       )}
+      {identityDialog && <IdentityDialog kind={identityDialog} onClose={() => setIdentityDialog(null)} onDone={setIdentityNote} />}
+      {identityNote && (
+        <Dialog title="Your identity" variant="card" closeLabel="Done" onClose={() => setIdentityNote(null)}>
+          {(close) => (
+            <div className="pause-card">
+              <h2 className="display">Your identity</h2>
+              <p className="hint">{identityNote}</p>
+              <button type="button" className="btn primary wide" data-autofocus onClick={close}>
+                Done
+              </button>
+            </div>
+          )}
+        </Dialog>
+      )}
       {library.ui}
       {updateOpen && <UpdateCard settings={settings} onClose={() => setUpdateOpen(false)} />}
       {calibrating && (
@@ -594,11 +617,14 @@ interface Ctx {
   outputs: OutputList;
   outputsRefused: boolean;
   askOutputs(): void;
+  /** The player's identity (null before it is made), and the dialogs that back it up and bring it back. */
+  identity: IdentityState | null;
+  openIdentity(kind: 'export' | 'import'): void;
 }
 
 function buildSections(tab: Tab, c: Ctx): Section[] {
   const { settings: s, set } = c;
-  if (tab === 'online') return onlineSections(s, set);
+  if (tab === 'online') return onlineSections(s, set, c);
   const toggle = (id: string, label: string, help: string, value: boolean, change: (v: boolean) => void, disabled = false): Row => ({
     kind: 'choice',
     id,
@@ -1714,7 +1740,7 @@ function Detail({ row }: { row: Row }) {
 /* ------------------------------------------------------------------------------------------- */
 /* Online (docs/specs/online-play.md, 5.1)                                                      */
 
-function onlineSections(s: Settings, set: (patch: Partial<Settings>) => void): Section[] {
+function onlineSections(s: Settings, set: (patch: Partial<Settings>) => void, c: Ctx): Section[] {
   const o = online.snapshot();
   const signedIn = !!o.account;
   const onOff = (
@@ -1752,6 +1778,47 @@ function onlineSections(s: Settings, set: (patch: Partial<Settings>) => void): S
             : o.server
               ? `${where} is your server, but you are not signed in. Sign in on the Online tab.`
               : 'No server yet. Pick one on the main menu’s Online tab; the settings below apply once you are on one.',
+        },
+      ],
+    },
+    {
+      title: 'Your identity',
+      rows: [
+        {
+          kind: 'info',
+          id: 'identityInfo',
+          label: c.identity ? (c.identity.backedUp ? 'Backed up' : 'Not backed up yet') : 'Not made yet',
+          help: 'This game signs you in to every server with its identity: no passwords. Each server sees a key of its own, so servers cannot tell they see the same player.',
+          body: !c.identity
+            ? 'It is made the first time you join a server.'
+            : c.identity.backedUp
+              ? 'Keep the backup file and its passphrase somewhere safe. Bring it back on another device or a new installation.'
+              : 'Back it up: if this device is lost or the game’s data is cleared, the backup is the way back to your accounts.',
+        },
+        {
+          kind: 'text',
+          id: 'identityName',
+          label: 'Your name',
+          help: 'The name you join new servers with. Each server can have you by another name: change it there, on the Online tab under your account.',
+          value: c.identity?.name ?? '',
+          set: (v) => void identityStore.setName(v.slice(0, 24)),
+        },
+        {
+          kind: 'action',
+          id: 'identityExport',
+          label: 'Back up',
+          help: 'Saves your identity as a small file locked with a passphrase you pick.',
+          button: 'Back up…',
+          disabled: !c.identity,
+          run: () => c.openIdentity('export'),
+        },
+        {
+          kind: 'action',
+          id: 'identityImport',
+          label: 'Bring back',
+          help: 'Takes an identity from its backup file, on a new installation or another device. It replaces the one here.',
+          button: 'Bring back…',
+          run: () => c.openIdentity('import'),
         },
       ],
     },

@@ -29,6 +29,7 @@ import {
   type Part,
   type PartyMode,
   type PartyState,
+  type Recovery,
   type ServerInfo,
   type ServerMessage,
   type Session,
@@ -41,6 +42,16 @@ import {
   type WireChart,
 } from './protocol';
 import type { SoundwaveAnalysis, SoundwaveEdits, SoundwaveMeta } from '../storage/soundwaveFile';
+import { identity } from './identity';
+
+/** A refusal from the server, with its status (404: an identity with no account there yet, say). */
+export class ServerRefusal extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
 
 const STORE_KEY = 'soundwave.online';
 /** Clock sync: rounds per measurement, and how often it is measured again (ms). */
@@ -88,6 +99,8 @@ export interface PartyStart {
 interface Stored {
   server: string;
   refresh?: string;
+  /** The player signed out: the identity does not sign them in again by itself until they sign in. */
+  out?: true;
 }
 
 const isLocal = (host: string) =>
@@ -115,7 +128,7 @@ export function serverAddress(typed: string): string {
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('A server address starts with https://.');
   if (url.protocol === 'http:' && !isLocal(url.hostname))
-    throw new Error('Servers outside your own network need HTTPS (https://), so your password is never sent in the clear.');
+    throw new Error('Servers outside your own network need HTTPS (https://), so what you send them stays private.');
   return url.origin;
 }
 
@@ -149,19 +162,32 @@ export function parseJoinSecret(secret: string): { server: string; code: string 
  * web game's own address with ?server=…&invite=…. Null when the text is none of them.
  */
 export function parseInvite(text: string): { server: string; invite: string } | null {
+  const found = parseJoinLink(text, 'invite');
+  return found && { server: found.server, invite: found.code };
+}
+
+/**
+ * A recovery link an admin made for a player who lost their identity (`…/join?recover=…`, or the
+ * soundwave:// and web game forms of it, as an invite has): its server and code, or null.
+ */
+export function parseRecovery(text: string): { server: string; code: string } | null {
+  return parseJoinLink(text, 'recover');
+}
+
+function parseJoinLink(text: string, kind: 'invite' | 'recover'): { server: string; code: string } | null {
   let url: URL;
   try {
     url = new URL(text.trim());
   } catch {
     return null;
   }
-  const invite = url.searchParams.get('invite');
-  if (!invite) return null;
+  const code = url.searchParams.get(kind);
+  if (!code) return null;
   const named = url.searchParams.get('server');
   try {
-    if (named) return { server: serverAddress(named), invite };
+    if (named) return { server: serverAddress(named), code };
     if (url.pathname.replace(/\/+$/, '') === '/join' && (url.protocol === 'https:' || url.protocol === 'http:'))
-      return { server: serverAddress(url.origin), invite };
+      return { server: serverAddress(url.origin), code };
   } catch {
     return null;
   }
@@ -223,6 +249,7 @@ class OnlineClient {
       if (s?.server) {
         this.state = { ...this.state, server: s.server, status: s.refresh ? 'reconnecting' : 'signed-out' };
         this.refreshToken = s.refresh ?? null;
+        this.out = !!s.out;
       }
     } catch {
       /* no storage: the player connects each time */
@@ -284,7 +311,11 @@ class OnlineClient {
       else
         localStorage.setItem(
           STORE_KEY,
-          JSON.stringify({ server: this.state.server, ...(this.refreshToken ? { refresh: this.refreshToken } : {}) }),
+          JSON.stringify({
+            server: this.state.server,
+            ...(this.refreshToken ? { refresh: this.refreshToken } : {}),
+            ...(this.out ? { out: true } : {}),
+          } satisfies Stored),
         );
     } catch {
       /* storage full or blocked: signed in for this session only */
@@ -337,7 +368,7 @@ class OnlineClient {
     if (res.ok) init.headers?.(res.headers);
     if (init.file && res.ok) return (init.progress ? await readWithProgress(res, init.progress) : await res.blob()) as T;
     const body = (await res.json().catch(() => ({}))) as T | ApiError;
-    if (!res.ok) throw new Error((body as ApiError).error ?? `The server answered with an error (${res.status}).`);
+    if (!res.ok) throw new ServerRefusal(res.status, (body as ApiError).error ?? `The server answered with an error (${res.status}).`);
     return body as T;
   }
 
@@ -355,7 +386,11 @@ class OnlineClient {
     }
   }
 
+  /** The player signed out (see Stored.out). */
+  private out = false;
+
   private signedIn(s: Session) {
+    this.out = false;
     this.access = s.access;
     this.refreshToken = s.refresh;
     this.save();
@@ -439,6 +474,8 @@ class OnlineClient {
     if (Date.now() - pending.at > LOGIN_WAIT_MS) throw new Error('That sign-in took too long. Sign in again.');
     if (this.state.server !== pending.server) await this.choose(pending.server);
     this.signedIn(await this.request<Session>('/auth/exchange', { body: { code, verifier: pending.verifier } }));
+    // Signed in with a password for the last time: the account takes the identity from now on.
+    await this.linkIdentity();
     this.set({ invite: null });
     this.connect();
     return true;
@@ -450,15 +487,72 @@ class OnlineClient {
     this.set({ invite: invite.invite });
   }
 
-  async signUp(req: SignUp) {
-    this.signedIn(await this.request<Session>('/auth/signup', { body: req }));
+  /** This game's proof for the server chosen: its identity's key for the server, signing a fresh challenge. */
+  private async proof() {
+    const id = this.state.info?.id;
+    if (!id) throw new Error('This server is older than your game. Its owner needs to update it.');
+    const { nonce } = await this.request<{ nonce: string }>('/auth/challenge', { body: {} });
+    return identity.prove(id, nonce);
+  }
+
+  /** A session for the identity on the server chosen, or null when it has no account there yet. */
+  private async keySession(): Promise<Session | null> {
+    try {
+      return await this.request<Session>('/auth/key', { body: await this.proof() });
+    } catch (e) {
+      if (e instanceof ServerRefusal && e.status === 404) return null;
+      throw e;
+    }
+  }
+
+  /** Signs in with the identity. False: it has no account on this server yet (`join` makes one). */
+  async signInWithIdentity(): Promise<boolean> {
+    const session = await this.keySession();
+    if (!session) return false;
+    this.signedIn(session);
+    this.connect();
+    return true;
+  }
+
+  /** Makes an account on the server chosen for the identity, under `name`. */
+  async join(req: Omit<SignUp, 'publicKey' | 'nonce' | 'signature'>) {
+    await identity.ensure(req.name);
+    if (!identity.snapshot()?.name) await identity.setName(req.name);
+    this.signedIn(await this.request<Session>('/auth/signup', { body: { ...req, ...(await this.proof()) } }));
     this.set({ invite: null });
     this.connect();
   }
 
+  /**
+   * Signs in to an account made with a password before identities: it takes the identity at once,
+   * and the server deletes the password.
+   */
   async signIn(name: string, password: string) {
     this.signedIn(await this.request<Session>('/auth/signin', { body: { name, password } }));
+    await this.linkIdentity();
     this.connect();
+  }
+
+  private async linkIdentity() {
+    await identity.ensure(this.state.account?.name ?? '');
+    await this.request('/me/key', { body: await this.proof(), auth: true });
+  }
+
+  /**
+   * A recovery link opened (`…/join?recover=…`): the account it is for takes this game's identity
+   * (one lost its own) and is signed in.
+   */
+  async recover(server: string, code: string) {
+    await this.choose(server);
+    await identity.ensure();
+    this.signedIn(await this.request<Session>('/auth/recover', { body: { code, ...(await this.proof()) } }));
+    this.connect();
+  }
+
+  /** The player's own name on this server. */
+  async rename(name: string) {
+    const you = await this.request<Account>('/me/name', { body: { name }, auth: true });
+    this.set({ account: you });
   }
 
   /** Signs out of the server, which stays chosen. */
@@ -467,6 +561,7 @@ class OnlineClient {
     this.welcomed = false;
     this.access = null;
     this.refreshToken = null;
+    this.out = true;
     this.save();
     this.ws?.close();
     this.ws = null;
@@ -623,8 +718,12 @@ class OnlineClient {
 
   /* Moderation (owner and moderators) --------------------------------------------------------- */
 
-  moderate(action: 'kick' | 'ban' | 'unban' | 'role' | 'reset-password', body: Record<string, unknown>) {
-    return this.request<{ ok?: boolean; password?: string }>(`/mod/${action}`, { body, auth: true });
+  moderate(action: 'kick' | 'ban' | 'unban' | 'role', body: Record<string, unknown>) {
+    return this.request<{ ok?: boolean }>(`/mod/${action}`, { body, auth: true });
+  }
+  /** An admin makes a one-time link that gives a player who lost their identity their account back. */
+  recoveryLink(name: string) {
+    return this.request<Recovery>('/mod/recovery', { body: { name }, auth: true });
   }
   /** An admin steps down to moderator or player (never the server's last admin). */
   async stepDown(role: 'moderator' | 'player') {
@@ -653,7 +752,7 @@ class OnlineClient {
 
   /** Connects with the stored sign-in, when there is one (the game starting). */
   resume() {
-    if (this.refreshToken && this.state.server && !this.ws) this.connect();
+    if ((this.refreshToken || (identity.snapshot() && !this.out)) && this.state.server && !this.ws) this.connect();
   }
 
   private connect() {
@@ -666,8 +765,15 @@ class OnlineClient {
 
   private async open() {
     try {
-      if (!this.access) await this.renew();
       if (!this.state.info) this.set({ info: await this.request<ServerInfo>('/info') });
+      if (!this.access)
+        await this.renew().catch(async (e: Error) => {
+          // The sign-in ran out (or there was none kept): the identity signs in again by itself.
+          if (/could not be reached/.test(e.message) || !(await identity.load())) throw e;
+          const session = await this.keySession();
+          if (!session) throw e;
+          this.signedIn(session);
+        });
     } catch (e) {
       if (this.refreshToken) return this.again();
       this.set({ status: 'signed-out', error: (e as Error).message });

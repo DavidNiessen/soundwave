@@ -71,7 +71,8 @@ export function readRequest(p: URLSearchParams): LoginRequest {
     redirect: p.get('redirect') ?? '',
     challenge: p.get('challenge') ?? '',
     state: p.get('state') ?? '',
-    mode: p.get('mode') === 'signup' ? 'signup' : 'signin',
+    // Accounts are made in the game, with an identity: this page only signs in old password accounts.
+    mode: 'signin',
     invite: inviteCode(p.get('invite') ?? ''),
   };
 }
@@ -164,11 +165,9 @@ ${body}
 </html>`;
 }
 
-/** The sign-in page: a form the browser's password manager knows, for signing in or making an account. */
+/** The sign-in page: a form the browser's password manager knows, for an account made with a password (moved to an identity once in). */
 export function loginPage(config: Config, r: LoginRequest, error: string | null = null, name = ''): string {
   const signup = r.mode === 'signup';
-  const keep = (mode: string) =>
-    `/login?${new URLSearchParams({ redirect: r.redirect, challenge: r.challenge, state: r.state, mode, ...(r.invite ? { invite: r.invite } : {}) })}`;
   const hidden = (['redirect', 'challenge', 'state', 'mode'] as const)
     .map((k) => `<input type="hidden" name="${k}" value="${esc(r[k])}">`)
     .join('');
@@ -195,10 +194,6 @@ export function loginPage(config: Config, r: LoginRequest, error: string | null 
   const body = `
 <h1>${signup ? 'Make an account' : 'Sign in'}</h1>
 <p class="server">on <strong>${esc(config.name)}</strong></p>
-<nav class="tabs" aria-label="Sign in or make an account">
-  <a href="${esc(keep('signin'))}"${signup ? '' : ' aria-current="page"'}>I have an account</a>
-  <a href="${esc(keep('signup'))}"${signup ? ' aria-current="page"' : ''}>I’m new here</a>
-</nav>
 <form method="post" action="/login">
   ${hidden}${keepInvite}
   ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
@@ -209,7 +204,7 @@ export function loginPage(config: Config, r: LoginRequest, error: string | null 
   ${extra}
   <button type="submit">${signup ? 'Make my account' : 'Sign in'}</button>
 </form>
-<p class="small">You go back to Soundwave once you are in. Your password stays between your browser and this server.</p>`;
+<p class="small">For an account made with a password: once you are in, Soundwave gives it your identity and the password is deleted. New here? Make your account in the game.</p>`;
   return page(`${signup ? 'Make an account' : 'Sign in'} · ${config.name}`, body);
 }
 

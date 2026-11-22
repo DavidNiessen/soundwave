@@ -15,6 +15,7 @@ import {
   LogIn,
   LogOut,
   PartyPopper,
+  Pencil,
   Send,
   Shirt,
   Trophy,
@@ -239,6 +240,8 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, base, part }: OnlinePa
   /** The window open over the tab: the account, an invite, or the server's tools. */
   const [modal, setModal] = useState<'account' | 'forget' | 'invite' | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [newName, setNewName] = useState(s.account?.name ?? '');
+  const [renameNote, setRenameNote] = useState<string | null>(null);
   /** Editing the look in place (the tiles give way to the editor): what the character wears meanwhile. */
   const [look, setLook] = useState<LookPreview | null>(null);
   const onAvatar = () => setLook({ part, look: s.avatar });
@@ -459,6 +462,27 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, base, part }: OnlinePa
                 {mod ? `${ROLE_LABEL[s.account!.role]} · ` : ''}
                 {s.status === 'online' ? `Signed in to ${s.info?.name ?? s.server}` : 'Connection lost, trying again…'}
               </p>
+              <form
+                className="rename-row"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setRenameNote(null);
+                  void online.rename(newName.trim()).then(
+                    () => setRenameNote('Your name here is changed.'),
+                    (err: Error) => setRenameNote(err.message),
+                  );
+                }}
+              >
+                <label className="meta-field">
+                  <span className="dim">Your name on {s.info?.name ?? 'this server'}</span>
+                  <input value={newName} onChange={(e) => setNewName(e.target.value)} maxLength={24} spellCheck={false} />
+                </label>
+                <button type="submit" className="btn small" disabled={newName.trim().length < 2 || newName.trim() === s.account!.name}>
+                  <Pencil strokeWidth={ICON_STROKE} aria-hidden />
+                  Rename
+                </button>
+              </form>
+              {renameNote && <p className="hint">{renameNote}</p>}
               <button type="button" className="btn wide" data-autofocus onClick={() => void saveData()}>
                 <Download strokeWidth={ICON_STROKE} aria-hidden />
                 Save my data

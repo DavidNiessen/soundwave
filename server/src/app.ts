@@ -189,6 +189,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       publicCovers: config.publicCovers,
       partySongs: config.partySongs,
       browserLogin: true,
+      id: accounts.identities.serverId,
     }),
     'POST /songs': async (req, _body, ip, _p, raw) => {
       if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many songs at once. Wait a minute.');
@@ -223,6 +224,26 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       return accounts.signIn(body.name, body.password);
     },
     'POST /auth/refresh': (_req, body) => accounts.refresh(body.refresh),
+    // Signing in with an identity: a challenge, then the challenge signed (identity.ts).
+    'POST /auth/challenge': (_req, _body, ip) => {
+      if (!authLimit.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
+      return { nonce: accounts.identities.challenge() };
+    },
+    'POST /auth/key': (_req, body) => accounts.keySignIn(body),
+    'POST /auth/recover': (_req, body, ip) => {
+      if (!authLimit.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
+      return accounts.recover(body.code, body);
+    },
+    // An account made with a password takes the player's identity (and loses the password).
+    'POST /me/key': (req, body) => {
+      accounts.linkKey(me(req), body);
+      return { ok: true };
+    },
+    'POST /me/name': (req, body) => {
+      const you = accounts.rename(me(req), body.name);
+      notify(['users', 'presence', 'boards', 'replays', 'log']);
+      return you;
+    },
     // The game trades the code a browser sign-in handed it, with the secret it started with.
     'POST /auth/exchange': (_req, body, ip) => {
       if (!authLimit.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
@@ -312,10 +333,10 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       notify(['users', 'log']);
       return { ok: true };
     },
-    'POST /mod/reset-password': async (req, body) => {
-      const password = await accounts.resetPassword(me(req), body.name);
+    'POST /mod/recovery': (req, body) => {
+      const recovery = accounts.makeRecovery(me(req), body.name);
       notify(['log']);
-      return { password };
+      return recovery;
     },
     'GET /mod/audit': (req) => accounts.audit(me(req)),
     'GET /mod/users': (req) => accounts.users(me(req), (id) => sockets.has(id)),
@@ -457,12 +478,15 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     const path = (req.url ?? '/').split('?')[0].replace(/\/+$/, '') || '/';
     // An invite link's page: plain HTML, with nothing on it that runs.
     if (req.method === 'GET' && path === '/join') {
-      const code = new URL(req.url ?? '/', 'http://x').searchParams.get('invite') ?? '';
+      const q = new URL(req.url ?? '/', 'http://x').searchParams;
+      const code = q.get('invite') ?? '';
+      const recover = q.get('recover') ?? '';
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
         'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'",
         'Cache-Control': 'no-store',
       });
+      if (recover) return void res.end(joinPage(config, recover.slice(0, 64), true, 'recover'));
       return void res.end(joinPage(config, code, code.length <= 64 && accounts.inviteValid(code)));
     }
     // Signing in through the browser: the server's own page, a plain form (browserLogin.ts).
@@ -564,16 +588,8 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     const password = params.get('password') ?? '';
     try {
       if (!authLimit.take(addressOf(req))) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
-      const session =
-        r.mode === 'signup'
-          ? await accounts.signUp({
-              name,
-              password,
-              ...(r.invite ? { invite: r.invite } : {}),
-              ...(params.get('serverPassword') ? { serverPassword: params.get('serverPassword')! } : {}),
-            })
-          : await accounts.signIn(name, password);
-      if (r.mode === 'signup') notify(['users']);
+      // Only accounts made with a password before identities sign in here, to move them over.
+      const session = await accounts.signIn(name, password);
       const code = loginCodes.issue(session, r.challenge);
       const to = `${r.redirect}${r.redirect.includes('?') ? '&' : '?'}${new URLSearchParams({ code, state: r.state, server: config.publicUrl })}`;
       // The desktop app is opened by its own link from a page that says what happened; the web
