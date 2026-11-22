@@ -5,7 +5,9 @@ import { DIFFICULTIES, PARTS, type Chart, type Difficulty, type Part } from '../
 import { chartFromNotes, chartKey, editedCount, resolveGrid, songDuration, standsAlone, type SongEdits } from '../editor/edits';
 import { analysisKey, deleteAnalyses, deleteEdits, getAnalysis, getEdits, putAnalysis, putEdits, putStems } from '../storage/db';
 import { writeAnalysisToFile } from '../storage/songFile';
+import { serveWorkerFetch } from '../app/workerFetch';
 import { stemAnalyzer, type StemAnalyzer } from './separation/analyzer';
+import { analysisDevice } from './separation/support';
 import {
   ANALYSIS_SAMPLE_RATE,
   ANALYSIS_VERSION,
@@ -408,7 +410,12 @@ const localAnalyzer: LocalAnalyzer = async (id, onProgress, signal, assist) => {
       if (s) stems[name] = s;
     }
   }
-  return runWorker(audio, onProgress, signal, assist?.lines, drumSignal, stems, assist?.stemNotes);
+  // The beat model is small enough for any device: without a graphics card it runs on the processor.
+  const beatModel = {
+    url: new URL(`${import.meta.env.BASE_URL}models/beat-this/small0.onnx`, location.href).href,
+    device: (await analysisDevice()) === 'gpu' ? ('gpu' as const) : ('cpu' as const),
+  };
+  return runWorker(audio, onProgress, signal, assist?.lines, drumSignal, stems, assist?.stemNotes, beatModel);
 };
 
 /** Mono, 22.05 kHz copy of the song for analysis. */
@@ -431,6 +438,7 @@ function runWorker(
   drumSignal?: Float32Array,
   stems?: Partial<Record<StemName, Float32Array>>,
   stemNotes?: StemNotes,
+  beatModel?: WorkerRequest['beatModel'],
 ): Promise<AnalysisResult> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
@@ -443,6 +451,8 @@ function runWorker(
       { once: true },
     );
     worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
+      // The worker's fetches, where it cannot make them itself (see app/workerFetch).
+      if (serveWorkerFetch(worker, e.data)) return;
       const m = e.data;
       if (m.type === 'progress') onProgress(m.progress);
       else if (m.type === 'log') console.info('[analysis]', m.message);
@@ -463,6 +473,7 @@ function runWorker(
       drumSignal,
       stems,
       stemNotes,
+      beatModel,
     };
     const transfer = [signal.buffer, ...(drumSignal ? [drumSignal.buffer] : []), ...Object.values(stems ?? {}).map((s) => s.buffer)];
     worker.postMessage(req, transfer);

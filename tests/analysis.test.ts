@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { estimateTempo, trackBeats } from '../src/analysis/dsp/beats';
+import { barsOnGrid, estimateTempo, trackBeats } from '../src/analysis/dsp/beats';
 import { onsetEnvelope } from '../src/analysis/dsp/onsets';
 import { stft } from '../src/analysis/dsp/stft';
 import { hpss } from '../src/analysis/dsp/hpss';
@@ -193,6 +193,22 @@ describe('drum detection', () => {
   });
 });
 
+describe('bar starts on the grid', () => {
+  const beats = Array.from({ length: 16 }, (_, i) => 0.5 + i * 0.5);
+
+  it('puts each bar start on the nearest beat and carries the bars on to both ends', () => {
+    // Bars heard at the third, seventh and eleventh beat, a little off the grid.
+    expect(barsOnGrid(beats, [1.52, 3.49, 5.51])).toEqual([2, 6, 10, 14]);
+    // Three beats to a bar, heard from the fifth beat on: carried back to the second.
+    expect(barsOnGrid(beats, [2.5, 4, 5.5])).toEqual([1, 4, 7, 10, 13]);
+  });
+
+  it('has no bars without bar starts or without beats', () => {
+    expect(barsOnGrid(beats, [])).toEqual([]);
+    expect(barsOnGrid([], [1])).toEqual([]);
+  });
+});
+
 describe('pipeline', () => {
   it('finds drums, beats, bass and lead in a synthetic song', async () => {
     const bass = [40, 40, 43, 45];
@@ -215,5 +231,39 @@ describe('pipeline', () => {
     expect(bass.filter((m) => bassPcs.has(m % 12)).length).toBeGreaterThanOrEqual(2);
     expect(a.sections.length).toBeGreaterThan(0);
     expect(a.downbeats.length).toBeGreaterThan(8);
+  }, 60_000);
+  it('takes its grid from the beat model when given one', async () => {
+    // The song is in four; the model is made to hear three beats to a bar, at 20 ms steps a little off.
+    const x = song(120, 24, { bass: [40, 40, 43, 45] });
+    const heard = Array.from({ length: 44 }, (_, i) => Math.round((0.5 + i * 0.5 + (i % 2 ? 0.01 : -0.01)) * 50) / 50);
+    const a = await analyzeSignal(x, { beatTracker: async () => ({ beats: heard, downbeats: heard.filter((_, i) => i % 3 === 1) }) });
+    expect(Math.abs(a.tempo - 120)).toBeLessThan(1);
+    // The grid is the model's, smoothed, moved onto the kicks and carried to both ends of the song.
+    expect(a.beats.length).toBeGreaterThanOrEqual(46);
+    for (const t of a.beats) {
+      const off = (((t - 0.5) % 0.5) + 0.5) % 0.5;
+      expect(Math.min(off, 0.5 - off)).toBeLessThan(0.02);
+    }
+    const bars = a.downbeats.map((i) => a.beats[i]);
+    expect(bars.length).toBeGreaterThan(12);
+    for (let i = 1; i < bars.length; i++) expect(bars[i] - bars[i - 1]).toBeCloseTo(1.5, 1);
+  }, 60_000);
+
+  it('finds the grid by itself when the beat model fails or hears too little', async () => {
+    const x = song(120, 24, { bass: [40, 40, 43, 45] });
+    const alone = await analyzeSignal(x);
+    const logs: string[] = [];
+    const failing = await analyzeSignal(x, {
+      onLog: (m) => logs.push(m),
+      beatTracker: async () => {
+        throw new Error('no model');
+      },
+    });
+    const sparse = await analyzeSignal(x, { onLog: (m) => logs.push(m), beatTracker: async () => ({ beats: [1, 2, 3], downbeats: [1] }) });
+    expect(failing.beats).toEqual(alone.beats);
+    expect(failing.downbeats).toEqual(alone.downbeats);
+    expect(sparse.beats).toEqual(alone.beats);
+    expect(logs.some((m) => m.includes('no model'))).toBe(true);
+    expect(logs.some((m) => m.includes('too few beats'))).toBe(true);
   }, 60_000);
 });

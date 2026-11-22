@@ -148,6 +148,7 @@ Analysis runs in Web Workers in both the browser and the desktop app. Every song
 
 - **Stem separation** – [Demucs](https://github.com/adefossez/demucs) (`htdemucs`) splits the song into drums, bass, vocals and the other instruments. It runs on [ONNX Runtime Web](https://onnxruntime.ai/): on the graphics card through WebGPU where the browser has it (about 10 seconds for a four-minute song on a fast card; the game prepares each segment and rebuilds the previous one while the card works on the current one), otherwise on the processor through WebAssembly (several minutes). The game does the model's short-time Fourier transform itself (`src/analysis/separation/`). The same song always gives the same stems.
 - **Transcription** – [Basic Pitch](https://github.com/spotify/basic-pitch) transcribes the bass, vocal and instrument stems, on the same runtime and device as the separation (its ONNX file, `public/models/basic-pitch/nmp.onnx`). Its notes are decoded by a port of Basic Pitch's own post-processing (`src/analysis/pitch/noteEvents.ts`) that gives the same notes far faster; a test checks the two agree. All three stems of a four-minute song take under two seconds on a graphics card.
+- **Beats and bars** – [Beat This](https://github.com/CPJKU/beat_this) finds the beats and where the bars start, from the mix, on the same runtime (its small model, `public/models/beat-this/small0.onnx`, 10 MB, served with the game and loaded when an analysis starts). The game computes the model's spectrogram itself and picks the beats the way Beat This does (`src/analysis/beat/`); a test checks the spectrogram against Beat This's own. If the model cannot be loaded, the game's own beat tracker finds the grid.
 
 A four-minute song takes about 20 seconds in all on a fast graphics card, most of it the separation.
 
@@ -161,7 +162,7 @@ The pipeline then works on the mix and the stems:
 
 1. **Spectrum** – STFT (2048/512 at 22.05 kHz).
 2. **Harmonic/percussive separation** – median-filter HPSS.
-3. **Rhythm** – band-balanced onset envelope, tempo by an autocorrelation comb, dynamic-programming beat tracking. The grid is then calibrated against the detected drum attacks.
+3. **Rhythm** – beats and bar starts from the beat model (without it: a band-balanced onset envelope, tempo by an autocorrelation comb, dynamic-programming beat tracking, and bars from the accents). The grid is then calibrated against the detected drum attacks.
 4. **Drums** – kick/snare/hat onsets from band-limited flux of the drum stem, refined to the attack in the time domain.
 5. **Harmony** – chroma, chord changes, key.
 6. **Melody** – each part's line is built from its stem's audible attacks and the notes transcribed in it (`src/analysis/pitch/stemLines.ts`):
@@ -199,6 +200,7 @@ pnpm test
 Unit tests cover:
 
 - tempo, beat and drum timing on synthetic audio;
+- the beat model's spectrogram, its windows and its peak picking;
 - HPSS;
 - bass and lead pitch extraction;
 - chart invariants: lanes, gaps, chords, sustains, determinism, density by difficulty;
@@ -311,6 +313,9 @@ Third-party parts keep their own licences:
 | The crowd in the finale sound: "Crowd cheering" by voicebosch, from Pixabay                                                                       | Pixabay Content License (free to use, not to be passed on as a standalone sound) |
 | The applause under it: recordings by thore (public domain) and by Sandermotions (CC0), from Wikimedia Commons                                     | Public domain / CC0 1.0                                                          |
 | Demucs (the code the stem model was exported from)                                                                                                | MIT                                                                              |
+| Beat This (code and model)                                                                                                                        | MIT                                                                              |
 | The Python reference in `ml-service/`: FastAPI, librosa, Demucs and others                                                                        | their own licences; see `ml-service/requirements*.txt`                           |
 
 The Demucs stem model (`models/htdemucs/`, and the copy the game downloads) is the published `htdemucs` weights in another file format. Its authors released the code under the MIT licence but state that the licence of the weights is not clear, because part of the music they were trained on was only cleared for research; the Apache licence of this repository does not cover them. Songs you import stay on your machine.
+
+The beat model (`public/models/beat-this/`) is Beat This's published `small0` weights in another file format. Its authors released code and weights under the MIT licence, and note that some of the recordings it was trained on are copyrighted or under limited Creative Commons licences.
