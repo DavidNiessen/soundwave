@@ -89,7 +89,8 @@ import { StageBackdrop } from './StageBackdrop';
 import type { SongActions } from './SongMenu';
 import { SongSheet } from './SongSheet';
 import { MetadataSheet } from './MetadataSheet';
-import { Toasts, useToasts } from './Toasts';
+import { notify } from './notifications';
+import { Notifications } from './Notifications';
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { installUiSounds } from './uiSounds';
 
@@ -230,8 +231,6 @@ export function App() {
     setSettings(s);
     saveSettings(s);
   }, []);
-  const toasts = useToasts();
-  const { push: toast } = toasts;
 
   const setSetlist = useCallback((next: string[]) => {
     setSetlistState(next);
@@ -331,14 +330,14 @@ export function App() {
       setSongs(await listSongs());
     } catch (e) {
       setSongs([]);
-      toast(
+      notify.error(
         e instanceof StorageBlockedError
           ? e.message
           : 'Song storage is unavailable in this browser window. Imported songs will not be saved.',
       );
     }
     setLoaded((l) => (l.songs ? l : { ...l, songs: true }));
-  }, [toast]);
+  }, []);
   const refreshScores = useCallback(async () => {
     try {
       setScores(await listAllScores());
@@ -382,8 +381,8 @@ export function App() {
     const was = modelWas.current;
     modelWas.current = model.state;
     // The download itself shows in the progress bar of the song waiting for it; only a failure is news.
-    if (was !== model.state && model.state === 'error' && model.error) toast(model.error);
-  }, [model, toast]);
+    if (was !== model.state && model.state === 'error' && model.error) notify.error(model.error);
+  }, [model]);
 
   const analysisStatus = useSyncExternalStore(analysisManager.subscribe, analysisManager.snapshot);
   const status: Record<string, SongStatus> = analysisStatus;
@@ -441,7 +440,10 @@ export function App() {
   const importFiles = useCallback(
     async (files: File[]): Promise<SongMeta[]> => {
       const usable = files.filter((f) => isSoundwaveFile(f) || isAudioFile(f));
-      if (usable.length < files.length) toast(`Skipped ${files.length - usable.length} file(s) that are not audio or Soundwave songs.`);
+      const skipped = files.length - usable.length;
+      if (skipped === 1)
+        notify.warning(`Skipped ${files.find((f) => !usable.includes(f))!.name}: it is not an audio file or a Soundwave song.`);
+      else if (skipped > 1) notify.warning(`Skipped ${skipped} files that are not audio files or Soundwave songs.`);
       setImporting((n) => n + usable.length);
       const got: SongMeta[] = [];
       for (const f of usable) {
@@ -450,7 +452,7 @@ export function App() {
           const { meta } = song;
           const had = await getSong(meta.id);
           if (had) {
-            toast(`"${had.title}" is already in your library.`);
+            notify.info(`"${had.title}" is already in your library.`);
             got.push(had);
             continue;
           }
@@ -462,7 +464,7 @@ export function App() {
           playSfx('add');
           got.push(meta);
         } catch (e) {
-          toast(`Could not import ${f.name}: ${(e as Error).message}`);
+          notify.error(`Could not import ${f.name}: ${(e as Error).message}`);
         } finally {
           setImporting((n) => n - 1);
         }
@@ -470,7 +472,7 @@ export function App() {
       await refresh();
       return got;
     },
-    [refresh, toast],
+    [refresh],
   );
   // Song files the desktop app is opened with (double-clicked in Explorer) are added, and a single
   // one opens on its page.
@@ -481,16 +483,14 @@ export function App() {
         setSheet(got[0]);
     });
   useEffect(() => watchOpenedFiles((files) => openedRef.current(files)), []);
-  const exportSong = useCallback(
-    async (song: SongMeta) => {
-      try {
-        if (await saveSongFile(await songFile(song.id), soundwaveFileName(song))) toast(`Saved "${song.title}" as a Soundwave song file.`);
-      } catch (e) {
-        toast(`Could not export "${song.title}": ${(e as Error).message}`);
-      }
-    },
-    [toast],
-  );
+  const exportSong = useCallback(async (song: SongMeta) => {
+    try {
+      if (await saveSongFile(await songFile(song.id), soundwaveFileName(song)))
+        notify.success(`Saved "${song.title}" as a Soundwave song file.`);
+    } catch (e) {
+      notify.error(`Could not export "${song.title}": ${(e as Error).message}`);
+    }
+  }, []);
   const addSongs = useCallback(() => fileInput.current?.click(), []);
 
   /* The track editor ---------------------------------------------------------------------- */
@@ -583,9 +583,9 @@ export function App() {
 
   const toggle = (song: SongMeta) => {
     if (!setlist.includes(song.id) && !canPlay(analysisStatus[song.id]))
-      return toast('No notes were found in this song, so it cannot go in a set.');
+      return notify.warning('No notes were found in this song, so it cannot go in a set.');
     if (!setlist.includes(song.id) && setlist.length >= SET_MAX)
-      return toast(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
+      return notify.warning(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
     setSetlist(toggleSong(setlist, song.id));
   };
 
@@ -596,7 +596,7 @@ export function App() {
       const next = [...setlist];
       for (const song of list) if (next.length < SET_MAX && !next.includes(song.id) && canPlay(analysisStatus[song.id])) next.push(song.id);
       if (next.length !== setlist.length) setSetlist(next);
-      if (list.some((song) => !next.includes(song.id))) toast(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
+      if (list.some((song) => !next.includes(song.id))) notify.warning(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
     },
     removeFromSet: (list) => setSetlist(setlist.filter((id) => !list.some((song) => song.id === id))),
     analyze: (list) => list.forEach((song) => analysisManager.enqueue(song.id, true)),
@@ -645,7 +645,7 @@ export function App() {
       setTimeout(() => setLaunch(null), 860);
     } catch (e) {
       setLaunch(null);
-      toast((e as Error).message);
+      notify.error((e as Error).message);
     }
   };
   const playAt = (run: Run, index: number, started = false) =>
@@ -669,14 +669,17 @@ export function App() {
   };
   // Videos are made in the menus and while a replay is watched, never beside a song or the editor.
   const holdVideos = view.name === 'play' || view.name === 'editor' || view.name === 'export';
+  // While a song or a replay is on screen, notifications stand along the top edge, clear of the
+  // highway and the score, and come without a sound or a pulse.
+  const songOnScreen = view.name === 'play' || view.name === 'replay' || view.name === 'export';
   useEffect(() => videoExports.hold(holdVideos), [holdVideos]);
   useEffect(
     () =>
       videoExports.onFinished((item) => {
-        if (item.state === 'saved') toast(`The video of ${item.title} is saved as ${item.fileName}.`);
-        else if (item.state === 'failed') toast(`The video of ${item.title} could not be exported: ${item.error}`);
+        if (item.state === 'saved') notify.success(`The video of ${item.title} is saved as ${item.fileName}.`);
+        else if (item.state === 'failed') notify.error(`The video of ${item.title} could not be exported: ${item.error}`);
       }),
-    [toast],
+    [],
   );
   /** The replay whose video is being set up (the export dialog is open). */
   const [exportAsk, setExportAsk] = useState<ReplayMeta | null>(null);
@@ -733,7 +736,7 @@ export function App() {
             playSfx('add');
           } catch (e) {
             await target.abort().catch(() => {});
-            toast(`The video could not be exported: ${(e as Error).message}`);
+            notify.error(`The video could not be exported: ${(e as Error).message}`);
           }
           return;
         }
@@ -743,7 +746,7 @@ export function App() {
           return { name: 'export', meta, data, buffer, video, plan, target, fileName, back, key: Date.now() };
         });
       })
-      .catch((e) => toast(`The video could not be saved: ${(e as Error).message}`));
+      .catch((e) => notify.error(`The video could not be saved: ${(e as Error).message}`));
   };
   const replayActions = {
     watch: watchReplay,
@@ -752,7 +755,7 @@ export function App() {
       try {
         await updateReplay(meta.id, { kept });
       } catch {
-        toast('The replay could not be changed: the library is unavailable.');
+        notify.error('The replay could not be changed: the library is unavailable.');
       }
       await refreshReplays();
     },
@@ -760,7 +763,7 @@ export function App() {
       try {
         await deleteReplays(list.map((r) => r.id));
       } catch {
-        toast('The replay could not be deleted: the library is unavailable.');
+        notify.error('The replay could not be deleted: the library is unavailable.');
       }
       await refreshReplays();
     },
@@ -803,7 +806,7 @@ export function App() {
       });
       if (!entries.length) {
         setLaunch(null);
-        return toast('No notes were found in these songs at this difficulty.');
+        return notify.warning('No notes were found in these songs at this difficulty.');
       }
       await playAt(
         {
@@ -820,7 +823,7 @@ export function App() {
       );
     } catch (e) {
       setLaunch(null);
-      toast((e as Error).message);
+      notify.error((e as Error).message);
     }
   };
 
@@ -873,7 +876,7 @@ export function App() {
       );
       await refreshReplays();
     } catch {
-      toast('This replay could not be saved: the library is out of room or unavailable.');
+      notify.error('This replay could not be saved: the library is out of room or unavailable.');
     }
   };
 
@@ -1011,7 +1014,8 @@ export function App() {
     if (!song || run.charts[index]?.part === part) return;
     try {
       const chart = await analysisManager.chart(song.id, part, run.pick.difficulty);
-      if (!chart || chart.notes.length === 0) return toast(`No ${PART_LABEL[part].toLowerCase()} notes were found in ${song.title}.`);
+      if (!chart || chart.notes.length === 0)
+        return notify.warning(`No ${PART_LABEL[part].toLowerCase()} notes were found in ${song.title}.`);
       const charts = [...run.charts];
       charts[index] = chart;
       // Still on this screen (the player may have moved on while the chart was fetched).
@@ -1019,7 +1023,7 @@ export function App() {
         v.name === 'results' && v.run.songs === run.songs && v.run.index === run.index ? { ...v, run: { ...v.run, charts } } : v,
       );
     } catch (e) {
-      toast((e as Error).message);
+      notify.error((e as Error).message);
     }
   };
 
@@ -1235,7 +1239,6 @@ export function App() {
             onAnalyze: (song) => analysisManager.enqueue(song.id, true),
             onScratch: startFromScratch,
             onOpen: (song) => setView({ name: 'editor', song, back: view }),
-            toast,
           }}
           replays={replays}
           replayActions={replayActions}
@@ -1355,7 +1358,12 @@ export function App() {
           <span />
         </div>
       )}
-      <Toasts items={toasts.items} onDismiss={toasts.dismiss} />
+      <Notifications
+        settings={settings}
+        place={songOnScreen ? 'top' : 'bar'}
+        quiet={songOnScreen}
+        shortcut={!songOnScreen && view.name !== 'editor'}
+      />
       <input
         ref={fileInput}
         type="file"
