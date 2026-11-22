@@ -34,6 +34,7 @@ import { PadGlyph, STYLE_LABEL } from '../input/glyphs';
 import { getInputMode, usesFocus } from '../input/inputMode';
 import { focusEl, focusStart, NAV_EVENT, nearest, TAB_EVENT, type Dir } from '../input/menuNav';
 import { backInput, confirmInput, PAUSE_INPUT, pads, resolveStyle, styleFor, SYSTEM_INPUT, type GlyphStyle } from '../input/pads';
+import { lightPads, type LightPad } from '../input/lightbar';
 import { dualSenseHaptics, menuPulse, Rumbler } from '../input/rumble';
 import { usePads } from '../input/usePads';
 import { Hint, keyName, useActions, useHints } from './actions';
@@ -119,7 +120,7 @@ const FIELDS: Record<Tab, readonly (keyof Settings)[]> = {
   video: ['graphics', 'displayMode', 'uiScale', 'motion'],
   audio: ['volume', 'musicVolume', 'sfxVolume', 'songPreviews', 'muteUnfocused', 'outputDevice', 'outputDeviceName'],
   game: ['trackSpeed', 'offsetMs', 'replays', 'replayLimit'],
-  controller: ['glyphs', 'rumble', 'rumbleHits', 'rumbleMisses', 'rumbleSustains', 'rumbleOverdrive', 'ps5Haptics'],
+  controller: ['glyphs', 'rumble', 'rumbleHits', 'rumbleMisses', 'rumbleSustains', 'rumbleOverdrive', 'ps5Haptics', 'lightbar'],
   touch: ['touchHaptics', 'touchOverdriveSide'],
   shortcuts: ['keys4', 'keys5', 'overdriveKey', 'pad4', 'pad5', 'padOverdrive', 'bindings'],
   advanced: ['checkUpdates', 'discordStatus'],
@@ -383,6 +384,21 @@ export function SettingsScreen({ settings, model, device, onChange, onBack, inSo
     };
   }, [ps5, tab]);
 
+  // A PlayStation controller's light bar can be set by the desktop app over USB; say which it is.
+  const playstation = snap.pads.some((p) => p.family === 'ps5' || p.family === 'ps4');
+  const [lights, setLights] = useState<LightPad[] | null>(null);
+  useEffect(() => {
+    if (!playstation || tab !== 'controller') return setLights(null);
+    let live = true;
+    const check = () => void lightPads().then((found) => live && setLights(found));
+    check();
+    const timer = setInterval(check, 4000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [playstation, tab]);
+
   // The audio outputs, kept current while the Audio tab is open (plugging one in changes the list).
   const [outputs, setOutputs] = useState<OutputList>({ devices: [], listed: false });
   const [outputsRefused, setOutputsRefused] = useState(false);
@@ -421,6 +437,7 @@ export function SettingsScreen({ settings, model, device, onChange, onBack, inSo
     setBinding,
     snap,
     haptics,
+    lights,
     model,
     device,
     library,
@@ -575,6 +592,8 @@ interface Ctx {
   setBinding(b: Binding): void;
   snap: ReturnType<typeof usePads>;
   haptics: boolean | null;
+  /** The controllers with a light bar the desktop app found (null while it looks). */
+  lights: LightPad[] | null;
   model: ModelStatus;
   device: AnalysisDevice | null;
   library: LibraryBackup;
@@ -1054,6 +1073,14 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
     const detected = styleFor(c.snap.family);
     const none = !c.snap.pads.length;
     const ps5 = c.snap.pads.some((p) => p.family === 'ps5');
+    const playstation = c.snap.pads.some((p) => p.family === 'ps5' || p.family === 'ps4');
+    const lightNote = !inDesktopApp()
+      ? 'It works in the desktop app with a USB cable.'
+      : c.lights === null
+        ? 'Checking the controller…'
+        : c.lights.some((p) => p.usb)
+          ? ''
+          : 'It needs a USB cable: by Bluetooth, setting the light would stop the game reading the controller’s buttons.';
     return [
       {
         title: 'Controllers',
@@ -1165,6 +1192,22 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
             : []),
         ],
       },
+      ...(playstation
+        ? [
+            {
+              title: 'Light bar',
+              rows: [
+                toggle(
+                  'lightbar',
+                  'Light bar',
+                  `The light around the touchpad flashes in a lane’s colour every time you press that lane, glows gold while your streak holds the top multiplier, and light blue in overdrive. ${lightNote}`.trim(),
+                  s.lightbar,
+                  (v) => set({ lightbar: v }),
+                ),
+              ],
+            },
+          ]
+        : []),
     ];
   }
 
