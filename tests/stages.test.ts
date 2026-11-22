@@ -73,6 +73,14 @@ describe('stages', () => {
     expect(findStage(s, 'mine-7').venueId).toBe('moonrise');
   });
 
+  it('puts the aurora in the sky unless a stage says otherwise', () => {
+    for (const d of BUILT_IN) expect(d.sky).toBe('aurora');
+    const [none, night, black, odd] = normalizeStages({
+      mine: [{ id: 'mine-8' }, { id: 'mine-9', sky: 'night' }, { id: 'mine-10', sky: 'black' }, { id: 'mine-11', sky: 'rain' }],
+    }).mine;
+    expect([none.sky, night.sky, black.sky, odd.sky]).toEqual(['aurora', 'night', 'black', 'aurora']);
+  });
+
   it('falls back to Festival when the stage in use was a template that is gone', () => {
     expect(normalizeStages({ active: 'warehouse', mine: [] }).active).toBe('festival');
   });

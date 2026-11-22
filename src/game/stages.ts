@@ -75,7 +75,7 @@ export const RANGES = {
 const base: Omit<StageDef, 'id' | 'name'> = {
   backdrop: { kind: 'venue' },
   venueId: DEFAULT_VENUE,
-  sky: 'night',
+  sky: 'aurora',
   dim: 0.35,
   screens: null,
   screensTurn: 0,
@@ -188,7 +188,7 @@ function normalizeDef(raw: unknown): StageDef | null {
     name: typeof d.name === 'string' && d.name.trim() ? d.name.trim().slice(0, 32) : 'My stage',
     backdrop: normalizeBackdrop(d.backdrop),
     venueId: isVenueId(d.venueId) ? d.venueId : DEFAULT_VENUE,
-    sky: d.sky === 'aurora' || d.sky === 'black' ? d.sky : 'night',
+    sky: d.sky === 'night' || d.sky === 'black' ? d.sky : 'aurora',
     dim: clamp(d.dim, RANGES.dim, 0.35),
     screens: typeof d.screens === 'string' && d.screens ? d.screens : null,
     screensTurn: [0, 1, 2, 3].includes(Number(d.screensTurn)) ? Number(d.screensTurn) : 0,

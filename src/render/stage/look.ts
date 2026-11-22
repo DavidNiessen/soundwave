@@ -32,7 +32,7 @@ export interface StageLook {
 }
 
 export const DEFAULT_LOOK: StageLook = {
-  sky: 'night',
+  sky: 'aurora',
   colors: null,
   brightness: 1,
   venue: 1,
