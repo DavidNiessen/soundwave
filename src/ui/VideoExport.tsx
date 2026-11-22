@@ -80,7 +80,6 @@ export function ExportVideoDialog({ replay, silent, settings: s, onChange, onSta
     // oxlint-disable-next-line react/exhaustive-deps -- `key` holds what the plan depends on
   }, [key]);
   const format = plan ? (plan.kind === 'live' ? plan.format : null) : null;
-  const size = videoSize(s);
   const set = (patch: Partial<VideoExportSettings>) => onChange({ ...s, ...patch });
   const onOff = (on: string, off: string) => [
     { value: true, label: on },
@@ -145,15 +144,15 @@ export function ExportVideoDialog({ replay, silent, settings: s, onChange, onSta
           {plan === undefined ? (
             <p className="hint export-summary">Checking what this device can encode…</p>
           ) : plan ? (
-            <p className="hint export-summary">
-              {plan.ext.toUpperCase()} · {size.width}×{size.height} · {s.fps} fps{music ? '' : ' · no sound'}.{' '}
-              {plan.kind === 'frames'
-                ? 'Made frame by frame, as fast as this device can draw them: usually well under the song’s length.'
-                : `Recorded as the replay plays, so it takes ${clock(replay.duration + 4)}. Keep the game in front until it is done.`}
-              {format?.ext === 'webm' &&
-                ' This browser cannot write MP4: the video is saved as WebM. The desktop app and Chrome write MP4.'}
-              {silent && ' The song is no longer in your library, so the video has no music.'}
-            </p>
+            // Only what is out of the ordinary is said: how the video is usually made needs no words.
+            (plan.kind === 'live' || silent) && (
+              <p className="hint export-summary">
+                {plan.kind === 'live' &&
+                  `This browser records the video as the replay plays, so it takes ${clock(replay.duration + 4)}. Keep the game in front until it is done.`}
+                {format?.ext === 'webm' && ' It cannot write MP4: the video is saved as WebM.'}
+                {silent && `${plan.kind === 'live' ? ' ' : ''}The song is no longer in your library, so the video has no music.`}
+              </p>
+            )
           ) : (
             <p className="error">This browser cannot make video. The desktop app, Chrome, Edge and Safari can.</p>
           )}
