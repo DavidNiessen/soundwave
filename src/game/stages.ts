@@ -1,7 +1,7 @@
 /**
  * The player's stage: how the 3D stage behind the highway and the menus looks. A few stages come
  * with the game; the player can copy one and make it their own (the Stage tab, src/ui/StageBrowser.tsx). They are
- * kept in the settings, so they travel with a library backup.
+ * kept in the settings, so they travel with a library backup (their videos and pictures too).
  */
 import type { Sky, StageLook } from '../render/stage/look';
 import { DEFAULT_VENUE, isVenueChoice, VENUES, type VenueChoice } from '../render/venues/catalog';

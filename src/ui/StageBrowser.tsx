@@ -668,8 +668,8 @@ function Editor({ def, actions, onClose, touch, activeRow, setActiveRow, onSave,
       label: b.kind === 'video' ? 'Video' : 'Picture',
       help:
         b.kind === 'video'
-          ? 'Plays silently on a loop. It stays on this device: a library backup keeps the stage but not the video.'
-          : 'Fills the screen behind the highway. It stays on this device: a library backup keeps the stage but not the picture.',
+          ? 'Plays silently on a loop. A library backup keeps it with the stage.'
+          : 'Fills the screen behind the highway. A library backup keeps it with the stage.',
       button: fileId ? 'Change' : 'Choose',
       run: () => chooseFile(b.kind as 'video' | 'image'),
       note: <span className="pill">{fileId ? (fileName ?? '…') : 'None yet'}</span>,
@@ -763,7 +763,7 @@ function Editor({ def, actions, onClose, touch, activeRow, setActiveRow, onSave,
                   kind: 'action',
                   id: 'screensFile',
                   label: 'Video',
-                  help: 'Plays silently on a loop on the stage’s screens. It stays on this device.',
+                  help: 'Plays silently on a loop on the stage’s screens. A library backup keeps it with the stage.',
                   button: 'Change',
                   run: chooseScreens,
                   note: <span className="pill">{screensName ?? '…'}</span>,

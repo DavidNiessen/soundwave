@@ -185,6 +185,7 @@ export function useLibraryBackup(settings: Settings): LibraryBackup {
                   {made ? `Backed up ${made}: ` : 'This backup holds '}
                   {songs(b.songs.length)}, {count(b.scores.length, 'best score')}
                   {b.replays.length ? `, ${count(b.replays.length, 'replay')}` : ''}
+                  {b.media.length ? `, ${count(b.media.length, 'stage video or picture', 'stage videos and pictures')}` : ''}
                   {Object.keys(b.preferences).length ? ' and settings' : ''}.
                 </p>
                 <p className="hint">
@@ -222,7 +223,9 @@ export function useLibraryBackup(settings: Settings): LibraryBackup {
               {done.added ? `${capital(songs(done.added))} added` : 'No new songs'}
               {done.kept ? `, ${songs(done.kept)} already here` : ''}
               {done.failed ? `, ${songs(done.failed)} could not be read` : ''}
-              {done.replays ? `, ${count(done.replays, 'replay')} added` : ''}. The game restarts to load them and the backup’s settings.
+              {done.replays ? `, ${count(done.replays, 'replay')} added` : ''}
+              {done.media ? `, ${count(done.media, 'stage video or picture', 'stage videos and pictures')} added` : ''}. The game restarts
+              to load them and the backup’s settings.
             </p>
             <button type="button" className="btn primary wide" data-autofocus onClick={() => location.reload()}>
               Restart

@@ -1,7 +1,8 @@
 /**
  * The videos and pictures the player's stages use as backgrounds or on the stage's screens. They
  * live in a database of their own, beside the songs': it never changes the songs' database or its
- * version, and a library backup leaves them out (they stay on this device).
+ * version. A library backup carries them (src/storage/backup.ts), so the stages that use them
+ * come along whole.
  */
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 
@@ -31,6 +32,23 @@ export async function putMedia(file: File): Promise<string> {
   const id = `media-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   await (await open()).put('media', { id, name: file.name, type: file.type, blob: file, addedAt: Date.now() });
   return id;
+}
+
+/** Every file kept, whole, for a library backup. */
+export async function listMedia(): Promise<StageMedia[]> {
+  try {
+    return await (await open()).getAll('media');
+  } catch {
+    return [];
+  }
+}
+
+/** Keeps a file from a backup under its own id; one already here is left as it is. Resolves to whether it was added. */
+export async function restoreMedia(m: StageMedia): Promise<boolean> {
+  const d = await open();
+  if (await d.get('media', m.id)) return false;
+  await d.put('media', m);
+  return true;
 }
 
 export async function getMedia(id: string): Promise<StageMedia | null> {
