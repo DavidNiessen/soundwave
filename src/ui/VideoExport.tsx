@@ -8,7 +8,7 @@ import { multiplierFor, MAX_MULTIPLIER, STREAK_PER_MULTIPLIER } from '../game/sc
 import type { Settings } from '../game/settings';
 import { videoBitrate, VideoRecorder, videoSize, type VideoExportSettings } from '../game/videoExport';
 import { drawVideoHud } from '../render/videoHud';
-import { planVideo, startFrameEncoder, type FrameEncoder, type VideoPlan } from '../game/videoRender';
+import { planVideo, songSamples, startFrameEncoder, type FrameEncoder, type VideoPlan } from '../game/videoRender';
 import type { SaveTarget } from '../storage/share';
 import type { ReplayMeta } from '../storage/replays';
 import { backInput } from '../input/pads';
@@ -335,7 +335,7 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
         await document.fonts?.load(`italic 900 32px "Archivo Variable"`).catch(() => undefined);
         await ctrl.ready;
         if (!live || finished) return;
-        encoder = await startFrameEncoder(out, plan, video, video.music ? { buffer, leadIn: -REPLAY_START } : null);
+        encoder = await startFrameEncoder(out, plan, video, video.music ? { ...songSamples(buffer), leadIn: -REPLAY_START } : null);
         if (!live || finished) return void encoder.cancel();
         const clock0 = performance.now();
         const step = 1000 / video.fps;
