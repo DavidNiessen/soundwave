@@ -14,6 +14,7 @@ import { Cover } from './Cover';
 import { Dialog } from './Dialog';
 import { DIFFICULTY_LABEL, ICON_STROKE, PART_ICON, PART_LABEL } from './icons';
 import { analysisLabel, type SongStatus } from './LibraryScreen';
+import { notify } from './notify';
 import { usePreviewRows } from './usePreviewRows';
 import { keysOf } from '../input/bindings';
 
@@ -44,7 +45,6 @@ export interface TrackPickerProps {
   onScratch(song: SongMeta): Promise<void>;
   /** Opens a track in the editor. */
   onOpen(song: SongMeta): void;
-  toast(text: string): void;
 }
 
 interface Props extends TrackPickerProps {
@@ -78,7 +78,6 @@ export function TrackPicker({
   onAnalyze,
   onScratch,
   onOpen,
-  toast,
 }: Props) {
   const hints = useHints(settings);
   const [query, setQuery] = useState('');
@@ -127,13 +126,13 @@ export function TrackPicker({
         if (song) setSubject({ song });
         return;
       }
-      if (!isAudioFile(f)) return toast(`${f.name} is not an audio file or a Soundwave song file.`);
+      if (!isAudioFile(f)) return void notify.warning(`${f.name} is not an audio file or a Soundwave song file.`);
       const picked = await readSongFile(f);
       const had = songs.find((s) => s.id === picked.meta.id);
       if (had) choose(had);
       else setSubject({ song: picked.meta, picked });
     } catch (e) {
-      toast(`Could not open ${f.name}: ${(e as Error).message}`);
+      notify.error(`Could not open ${f.name}: ${(e as Error).message}`);
     }
   };
 
@@ -307,7 +306,6 @@ export function TrackPicker({
           }}
           onStored={(song) => setSubject({ song })}
           onClose={() => setSubject(null)}
-          toast={toast}
         />
       )}
       <input
@@ -404,7 +402,6 @@ interface SetupProps {
   /** The picked file is in the library now. */
   onStored(song: SongMeta): void;
   onClose(): void;
-  toast(text: string): void;
 }
 
 /**
@@ -412,7 +409,7 @@ interface SetupProps {
  * from scratch on its own tempo. While the analysis runs the card waits with it, and the song opens
  * in the editor when it is done.
  */
-function TrackSetup({ subject, status, canAnalyze, onNew, onAnalyze, onScratch, onOpen, onStored, onClose, toast }: SetupProps) {
+function TrackSetup({ subject, status, canAnalyze, onNew, onAnalyze, onScratch, onOpen, onStored, onClose }: SetupProps) {
   const { song, picked } = subject;
   /** Listening for the tempo of a song that is started from scratch. */
   const [finding, setFinding] = useState(false);
@@ -434,7 +431,7 @@ function TrackSetup({ subject, status, canAnalyze, onNew, onAnalyze, onScratch, 
       if (picked) onStored(await onNew(picked, 'analyze'));
       else onAnalyze(song);
     } catch (e) {
-      toast(`Could not add ${song.title}: ${(e as Error).message}`);
+      notify.error(`Could not add ${song.title}: ${(e as Error).message}`);
       onClose();
     }
   };
@@ -449,7 +446,7 @@ function TrackSetup({ subject, status, canAnalyze, onNew, onAnalyze, onScratch, 
     } catch (e) {
       if (!live.current) return;
       setFinding(false);
-      toast(`Could not open ${song.title}: ${(e as Error).message}`);
+      notify.error(`Could not open ${song.title}: ${(e as Error).message}`);
     }
   };
 

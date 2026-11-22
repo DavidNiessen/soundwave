@@ -58,6 +58,8 @@ export const COMMANDS: Command[] = [
     { id: 'menus.back', label: 'Back', key: 'Escape', fixedKey: true, fixedPad: true, mouse: 'm3' },
     { id: 'menus.tabPrev', label: 'Previous tab', key: 'KeyQ', pad: 'b4' },
     { id: 'menus.tabNext', label: 'Next tab', key: 'KeyE', pad: 'b5' },
+    // Every controller button is taken somewhere in the menus; a player can give this one theirs.
+    { id: 'menus.dismiss', label: 'Dismiss a notification', key: 'KeyZ' },
   ]),
   // The same in every list of things of the player's: the music library, the Stage tab, the Replays tab.
   ...cmd('lists', [
