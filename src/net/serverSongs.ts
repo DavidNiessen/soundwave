@@ -311,8 +311,9 @@ class ServerSongs {
           await online.shareSong(await file(song.id));
         } catch (e) {
           const message = (e as Error).message;
-          // Too big is about this song; anything else (off, quota, rights) is about all of them.
-          if (!/at most/.test(message)) {
+          // Too big, or there already in another file, is about this song; anything else (off,
+          // quota, rights) is about all of them.
+          if (!/at most|already on the server/.test(message)) {
             onStop(message);
             return;
           }

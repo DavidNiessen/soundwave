@@ -246,6 +246,9 @@ copy `soundwave.db` together with its `-wal` and `-shm` files.
   themselves (pick yourself in the list), and the last admin cannot.
 - **Moderation log**: everything the owner and moderators did, with the reasons.
 - **Reported songs**: songs players asked to have taken down, to remove everywhere at once.
+- **Possible duplicates**: songs that sound like the same song twice (an MP3 and a FLAC of it, say),
+  to keep one or mark them as different. A song that is the same recording as one already on the
+  server is not taken twice in the first place, unless you add it anyway.
 - **Server library** and **Showdown rotation**: the songs everyone can play, and the set a
   Showdown plays when its host picks the server's.
 

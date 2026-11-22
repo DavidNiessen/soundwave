@@ -5,6 +5,7 @@
 !server/package.json
 !server/src
 !src/net/protocol.ts
+!src/net/similarity.ts
 !src/chart/types.ts
 !src/game/GameSession.ts
 !src/game/judge.ts

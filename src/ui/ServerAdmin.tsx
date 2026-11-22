@@ -7,6 +7,7 @@
 import {
   ArrowLeft,
   Check,
+  CopyCheck,
   ChevronRight,
   Copy,
   Flag,
@@ -30,7 +31,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import type { Settings } from '../game/settings';
 import { keysOf } from '../input/bindings';
 import { online } from '../net/client';
-import type { Invite, Role, SetSong, SharedSong, Topic, UserEntry } from '../net/protocol';
+import type { DuplicatePair, Invite, Role, SetSong, SharedSong, Topic, UserEntry } from '../net/protocol';
 import type { SongMeta } from '../storage/db';
 import { Hint, useActions, useHints, type Action } from './actions';
 import { Cover } from './Cover';
@@ -109,7 +110,7 @@ export function InvitePanel({ mod }: { mod: boolean }) {
 }
 
 /** The admin's sections: each a page of its own, listed down the side of the admin page. */
-type Section = 'overview' | 'library' | 'players' | 'invites' | 'rotation' | 'log' | 'reports';
+type Section = 'overview' | 'library' | 'players' | 'invites' | 'rotation' | 'log' | 'reports' | 'duplicates';
 
 const SECTIONS: { id: Section; binding: string; label: string; icon: LucideIcon; about: string }[] = [
   { id: 'overview', binding: 'admin.overview', label: 'Overview', icon: LayoutDashboard, about: 'Your server at a glance.' },
@@ -149,6 +150,14 @@ const SECTIONS: { id: Section; binding: string; label: string; icon: LucideIcon;
     about: 'Everything the admin and moderators did, newest first.',
   },
   { id: 'reports', binding: 'admin.reports', label: 'Reported songs', icon: Flag, about: 'Songs players asked to have taken down.' },
+  {
+    id: 'duplicates',
+    binding: 'admin.duplicates',
+    label: 'Possible duplicates',
+    icon: CopyCheck,
+    about:
+      'Songs that look like the same song twice, found by how they sound, how long they are and their names. Keep one, or say they differ.',
+  },
 ];
 
 type LogEntry = Awaited<ReturnType<typeof online.auditLog>>[number];
@@ -198,6 +207,7 @@ export function AdminScreen({
   const [rotation, setRotation] = useState<Loaded<SetSong[]>>(null);
   const [log, setLog] = useState<Loaded<LogEntry[]>>(null);
   const [reports, setReports] = useState<Loaded<Report[]>>(null);
+  const [duplicates, setDuplicates] = useState<Loaded<DuplicatePair[]>>(null);
   /** Each section's fetch, by the topic that says it changed. */
   const fetchers = useMemo((): Partial<Record<Topic, () => void>> => {
     if (!mod) return {};
@@ -208,7 +218,10 @@ export function AdminScreen({
         : (e as Error).message,
     });
     return {
-      songs: () => void online.songs('').then(setSongs, (e) => setSongs(fail(e))),
+      songs: () => {
+        void online.songs('').then(setSongs, (e) => setSongs(fail(e)));
+        void online.duplicates().then(setDuplicates, (e) => setDuplicates(fail(e)));
+      },
       users: () => void online.users().then(setUsers, (e) => setUsers(fail(e))),
       rotation: () => void online.showdownRotation().then(setRotation, (e) => setRotation(fail(e))),
       log: () => void online.auditLog().then(setLog, (e) => setLog(fail(e))),
@@ -265,6 +278,7 @@ export function AdminScreen({
     players: userList?.length,
     rotation: ready(rotation)?.length,
     reports: reportList?.length,
+    duplicates: ready(duplicates)?.length,
   };
   const current = SECTIONS.find((x) => x.id === section)!;
 
@@ -301,7 +315,9 @@ export function AdminScreen({
             <h2 className="admin-main-title">{current.label}</h2>
             <p className="hint">{current.about}</p>
           </header>
-          {section === 'overview' && <Overview songs={songs} users={users} rotation={rotation} log={log} reports={reports} onGo={go} />}
+          {section === 'overview' && (
+            <Overview songs={songs} users={users} rotation={rotation} log={log} reports={reports} duplicates={duplicates} onGo={go} />
+          )}
           {section === 'library' &&
             (failed(songs) ? (
               <Failed reason={songs.failed} />
@@ -331,6 +347,8 @@ export function AdminScreen({
           {section === 'log' && (failed(log) ? <Failed reason={log.failed} /> : <ModLog log={ready(log)} />)}
           {section === 'reports' &&
             (failed(reports) ? <Failed reason={reports.failed} /> : <ReportedSongs reports={reportList} onChange={load} />)}
+          {section === 'duplicates' &&
+            (failed(duplicates) ? <Failed reason={duplicates.failed} /> : <Duplicates pairs={ready(duplicates)} onChange={load} />)}
         </main>
       </div>
     </div>
@@ -354,6 +372,7 @@ function Overview({
   rotation,
   log,
   reports,
+  duplicates,
   onGo,
 }: {
   songs: Loaded<SharedSong[]>;
@@ -361,8 +380,10 @@ function Overview({
   rotation: Loaded<SetSong[]>;
   log: Loaded<LogEntry[]>;
   reports: Loaded<Report[]>;
+  duplicates: Loaded<DuplicatePair[]>;
   onGo(s: Section): void;
 }) {
+  const twins = ready(duplicates)?.length ?? 0;
   const songList = ready(songs);
   const userList = ready(users);
   const reportList = ready(reports);
@@ -372,11 +393,17 @@ function Overview({
   const value = <T,>(x: Loaded<T>, v: (t: T) => string) => (failed(x) ? '–' : x === null ? '…' : v(x));
   const stats: { id: Section; icon: LucideIcon; label: string; value: string; sub: string; alert?: boolean }[] = [
     {
-      id: 'library',
+      // With songs that may be there twice, the tile leads to them.
+      id: twins ? 'duplicates' : 'library',
       icon: Library,
       label: 'Songs',
       value: value(songs, (l) => String(l.length)),
-      sub: songList ? minutes(songList.reduce((n, x) => n + x.duration, 0)) + ' of music' : '',
+      sub: twins
+        ? `${twins} possible duplicate${twins === 1 ? '' : 's'}`
+        : songList
+          ? minutes(songList.reduce((n, x) => n + x.duration, 0)) + ' of music'
+          : '',
+      alert: twins > 0,
     },
     {
       id: 'players',
@@ -953,6 +980,109 @@ function ReportedSongs({ reports, onChange }: { reports: Report[] | null; onChan
     </div>
   );
 }
+
+/**
+ * Songs that may be the same song twice: each pair side by side, with who shared each, to keep one
+ * (the other is removed for everyone) or to say they are different songs (the pair is not listed again).
+ */
+function Duplicates({ pairs, onChange }: { pairs: DuplicatePair[] | null; onChange(): void }) {
+  const [note, setNote] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<{ song: SharedSong; keep: SharedSong } | null>(null);
+  const side = (song: SharedSong) => (
+    <span className="dup-side">
+      <ServerCover song={song} className="admin-row-cover" />
+      <span className="admin-row-text">
+        <span className="admin-row-title">{song.title}</span>
+        <span className="admin-row-sub">
+          {song.artist} · {formatDuration(song.duration)} · {(song.size / 1048576).toFixed(1)} MB ·{' '}
+          {song.by ? `shared by ${song.by}` : 'shared by a removed account'}
+        </span>
+      </span>
+    </span>
+  );
+  return (
+    <div className="admin-page-body">
+      {note && (
+        <p className="hint admin-note" role="status">
+          {note}
+        </p>
+      )}
+      {pairs === null ? (
+        <p className="hint">Loading…</p>
+      ) : !pairs.length ? (
+        <div className="admin-empty good">
+          <Check strokeWidth={ICON_STROKE} aria-hidden />
+          <p>No song looks like it is here twice.</p>
+        </div>
+      ) : (
+        <ol className="admin-rows scroll dup-list">
+          {pairs.map((p) => (
+            <li key={`${p.a.id}/${p.b.id}`} className={`dup-pair ${p.kind}`}>
+              <span className={`admin-role ${p.kind === 'same' ? 'banned' : 'moderator'}`}>
+                {p.kind === 'same' ? 'Same recording' : 'Probably the same song'}
+                {p.score > 0 ? ` · ${Math.round(p.score * 100)}% alike` : ''}
+              </span>
+              {side(p.a)}
+              {side(p.b)}
+              <span className="admin-actions">
+                <button type="button" className="btn small" onClick={() => setRemoving({ song: p.b, keep: p.a })}>
+                  Keep the first
+                </button>
+                <button type="button" className="btn small" onClick={() => setRemoving({ song: p.a, keep: p.b })}>
+                  Keep the second
+                </button>
+                <button
+                  type="button"
+                  className="btn small"
+                  onClick={() =>
+                    void online.notDuplicates(p.a.id, p.b.id).then(
+                      () => (setNote('Marked as different songs.'), onChange()),
+                      (e) => setNote((e as Error).message),
+                    )
+                  }
+                >
+                  They differ
+                </button>
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {removing && (
+        <Dialog title="Remove the duplicate" variant="card" closeLabel="Go back" onClose={() => setRemoving(null)}>
+          {(close) => (
+            <div className="pause-card">
+              <h2 className="display">Keep “{removing.keep.title}”?</h2>
+              <p className="hint">
+                The other copy, “{removing.song.title}” ({(removing.song.size / 1048576).toFixed(1)} MB
+                {removing.song.by ? `, shared by ${removing.song.by}` : ''}), leaves the server for everyone.
+              </p>
+              <button type="button" className="btn wide" data-autofocus data-sfx="back" onClick={close}>
+                Go back
+              </button>
+              <button
+                type="button"
+                className="btn primary wide danger"
+                onClick={() => {
+                  const r = removing;
+                  close();
+                  void online.removeSong(r.song.id, `A duplicate of “${r.keep.title}”`).then(
+                    () => (setNote(`The duplicate of “${r.keep.title}” was removed.`), onChange()),
+                    (e) => setNote((e as Error).message),
+                  );
+                }}
+              >
+                Remove the other
+              </button>
+            </div>
+          )}
+        </Dialog>
+      )}
+    </div>
+  );
+}
+
+const formatDuration = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
 
 /** Kinds of invite link, as the owner and moderators make them. */
 const INVITE_KINDS: { id: string; label: string; about: string; uses: number | null; days: number | null }[] = [

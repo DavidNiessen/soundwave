@@ -139,6 +139,14 @@ the server (`uid`) and the SHA-256 of the file the server keeps (`hash`). Renami
 file anew, so its hash changes, and every game that downloaded it takes the new details over the
 next time it signs in: the server is the single point of truth for its songs.
 
+**Duplicates.** The same song shared twice in other files (an MP3 and a FLAC of it) has other
+bytes, so another id. The server also compares songs by their loudness from moment to moment (from
+their analysis), their length and their names: a song that is the same recording as one already
+there is refused with a sentence naming it (the owner and moderators can add it anyway with
+`POST /songs?force=1`), and Admin → **Possible duplicates** lists every pair alike enough, the same
+recording or probably the same song (another master, or the same name and length), to keep one or
+mark them as different.
+
 **Streaming quality.** A whole song can also be kept in two smaller copies for players on a slow
 connection (Settings → Online → Streaming quality): `medium` (AAC at 128 kbit/s) and `low`
 (64 kbit/s, or 96 where the encoder goes no lower). The server has no audio encoder, so it does not make them: the game of whoever shared
@@ -196,6 +204,8 @@ signed-in owner's or moderator's access token:
 | `POST /mod/reset-password` (owner) | `{ name }`: answers a new password to pass on               |
 | `GET /mod/audit`                   | The moderation log                                          |
 | `GET /mod/reports`                 | Reported songs                                              |
+| `GET /mod/duplicates`              | Songs that may be the same song twice, most alike first     |
+| `POST /mod/duplicates/ok`          | `{ a, b }`: these two differ; the pair is not listed again  |
 
 Moderators can only act on players, and admins on anyone but admins. An admin steps down only
 themselves (`/mod/role` with their own name), and never as the server's last admin; the last admin's

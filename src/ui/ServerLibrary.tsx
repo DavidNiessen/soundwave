@@ -75,6 +75,8 @@ export function ServerLibrary({
   const [picked, setPicked] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  /** Songs just added that the server has already in another file, to add anyway or leave out. */
+  const [twins, setTwins] = useState<{ song: SongMeta; why: string }[]>([]);
 
   const q = query.trim().toLowerCase();
   const shown = useMemo(() => {
@@ -198,14 +200,58 @@ export function ServerLibrary({
         <AddSongs
           songs={addable}
           onClose={() => setAdding(false)}
-          onAdded={(n, failed) => {
+          onAdded={(n, failed, found) => {
             setNote(
               `${n} ${n === 1 ? 'song is' : 'songs are'} on the server now.${failed.length ? ` Not added: ${failed.join('; ')}` : ''}`,
             );
+            setTwins(found);
             onChange();
             void serverSongs.refresh();
           }}
         />
+      )}
+      {twins.length > 0 && (
+        <Dialog title="Already on the server" variant="card" closeLabel="Leave them out" onClose={() => setTwins([])}>
+          {(close) => (
+            <div className="pause-card">
+              <h2 className="display">Already on the server</h2>
+              <p className="hint">
+                {twins.length === 1 ? 'This song sounds like one' : 'These songs sound like ones'} the server has in another file:
+              </p>
+              <ul className="dup-found">
+                {twins.map((t) => (
+                  <li key={t.song.id}>
+                    <strong>{t.song.title}</strong> <span className="dim">{t.why.replace(/^This song is /, '')}</span>
+                  </li>
+                ))}
+              </ul>
+              <button type="button" className="btn wide" data-autofocus data-sfx="back" onClick={close}>
+                Leave {twins.length === 1 ? 'it' : 'them'} out
+              </button>
+              <button
+                type="button"
+                className="btn primary wide"
+                onClick={() => {
+                  const list = twins;
+                  close();
+                  void (async () => {
+                    let n = 0;
+                    for (const t of list)
+                      await online.shareSong(await songFile(t.song.id), true).then(
+                        () => n++,
+                        () => {},
+                      );
+                    setNote(`${n} ${n === 1 ? 'song was' : 'songs were'} added anyway. They show under Possible duplicates.`);
+                    onChange();
+                    void serverSongs.refresh();
+                  })();
+                }}
+              >
+                Add {twins.length === 1 ? 'it' : 'them'} anyway
+              </button>
+            </div>
+          )}
+        </Dialog>
       )}
     </div>
   );
@@ -313,7 +359,16 @@ function SongDetail({ song, onDone }: { song: SharedSong | null; onDone(note: st
 }
 
 /** Songs of the player's library to add to the server: ticked, then added one after another. */
-function AddSongs({ songs, onClose, onAdded }: { songs: SongMeta[]; onClose(): void; onAdded(n: number, failed: string[]): void }) {
+function AddSongs({
+  songs,
+  onClose,
+  onAdded,
+}: {
+  songs: SongMeta[];
+  onClose(): void;
+  /** `twins`: songs the server has already in another file (with why), to add anyway or not. */
+  onAdded(n: number, failed: string[], twins: { song: SongMeta; why: string }[]): void;
+}) {
   const [query, setQuery] = useState('');
   const [ticked, setTicked] = useState<Set<string>>(new Set());
   const [progress, setProgress] = useState<{ at: number; of: number } | null>(null);
@@ -339,6 +394,7 @@ function AddSongs({ songs, onClose, onAdded }: { songs: SongMeta[]; onClose(): v
   const add = async (close: () => void) => {
     const todo = songs.filter((x) => ticked.has(x.id));
     const failed: string[] = [];
+    const twins: { song: SongMeta; why: string }[] = [];
     let n = 0;
     for (let i = 0; i < todo.length; i++) {
       setProgress({ at: i + 1, of: todo.length });
@@ -346,10 +402,12 @@ function AddSongs({ songs, onClose, onAdded }: { songs: SongMeta[]; onClose(): v
         await online.shareSong(await songFile(todo[i].id));
         n++;
       } catch (e) {
-        failed.push(`${todo[i].title} (${(e as Error).message})`);
+        const why = (e as Error).message;
+        if (/already on the server/.test(why)) twins.push({ song: todo[i], why });
+        else failed.push(`${todo[i].title} (${why})`);
       }
     }
-    onAdded(n, failed);
+    onAdded(n, failed, twins);
     close();
   };
   return (

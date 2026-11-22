@@ -192,12 +192,19 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     }),
     'POST /songs': async (req, _body, ip, _p, raw) => {
       if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many songs at once. Wait a minute.');
-      const shared = await songs.share(me(req), raw);
+      const force = new URL(req.url ?? '/', 'http://x').searchParams.get('force') === '1';
+      const shared = await songs.share(me(req), raw, force);
       notify(['songs']);
       return shared;
     },
     'GET /songs': (req) => (me(req), songs.list(new URL(req.url ?? '/', 'http://x').searchParams.get('q') ?? '')),
     'GET /mod/reports': (req) => songs.reports(me(req)),
+    'GET /mod/duplicates': (req) => songs.duplicates(me(req)),
+    'POST /mod/duplicates/ok': (req, body) => {
+      songs.notDuplicates(me(req), body.a, body.b);
+      notify(['songs']);
+      return { ok: true };
+    },
     'GET /presence': (req) => {
       me(req);
       return [...sockets.keys()]

@@ -89,6 +89,16 @@ export const STREAM_QUALITIES: readonly StreamQuality[] = ['high', 'medium', 'lo
 /** The bit rate of each smaller copy. */
 export const QUALITY_BITRATE: Record<Exclude<StreamQuality, 'high'>, number> = { medium: 128_000, low: 64_000 };
 
+/** Two songs on a server that look like the same song (`GET /mod/duplicates`, see src/net/similarity.ts). */
+export interface DuplicatePair {
+  a: SharedSong;
+  b: SharedSong;
+  /** 'same': the same recording in two files; 'likely': probably the same song (another master, or the same name). */
+  kind: 'same' | 'likely';
+  /** How alike their loudness is, 0..1 (where both have an analysis). */
+  score: number;
+}
+
 export interface SharedSong {
   /** The hash of the song's audio: the same song is the same id everywhere. */
   id: string;

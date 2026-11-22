@@ -24,6 +24,7 @@ import {
   type Online,
   type ClientMessage,
   type Difficulty,
+  type DuplicatePair,
   type Invite,
   type Part,
   type PartyMode,
@@ -520,8 +521,17 @@ class OnlineClient {
   /* Shared songs ------------------------------------------------------------------------------- */
 
   /** Shares a song (its .soundwave file) to the server's library. */
-  shareSong(file: Blob) {
-    return this.request<SharedSong>('/songs', { raw: file, auth: true });
+  /** Shares a song. `force`: an admin adds it although the server has the same recording already. */
+  shareSong(file: Blob, force = false) {
+    return this.request<SharedSong>(`/songs${force ? '?force=1' : ''}`, { raw: file, auth: true });
+  }
+  /** Songs on the server that may be the same song twice (owner and moderators). */
+  duplicates() {
+    return this.request<DuplicatePair[]>('/mod/duplicates', { auth: true });
+  }
+  /** Two songs are not the same: the pair is not listed again. */
+  notDuplicates(a: string, b: string) {
+    return this.request<{ ok: boolean }>('/mod/duplicates/ok', { body: { a, b }, auth: true });
   }
   songs(query = '') {
     return this.request<SharedSong[]>(`/songs${query ? `?q=${encodeURIComponent(query)}` : ''}`, { auth: true });

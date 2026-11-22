@@ -10,13 +10,18 @@
  * A whole song can have smaller copies for streaming, songs/<id>.medium.soundwave and
  * <id>.low.soundwave: the server cannot make them itself (it has no audio encoder), so the game of
  * whoever shared the song, or of an admin or moderator, makes and sends them (src/net/streamQuality.ts).
+ *
+ * The same song shared twice in other files (an MP3 and a FLAC) has another id, so songs are also
+ * compared by their loudness, length and name (src/net/similarity.ts): the same recording again is
+ * refused (an admin can add it anyway), and the admin page lists what may be the same song twice.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readSoundwave, writeSoundwave } from '../../src/storage/soundwaveFile.ts';
-import { STREAM_QUALITIES, type SharedSong, type StreamQuality } from '../../src/net/protocol.ts';
+import { STREAM_QUALITIES, type DuplicatePair, type SharedSong, type StreamQuality } from '../../src/net/protocol.ts';
+import { coarseEnergy, likeness, nameKey, type Fingerprint } from '../../src/net/similarity.ts';
 import { Refusal } from './accounts.ts';
 import type { Config } from './config.ts';
 import type { Store, UserRow } from './db.ts';
@@ -68,6 +73,11 @@ export class Songs {
         uid TEXT,
         hash TEXT
       );
+      CREATE TABLE IF NOT EXISTS not_duplicates (
+        a TEXT NOT NULL,
+        b TEXT NOT NULL,
+        PRIMARY KEY (a, b)
+      );
       CREATE TABLE IF NOT EXISTS reports (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         song TEXT NOT NULL,
@@ -109,6 +119,84 @@ export class Songs {
     return this.store.db.prepare('SELECT * FROM songs WHERE id = ?').get(id) as SongRow | undefined;
   }
 
+  /** Each song's fingerprint, read from its charts once. */
+  private prints = new Map<string, Fingerprint>();
+
+  private static fingerprintOf(meta: { title?: unknown; artist?: unknown; duration?: unknown }, analysis: unknown): Fingerprint {
+    const a = (analysis as { data?: { energy?: unknown; energyHop?: unknown } } | null)?.data;
+    const energy = Array.isArray(a?.energy) && typeof a.energyHop === 'number' ? coarseEnergy(a.energy as number[], a.energyHop) : [];
+    return {
+      energy,
+      duration: typeof meta.duration === 'number' ? meta.duration : 0,
+      title: nameKey(typeof meta.title === 'string' ? meta.title : ''),
+      artist: nameKey(typeof meta.artist === 'string' ? meta.artist : ''),
+    };
+  }
+
+  private fingerprint(id: string): Fingerprint {
+    let fp = this.prints.get(id);
+    if (!fp) {
+      try {
+        const charts = JSON.parse(readFileSync(join(this.dirs.charts, `${id}.json`), 'utf8')) as {
+          meta: Record<string, unknown>;
+          analysis: unknown;
+        };
+        fp = Songs.fingerprintOf(charts.meta, charts.analysis);
+      } catch {
+        const r = this.row(id);
+        fp = { energy: [], duration: r?.duration ?? 0, title: nameKey(r?.title ?? ''), artist: nameKey(r?.artist ?? '') };
+      }
+      this.prints.set(id, fp);
+    }
+    return fp;
+  }
+
+  /** The songs here that `fp` is like, most alike first. */
+  private like(fp: Fingerprint, except?: string): { row: SongRow; kind: 'same' | 'likely'; score: number }[] {
+    const rows = this.store.db
+      .prepare('SELECT * FROM songs WHERE duration BETWEEN ? AND ?')
+      .all(fp.duration - 6, fp.duration + 6) as unknown as SongRow[];
+    return rows
+      .filter((r) => r.id !== except)
+      .map((row) => ({ row, match: likeness(fp, this.fingerprint(row.id)) }))
+      .filter((x): x is { row: SongRow; match: { kind: 'same' | 'likely'; score: number } } => !!x.match)
+      .map(({ row, match }) => ({ row, ...match }))
+      .sort((a, b) => (a.kind === b.kind ? b.score - a.score : a.kind === 'same' ? -1 : 1));
+  }
+
+  /**
+   * Songs on the server that may be the same song twice, for the owner and moderators to look at:
+   * every pair alike enough, but those already said not to be.
+   */
+  duplicates(actor: UserRow): DuplicatePair[] {
+    if (!canModerate(actor)) throw new Refusal(403, 'Only the owner and moderators look for duplicates.');
+    const rows = this.store.db
+      .prepare('SELECT s.*, u.name AS name FROM songs s LEFT JOIN users u ON u.id = s.uploader ORDER BY s.duration')
+      .all() as unknown as (SongRow & { name: string | null })[];
+    const ok = new Set(
+      (this.store.db.prepare('SELECT a, b FROM not_duplicates').all() as { a: string; b: string }[]).map((p) => `${p.a}/${p.b}`),
+    );
+    const pairs: DuplicatePair[] = [];
+    // Sorted by length, each song is only compared with those close to it in length.
+    for (let i = 0; i < rows.length; i++)
+      for (let j = i + 1; j < rows.length && rows[j].duration - rows[i].duration <= 6; j++) {
+        const [a, b] = [rows[i], rows[j]].sort((x, y) => (x.id < y.id ? -1 : 1));
+        if (ok.has(`${a.id}/${b.id}`)) continue;
+        const match = likeness(this.fingerprint(a.id), this.fingerprint(b.id));
+        if (match) pairs.push({ a: this.shared(a), b: this.shared(b), ...match });
+      }
+    return pairs.sort((x, y) => (x.kind === y.kind ? y.score - x.score : x.kind === 'same' ? -1 : 1));
+  }
+
+  /** The owner or a moderator says two songs are not the same: the pair is not listed again. */
+  notDuplicates(actor: UserRow, a: unknown, b: unknown) {
+    if (!canModerate(actor)) throw new Refusal(403, 'Only the owner and moderators look for duplicates.');
+    if (typeof a !== 'string' || typeof b !== 'string' || !this.row(a) || !this.row(b))
+      throw new Refusal(404, 'That song is not on this server.');
+    const [x, y] = [a, b].sort();
+    this.store.db.prepare('INSERT OR IGNORE INTO not_duplicates (a, b) VALUES (?, ?)').run(x, y);
+  }
+
   private copyPath(id: string, quality: Exclude<StreamQuality, 'high'>) {
     return join(this.dirs.songs, `${id}.${quality}.soundwave`);
   }
@@ -139,7 +227,7 @@ export class Songs {
    * Takes a shared `.soundwave` file. The song's id is worked out here from its audio, so nobody can
    * share a song under another's id; on a charts-only server the audio is then thrown away.
    */
-  async share(user: UserRow, body: Buffer): Promise<SharedSong> {
+  async share(user: UserRow, body: Buffer, force = false): Promise<SharedSong> {
     // The owner and moderators build the server's library whatever players may share.
     const curator = canModerate(user);
     if (this.sharing === 'off' && !curator)
@@ -156,6 +244,11 @@ export class Songs {
       .digest('hex');
     const had = this.row(id);
     if (had) return this.shared({ ...had, name: this.store.userById(had.uploader ?? '')?.name });
+    // The same recording in another file is not taken twice (an admin may add it anyway).
+    const fp = Songs.fingerprintOf(c.meta, c.analysis ?? null);
+    const twin = this.like(fp).find((x) => x.kind === 'same');
+    if (twin && !(force && curator))
+      throw new Refusal(409, `This song is already on the server as "${twin.row.title}" by ${twin.row.artist}.`);
     const keepAudio = curator || this.sharing === 'songs';
     const size = keepAudio ? body.length : 0;
     const used = (this.store.db.prepare('SELECT COALESCE(SUM(size), 0) AS n FROM songs WHERE uploader = ?').get(user.id) as { n: number })
@@ -281,6 +374,7 @@ export class Songs {
     this.store.db
       .prepare('UPDATE songs SET title = ?, artist = ?, hash = ? WHERE id = ?')
       .run(title, artist, this.fileHash(id, !!r.audio), id);
+    this.prints.delete(id);
     this.store.log({
       at: this.now(),
       actor: actor.id,
@@ -299,6 +393,8 @@ export class Songs {
     if (r.uploader !== actor.id && !mod) throw new Refusal(403, 'Only whoever shared a song, and the moderators, can remove it.');
     this.store.db.prepare('DELETE FROM songs WHERE id = ?').run(id);
     this.store.db.prepare('DELETE FROM reports WHERE song = ?').run(id);
+    this.store.db.prepare('DELETE FROM not_duplicates WHERE a = ? OR b = ?').run(id, id);
+    this.prints.delete(id);
     for (const p of [
       join(this.dirs.songs, `${id}.soundwave`),
       this.copyPath(id, 'medium'),

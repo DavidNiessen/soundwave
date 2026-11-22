@@ -11939,6 +11939,39 @@ a.btn {
   border-radius: var(--r-m);
   background: var(--well);
 }
+/* Possible duplicates: the two songs side by side, what makes them alike above, what to do below. */
+.dup-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.6rem 1rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+}
+.dup-pair > .admin-role,
+.dup-pair > .admin-actions {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+.dup-side {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+.dup-list {
+  gap: 0.6rem;
+}
+.dup-found {
+  margin: 0;
+  padding-left: 1.2rem;
+  text-align: left;
+}
+@media (max-width: 760px) {
+  .dup-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .admin-rows.compact .admin-row {
   min-height: 2.8rem;
   padding-left: 0.6rem;

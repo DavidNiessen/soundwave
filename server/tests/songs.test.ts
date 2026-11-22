@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { WebSocket } from 'ws';
-import { PROTOCOL_VERSION, type ServerInfo, type ServerMessage, type Session, type SharedSong } from '../../src/net/protocol.ts';
+import {
+  PROTOCOL_VERSION,
+  type DuplicatePair,
+  type ServerInfo,
+  type ServerMessage,
+  type Session,
+  type SharedSong,
+} from '../../src/net/protocol.ts';
 import { readSoundwave, writeSoundwave } from '../../src/storage/soundwaveFile.ts';
 import { startServer, type RunningServer } from '../src/app.ts';
 import { DEFAULTS, type Config } from '../src/config.ts';
@@ -232,6 +239,38 @@ describe('shared songs', () => {
     expect(a.got.find((m) => m.type === 'you')).toMatchObject({ you: { name: 'Ana', role: 'moderator' } });
     o.ws.close();
     a.ws.close();
+  });
+
+  it('refuse the same recording in another file, and list possible duplicates for the admin', async () => {
+    await start({ songSharing: 'songs' });
+    const owner = await signUp('Owner', { invite: server.accounts.ownerCode });
+    const ana = await signUp('Ana');
+    // Two files of one song (other bytes, the same loudness), and another song as long.
+    const energy = Array.from({ length: 1800 }, (_, i) => 0.5 + 0.3 * Math.sin(i / 37) + (i % 400 < 200 ? 0.2 : 0));
+    const other = Array.from({ length: 1800 }, (_, i) => 0.5 + 0.3 * Math.cos(i / 11));
+    const file = async (seed: number, title: string, loud: number[]) => {
+      const audio = new Uint8Array(5000).map((_, i) => (i * seed) % 251);
+      const f = await writeSoundwave({
+        meta: { title, artist: 'Band', duration: 180, fileName: 'song.mp3' },
+        analysis: { version: 1, data: { energy: loud, energyHop: 0.1 } },
+        audio: new Blob([audio], { type: 'audio/mpeg' }),
+      });
+      return new Uint8Array(await f.arrayBuffer());
+    };
+    expect((await api('POST', '/songs', await file(3, 'Song', energy), ana.access)).status).toBe(200);
+    expect((await api('POST', '/songs', await file(4, 'Another', other), ana.access)).status).toBe(200);
+    const twice = await api<{ error: string }>('POST', '/songs', await file(5, 'Song (FLAC)', energy), ana.access);
+    expect(twice.status).toBe(409);
+    expect(twice.body.error).toContain('already on the server as "Song"');
+    // A player cannot force it in; an admin can, and then it is listed as a duplicate.
+    expect((await api('POST', '/songs?force=1', await file(5, 'Song (FLAC)', energy), ana.access)).status).toBe(409);
+    expect((await api('POST', '/songs?force=1', await file(5, 'Song (FLAC)', energy), owner.access)).status).toBe(200);
+    expect((await api('GET', '/mod/duplicates', undefined, ana.access)).status).toBe(403);
+    const pairs = await api<DuplicatePair[]>('GET', '/mod/duplicates', undefined, owner.access);
+    expect(pairs.body.map((p) => [p.kind, [p.a.title, p.b.title].sort()])).toEqual([['same', ['Song', 'Song (FLAC)']]]);
+    // Said to differ, the pair is not listed again.
+    expect((await api('POST', '/mod/duplicates/ok', { a: pairs.body[0].a.id, b: pairs.body[0].b.id }, owner.access)).status).toBe(200);
+    expect((await api<DuplicatePair[]>('GET', '/mod/duplicates', undefined, owner.access)).body).toEqual([]);
   });
 
   it('do not pass a party’s songs on where the owner turned that off', async () => {

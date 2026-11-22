@@ -170,6 +170,7 @@ export const COMMANDS: Command[] = [
     { id: 'admin.rotation', label: 'Showdown rotation', key: 'Digit4' },
     { id: 'admin.log', label: 'Moderation log', key: 'Digit5' },
     { id: 'admin.reports', label: 'Reported songs', key: 'Digit6' },
+    { id: 'admin.duplicates', label: 'Possible duplicates', key: 'Digit7' },
     { id: 'admin.add', label: 'Add songs to the server library', key: 'KeyA', pad: 'b3' },
     { id: 'admin.sort', label: 'Sort the server library another way', key: 'KeyS', pad: 'b2' },
   ]),
