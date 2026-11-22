@@ -352,7 +352,7 @@ class OnlineClient {
    * back to itself with the code. Either way the code is traded with the secret kept here
    * (`finishBrowserSignIn`).
    */
-  async signInWithBrowser(mode: 'signin' | 'signup') {
+  async signInWithBrowser(mode: 'signin' | 'signup', invite = this.state.invite ?? undefined) {
     const server = this.state.server;
     if (!server) throw new Error('Connect to a server first.');
     const random = (n: number) => base64url(crypto.getRandomValues(new Uint8Array(n)));
@@ -371,7 +371,7 @@ class OnlineClient {
       challenge,
       state,
       mode,
-      ...(this.state.invite ? { invite: this.state.invite } : {}),
+      ...(invite ? { invite } : {}),
     })}`;
     if (desktop) {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -563,6 +563,13 @@ class OnlineClient {
 
   moderate(action: 'kick' | 'ban' | 'unban' | 'role' | 'reset-password', body: Record<string, unknown>) {
     return this.request<{ ok?: boolean; password?: string }>(`/mod/${action}`, { body, auth: true });
+  }
+  /** An admin steps down to moderator or player (never the server's last admin). */
+  async stepDown(role: 'moderator' | 'player') {
+    const me = this.state.account;
+    if (!me) return;
+    await this.moderate('role', { name: me.name, role });
+    this.set({ account: { ...me, role } });
   }
   /** Every player on the server, for the admin's list (owner and moderators). */
   users() {

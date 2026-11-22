@@ -237,6 +237,24 @@ describe('Showdown in a run', () => {
     });
   });
 
+  it('halves the streak multiplier under a Drain, overdrive doubling what is left; older runs keep the ×2 cap', () => {
+    const session = new GameSession(chart());
+    session.streak = 40; // ×5
+    session.setRule(4, 0);
+    expect(session.multiplier).toBe(3);
+    session.overdriveActive = true;
+    expect(session.multiplier).toBe(6);
+    session.overdriveActive = false;
+    session.streak = 0;
+    expect(session.multiplier).toBe(1);
+    // A run recorded before the halving capped the whole multiplier, and is judged that way still.
+    session.streak = 40;
+    session.setRule(2, 0);
+    expect(session.multiplier).toBe(2);
+    session.setRule(0, 0);
+    expect(session.multiplier).toBe(5);
+  });
+
   it('spends the whole charge on a Strike, and none without a quarter meter', () => {
     const c = chart();
     const session = new GameSession(c);

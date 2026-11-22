@@ -350,7 +350,7 @@ export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, 
       </div>
       {mark && (
         <p className={`showdown-note replay-mark ${mark.kind}`} key={mark.key} role="status">
-          {mark.kind === 'strike' ? 'Strike!' : 'Struck: fog, and the multiplier held at ×2'}
+          {mark.kind === 'strike' ? 'Strike!' : 'Struck: fog, and the multiplier halved'}
         </p>
       )}
 

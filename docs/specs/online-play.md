@@ -13,7 +13,8 @@ Decisions made while building, which override what follows:
   3.3b, the challenge endpoints in section 6 and milestone 10 no longer apply. Leaderboards, Watch and shared
   replays stay.
 - **Showdown, as built:** Strike has no button of its own. With hits on, the overdrive button strikes when the board
-  shows someone above the player to aim at; first place, or a player with nobody to aim at, gets overdrive. Rests need
+  shows someone above the player to aim at, and the charge starts the striker's own overdrive as well; first place, or
+  a player with nobody to aim at, gets overdrive alone. Rests need
   no rule of their own: charge only comes from completing phrases, which a rest has none of. "The server's rotation" is
   a song list the owner and moderators set (`GET`/`POST /showdown/rotation`). Showdown runs are not posted to the
   leaderboards, since hits shape them. Players level at a cut all stay.
@@ -45,8 +46,9 @@ Decisions made while building, which override what follows:
   board, sink for a player who is out, and glow red under a hit. Every Strike is seen by everyone: it flies as a
   bolt from the striker's podium to the target, who shakes and flashes as it lands.
 - **Showdown hits are Fog and Drain together**, with no choice: every hit lays wavy, shimmering bands over the highway
-  from just past the strike line to the horizon (far notes are hard to read, the strike line stays clear) and holds the
-  multiplier at ×2 for as long as it lasts. The setting _Showdown hits reach me as_ (4.1, 5.x) is not built.
+  from just past the strike line to the horizon (far notes are hard to read, the strike line stays clear) and halves
+  the streak's multiplier for as long as it lasts (×4 is ×2; overdrive still doubles what is left). Runs recorded
+  before this held the multiplier at ×2 and are judged that way still. The setting _Showdown hits reach me as_ (4.1, 5.x) is not built.
 - **Shared songs live in the library**, not on a screen of their own: where the server takes songs, its songs the
   player lacks are listed under the player's own, to stream (fetched and held for the session, never stored) or
   download, as Settings → Online → _Songs from the server_ says (the same choice for a party's songs). A player's

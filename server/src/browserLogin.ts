@@ -72,7 +72,7 @@ export function readRequest(p: URLSearchParams): LoginRequest {
     challenge: p.get('challenge') ?? '',
     state: p.get('state') ?? '',
     mode: p.get('mode') === 'signup' ? 'signup' : 'signin',
-    invite: p.get('invite') ?? '',
+    invite: inviteCode(p.get('invite') ?? ''),
   };
 }
 
@@ -172,6 +172,8 @@ export function loginPage(config: Config, r: LoginRequest, error: string | null 
   const hidden = (['redirect', 'challenge', 'state', 'mode'] as const)
     .map((k) => `<input type="hidden" name="${k}" value="${esc(r[k])}">`)
     .join('');
+  // Signing in keeps the invite the game brought, so it is still there on the way to making an account.
+  const keepInvite = !signup && r.invite ? `<input type="hidden" name="invite" value="${esc(r.invite)}">` : '';
   const modeNote = {
     public: 'Anyone can make an account here.',
     password: 'Making an account here needs the server’s password, or an invite.',
@@ -183,12 +185,12 @@ export function loginPage(config: Config, r: LoginRequest, error: string | null 
           ? `<label>The server’s password<input type="password" name="serverPassword" autocomplete="off"></label>`
           : ''
       }
-      ${
+      <label>${config.mode === 'invite' ? 'Your invite link or code' : 'An invite link or code (if you have one)'}<input name="invite" value="${esc(r.invite)}" autocomplete="off" spellcheck="false"${config.mode === 'invite' ? ' required' : ''}></label>
+      <p class="note">${
         r.invite
-          ? `<input type="hidden" name="invite" value="${esc(r.invite)}"><p class="note">Your invite lets you in.</p>`
-          : `<label>${config.mode === 'invite' ? 'Your invite link or code' : 'An invite link or code (if you have one)'}<input name="invite" autocomplete="off" spellcheck="false"${config.mode === 'invite' ? ' required' : ''}></label>
-             <p class="note">Setting up this server? Enter the set-up code it printed when it first started: it makes you its owner.</p>`
-      }`
+          ? 'Filled in from your invite link: it lets you in.'
+          : 'Setting up this server? Enter the set-up code it printed when it first started: it makes you its owner.'
+      }</p>`
     : '';
   const body = `
 <h1>${signup ? 'Make an account' : 'Sign in'}</h1>
@@ -198,7 +200,7 @@ export function loginPage(config: Config, r: LoginRequest, error: string | null 
   <a href="${esc(keep('signup'))}"${signup ? ' aria-current="page"' : ''}>I’m new here</a>
 </nav>
 <form method="post" action="/login">
-  ${hidden}
+  ${hidden}${keepInvite}
   ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
   ${signup ? `<p class="note">${modeNote}</p>` : ''}
   <label>Name<input name="name" value="${esc(name)}" autocomplete="username" maxlength="24" required autofocus spellcheck="false" autocapitalize="off"></label>

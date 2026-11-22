@@ -469,20 +469,30 @@ export function App() {
   const server = useSyncExternalStore(serverSongs.subscribe, serverSongs.snapshot);
   const partyLibrary = useMemo(() => {
     const ids = Object.keys(held);
-    if (!ids.length) return byId;
+    const streamed = Object.values(server.held);
+    if (!ids.length && !streamed.length) return byId;
     const all = new Map(byId);
     for (const id of ids) if (!all.has(id)) all.set(id, held[id].meta);
+    for (const song of streamed) if (!all.has(song.id)) all.set(song.id, song);
     return all;
-  }, [byId, held]);
+  }, [byId, held, server.held]);
   /** Per song, the parts it hardly has: they are not offered for playing. */
   const thin: ThinParts = useMemo(() => Object.fromEntries(Object.entries(status).map(([id, s]) => [id, s.thin])), [status]);
-  // Songs that were removed leave the setlist with them.
+  // Songs that were removed leave the setlist with them. A streamed song stays while it is held (it
+  // is gone once the game closes, and leaves the setlist then).
   useEffect(() => {
     if (!songs.length) return;
-    const kept = pruneSetlist(setlist, new Set(songs.map((s) => s.id)));
+    const kept = pruneSetlist(setlist, new Set([...songs.map((s) => s.id), ...Object.keys(server.held)]));
     if (kept.length !== setlist.length) setSetlist(kept);
-  }, [songs, setlist, setSetlist]);
-  const setSongs_ = useMemo(() => setlist.map((id) => byId.get(id)).filter((s): s is SongMeta => !!s), [setlist, byId]);
+  }, [songs, setlist, setSetlist, server.held]);
+  const setSongs_ = useMemo(
+    () => setlist.map((id) => byId.get(id) ?? server.held[id]).filter((s): s is SongMeta => !!s),
+    [setlist, byId, server.held],
+  );
+  /** A song the player can play: from the library (analysed, with notes), or streamed from the server. */
+  const playable = (id: string) => (byId.has(id) && canPlay(analysisStatus[id])) || !!server.held[id];
+  const setlistRef = useRef(setlist);
+  setlistRef.current = setlist;
   const played = useMemo(() => new Set(scores.map((s) => s.songId)), [scores]);
 
   /** Adds audio files and .soundwave song files to the library. Resolves to the songs they hold. */
@@ -688,8 +698,7 @@ export function App() {
   }, [takesDrops, importFiles]);
 
   const toggle = (song: SongMeta) => {
-    if (!setlist.includes(song.id) && !canPlay(analysisStatus[song.id]))
-      return toast('No notes were found in this song, so it cannot go in a set.');
+    if (!setlist.includes(song.id) && !playable(song.id)) return toast('No notes were found in this song, so it cannot go in a set.');
     if (!setlist.includes(song.id) && setlist.length >= SET_MAX)
       return toast(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
     setSetlist(toggleSong(setlist, song.id));
@@ -700,7 +709,7 @@ export function App() {
     details: (song) => setSheet(song),
     addToSet: (list) => {
       const next = [...setlist];
-      for (const song of list) if (next.length < SET_MAX && !next.includes(song.id) && canPlay(analysisStatus[song.id])) next.push(song.id);
+      for (const song of list) if (next.length < SET_MAX && !next.includes(song.id) && playable(song.id)) next.push(song.id);
       if (next.length !== setlist.length) setSetlist(next);
       if (list.some((song) => !next.includes(song.id))) toast(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
     },
@@ -1047,7 +1056,10 @@ export function App() {
     }
   };
 
-  /** Watches a run from a server's board, on the song when the library has it. */
+  /**
+   * Watches a run from a server's board: with the song's music from the library, else streamed from
+   * the server's library where it keeps the song, else without music.
+   */
   const watchRun = (scoreId: string) => {
     menuPulse('launch');
     const back = view;
@@ -1069,7 +1081,13 @@ export function App() {
         kept: false,
         duration: chart.duration,
       };
-      const buffer = byId.has(r.songId) ? await loadSongBuffer(r.songId).catch(() => null) : null;
+      let buffer = byId.has(r.songId) || serverSongs.snapshot().held[r.songId] ? await loadSongBuffer(r.songId).catch(() => null) : null;
+      const shared = buffer ? undefined : serverSongs.snapshot().list.find((x) => x.id === r.songId && x.audio);
+      if (shared)
+        buffer = await serverSongs
+          .stream(shared)
+          .then(() => loadSongBuffer(r.songId))
+          .catch(() => null);
       return {
         name: 'replay',
         meta,
@@ -1147,7 +1165,7 @@ export function App() {
   partyStartRef.current = (start) => {
     const song = online.snapshot().party?.set[start.songIndex];
     if (!start.chart || !song) return;
-    const meta = byId.get(song.id) ?? partySongs.songs()[song.id]?.meta;
+    const meta = byId.get(song.id) ?? partySongs.songs()[song.id]?.meta ?? serverSongs.snapshot().held[song.id];
     const chart = cleanChart(start.chart);
     // A party song still open from before (the party moved on without this player) gives way to the new one.
     const v = viewRef.current;
@@ -1283,9 +1301,14 @@ export function App() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [server.ready, server.list, songs]);
-  /** A server song pressed in the library: streamed and opened to play, or downloaded, as the player chose. */
+  /**
+   * A server song pressed in the library: streamed and put in the setlist (pressed again, taken out),
+   * or downloaded into the library, as the player chose. Either way the player stays where they are,
+   * picking songs, whether for themselves or for a party.
+   */
   const playServerSong = async (song: SharedSong) => {
     try {
+      if (setlistRef.current.includes(song.id)) return setSetlist(setlistRef.current.filter((id) => id !== song.id));
       if (settingsRef.current.serverSongs === 'download') {
         const got = await importFiles([await serverSongs.download(song)]);
         if (!got.length) return;
@@ -1295,14 +1318,16 @@ export function App() {
         toast(`"${got[0].title}" is in your library.`);
         return;
       }
+      if (setlistRef.current.length >= SET_MAX) return toast(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
       await serverSongs.stream(song);
-      setView({ name: 'lobby', ids: [song.id], from: 'library' });
+      const now = setlistRef.current;
+      if (now.includes(song.id)) return;
+      if (now.length >= SET_MAX) return toast(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
+      setSetlist([...now, song.id]);
     } catch (e) {
       toast((e as Error).message);
     }
   };
-  /** A song the player can play: from the library (analysed, with notes), or streamed from the server. */
-  const playable = (id: string) => (byId.has(id) && canPlay(analysisStatus[id])) || !!server.held[id];
   // A party's songs reach every player by themselves: the host's game sends a song someone lacks,
   // and the games without it download it from the server, held for the party or kept in the
   // library (src/net/partySongs.ts).
@@ -1319,11 +1344,11 @@ export function App() {
       serverOn: !!onlineState.info?.partySongs,
       share: settings.shareSongs,
       keep: settings.serverSongs === 'download',
-      has: (id) => byId.has(id),
+      has: (id) => byId.has(id) || !!serverSongs.snapshot().held[id],
       file: (id) => songFile(id),
       add: (file) => partyAdd.current(file),
     });
-  }, [onlineState.party, onlineState.account, onlineState.info, settings.shareSongs, settings.serverSongs, byId]);
+  }, [onlineState.party, onlineState.account, onlineState.info, settings.shareSongs, settings.serverSongs, byId, server.held]);
 
   /** A party's song is over: the score is kept here as any other, and the party gets it. */
   const finishPartySong = (run: Run, results: Results, inputs?: ReplayInputs) => {
@@ -1733,6 +1758,7 @@ export function App() {
               ? {
                   songs: server.list.filter((x) => !byId.has(x.id)),
                   busy: server.busy,
+                  held: server.held,
                   stream: settings.serverSongs === 'stream',
                   sharing: settings.shareLibrary,
                   canShare: !!serverSharing,

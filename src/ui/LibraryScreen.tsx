@@ -62,7 +62,9 @@ export interface ServerLibrary {
   songs: SharedSong[];
   /** Songs being fetched now. */
   busy: Record<string, true>;
-  /** Pressing one streams it (true) or downloads it into the library. */
+  /** Songs streamed and held now: they can be in the setlist. */
+  held: Record<string, SongMeta>;
+  /** Pressing one streams it into the setlist (true) or downloads it into the library. */
   stream: boolean;
   /** The player's songs are shared to the server. */
   sharing: boolean;
@@ -177,7 +179,7 @@ export function LibraryScreen({
 
   const byId = useMemo(() => new Map(songs.map((s) => [s.id, s])), [songs]);
   const current = (currentId && byId.get(currentId)) || shown[0] || null;
-  const picked = setlist.map((id) => byId.get(id)).filter((s): s is SongMeta => !!s);
+  const picked = setlist.map((id) => byId.get(id) ?? server?.held[id]).filter((s): s is SongMeta => !!s);
   const setTime = formatTime(picked.reduce((t, s) => t + s.duration, 0));
 
   // The song the player is on plays its preview, and only while they are on it.
@@ -517,19 +519,30 @@ export function LibraryScreen({
             <li className="song-list-head" aria-hidden>
               <Cloud strokeWidth={ICON_STROKE} />
               On {server.name} · {serverShown.length} {serverShown.length === 1 ? 'song' : 'songs'}
-              <span className="dim">{server.stream ? 'Press one to stream it' : 'Press one to download it'}</span>
+              <span className="dim">{server.stream ? 'Press one to stream it into your setlist' : 'Press one to download it'}</span>
             </li>
           )}
           {server &&
             serverShown.map((x) => {
               const busy = !!server.busy[x.id];
+              const slot = setlist.indexOf(x.id);
+              const full = setlist.length >= SET_MAX && slot < 0;
               return (
-                <li key={x.id} className="song-item server-song">
+                <li key={x.id} className={`song-item server-song ${slot >= 0 ? 'in-set' : ''}`}>
                   <button
                     type="button"
                     className="song-row"
                     disabled={busy}
-                    aria-label={`${x.title} by ${x.artist}, on the server${x.by ? `, shared by ${x.by}` : ''}. Press to ${server.stream ? 'stream and play it' : 'download it'}.`}
+                    aria-pressed={server.stream ? slot >= 0 : undefined}
+                    aria-label={`${x.title} by ${x.artist}, on the server${x.by ? `, shared by ${x.by}` : ''}. ${
+                      !server.stream
+                        ? 'Press to download it.'
+                        : slot >= 0
+                          ? `In the setlist at ${slot + 1}. Press to remove.`
+                          : full
+                            ? 'The setlist is full.'
+                            : 'Press to stream it into the setlist.'
+                    }`}
                     onClick={() => server.onPlay(x)}
                   >
                     <Cover title={x.title} />
@@ -544,9 +557,13 @@ export function LibraryScreen({
                     <span className="server-song-act">
                       {busy ? (
                         <span className="dim">Fetching…</span>
+                      ) : server.stream && slot >= 0 ? (
+                        <>
+                          <Check strokeWidth={ICON_STROKE} aria-hidden /> In set · {slot + 1}
+                        </>
                       ) : server.stream ? (
                         <>
-                          <Play strokeWidth={ICON_STROKE} aria-hidden /> Stream
+                          <Plus strokeWidth={ICON_STROKE} aria-hidden /> Stream
                         </>
                       ) : (
                         <>

@@ -212,6 +212,27 @@ describe('accounts', () => {
     expect(await app.text()).toMatch(/soundwave:\/\/auth\?code=/);
   });
 
+  it('fills in the invite the game brought on the browser’s sign-up page, and takes a whole invite link', async () => {
+    await start({ mode: 'invite' });
+    const verifier = randomBytes(32).toString('base64url');
+    const challenge = createHash('sha256').update(verifier).digest('base64url');
+    const ask = { redirect: 'http://localhost:5173/', challenge, state: 'state-123' };
+    const code = server.accounts.ownerCode!;
+    const link = `${server.url}/join?invite=${code}`;
+    // Sign-in mode carries the invite along, so making an account after has it still.
+    const signin = await (await fetch(`${server.url}/login?${new URLSearchParams({ ...ask, invite: link })}`)).text();
+    expect(signin).toContain(`name="invite" value="${code}"`);
+    const signup = await (await fetch(`${server.url}/login?${new URLSearchParams({ ...ask, mode: 'signup', invite: link })}`)).text();
+    expect(signup).toMatch(new RegExp(`<input name="invite" value="${code}"`));
+    const made = await fetch(`${server.url}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ ...ask, mode: 'signup', name: 'Owner', password: 'correct horse', invite: link }),
+      redirect: 'manual',
+    });
+    expect(made.status).toBe(303);
+  });
+
   it('asks for the server password in password mode', async () => {
     await start({ mode: 'password', password: 'letmein' });
     expect((await api('POST', '/auth/signup', { name: 'Robin', password: 'correct horse', serverPassword: 'nope' })).status).toBe(403);
@@ -231,6 +252,31 @@ describe('accounts', () => {
     expect(theirs.status).toBe(200);
     await signUp('Friend of friend', { invite: theirs.body.code });
     expect((await api('POST', '/auth/signup', { name: 'Late', password: 'correct horse', invite: inv.body.code })).status).toBe(403);
+  });
+
+  it('lets an admin name admins, who only step down themselves, and keeps one admin always', async () => {
+    await start();
+    const first = await signUp('First', { invite: server.accounts.ownerCode });
+    const second = await signUp('Second');
+    // Alone, the first admin cannot step down.
+    expect((await api('POST', '/mod/role', { name: 'First', role: 'player' }, first.access)).status).toBe(409);
+    expect((await api('POST', '/mod/role', { name: 'Second', role: 'owner' }, first.access)).status).toBe(200);
+    const users = await api<UserEntry[]>('GET', '/mod/users', undefined, second.access);
+    expect(users.body.map((u) => [u.name, u.role])).toEqual([
+      ['First', 'owner'],
+      ['Second', 'owner'],
+    ]);
+    // Neither admin can change or ban the other.
+    expect((await api('POST', '/mod/role', { name: 'First', role: 'player' }, second.access)).status).toBe(403);
+    expect((await api('POST', '/mod/ban', { name: 'Second' }, first.access)).status).toBe(403);
+    // With two, either can step down, and then the other is the last.
+    expect((await api('POST', '/mod/role', { name: 'First', role: 'moderator' }, first.access)).status).toBe(200);
+    expect((await api('POST', '/mod/role', { name: 'Second', role: 'player' }, second.access)).status).toBe(409);
+    const log = await api<{ action: string; target: string }[]>('GET', '/mod/audit', undefined, second.access);
+    expect(log.body.slice(0, 2).map((l) => [l.action, l.target])).toEqual([
+      ['role moderator', 'First'],
+      ['role admin', 'Second'],
+    ]);
   });
 
   it('bans, logs it, keeps the banned out, and exports what it holds', async () => {

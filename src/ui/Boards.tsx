@@ -15,6 +15,7 @@ import { keysOf } from '../input/bindings';
 import { TAB_EVENT } from '../input/menuNav';
 import { menuPulse } from '../input/rumble';
 import { online } from '../net/client';
+import { serverSongs } from '../net/serverSongs';
 import type { Board, RankLine } from '../net/protocol';
 import { chartId } from '../net/runs';
 import type { SongMeta } from '../storage/db';
@@ -469,6 +470,9 @@ function SharedRuns({ library, onWatch, onProblem }: { library: SongMeta[]; onWa
     void online.sharedRuns().then(setShared, (e) => (setShared([]), problemRef.current((e as Error).message)));
   }, []);
   const have = (id: string) => library.some((x) => x.id === id);
+  const server = useSyncExternalStore(serverSongs.subscribe, serverSongs.snapshot);
+  /** Where the music of a run comes from: the library, streamed from the server, or none. */
+  const music = (id: string) => (have(id) || server.held[id] ? 'own' : server.list.some((x) => x.id === id && x.audio) ? 'stream' : 'none');
   if (!shared) return <p className="hint boards-empty">Loading the shared replays…</p>;
   if (!shared.length) return <p className="hint boards-empty">Nobody has shared a replay yet. Share yours from a song’s board.</p>;
   return (
@@ -483,7 +487,11 @@ function SharedRuns({ library, onWatch, onProblem }: { library: SongMeta[]; onWa
               </span>
               <span className="board-name">
                 {r.name}
-                <span className="dim"> · {r.title}</span>
+                <span className="dim">
+                  {' '}
+                  · {r.title}
+                  {music(r.songId) === 'stream' ? ' · streams the song' : music(r.songId) === 'none' ? ' · no music' : ''}
+                </span>
               </span>
               <Stars n={r.stars} />
               <span className="board-pill">{Math.round(r.accuracy * 100)}%</span>
@@ -495,8 +503,13 @@ function SharedRuns({ library, onWatch, onProblem }: { library: SongMeta[]; onWa
                 <button
                   type="button"
                   className="btn small"
-                  disabled={!have(r.songId)}
-                  title={have(r.songId) ? undefined : 'You don’t have this song'}
+                  title={
+                    {
+                      own: undefined,
+                      stream: 'Streams the song from the server',
+                      none: 'Plays without music: neither you nor the server has this song',
+                    }[music(r.songId)]
+                  }
                   onClick={() => onWatch(r.scoreId)}
                 >
                   <Eye strokeWidth={ICON_STROKE} aria-hidden />

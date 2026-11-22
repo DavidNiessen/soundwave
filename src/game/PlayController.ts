@@ -16,7 +16,7 @@ import { GamepadInput, KeyboardInput, TouchInput, type InputHandlers } from './i
 import { WINDOWS } from './judge';
 import { GOLD_STARS, MAX_MULTIPLIER, multiplierFor, STREAK_PER_MULTIPLIER } from './scoring';
 import { highwaySpeed, type Settings } from './settings';
-import { DRAIN_CAP } from '../net/protocol';
+import { DRAIN_RULE } from '../net/protocol';
 import { stageVenue } from './stages';
 import type { VenueId } from '../render/venues/catalog';
 
@@ -398,7 +398,7 @@ export class PlayController {
     this.pressOverdrive();
   };
 
-  /** The overdrive button: overdrive, or in a Showdown a Strike when there is someone to strike. */
+  /** The overdrive button: overdrive, and in a Showdown a Strike too when there is someone to strike. */
   private pressOverdrive() {
     if (this.phase !== 'playing' || !this.recorder || this.menu) return;
     const s = this.session;
@@ -406,9 +406,16 @@ export class PlayController {
     this.recorder.overdrive(this.engine.time());
   }
 
-  /** Showdown: the Strike found its target, so the charge is spent now. */
+  /**
+   * Showdown: the Strike found its target. The charge goes into overdrive as any press's would, so a
+   * Strike boosts the striker too; the Strike is marked on the run after it (a no-op for the score
+   * once overdrive is on, kept for the replay's marks).
+   */
   spendCharge() {
-    if (this.phase === 'playing') this.recorder?.strike(this.engine.time());
+    if (this.phase !== 'playing' || !this.recorder) return;
+    const t = this.engine.time();
+    this.recorder.overdrive(t);
+    this.recorder.strike(t);
   }
 
   /** Showdown: nobody could be struck, so the press was an overdrive after all. */
@@ -418,7 +425,7 @@ export class PlayController {
 
   /**
    * Showdown: a hit on this player from `at` (performance.now ms) for `ms`. Every hit is both: Fog
-   * hazes the far highway and Drain holds the multiplier at ×2, for as long as it lasts.
+   * hazes the far highway and Drain halves the streak's multiplier, for as long as it lasts.
    */
   hit(at: number, ms: number) {
     this.addEffect(at, ms, 'fog');
@@ -470,7 +477,7 @@ export class PlayController {
   /** Records the multiplier's rule at song time `at`, if it changed. */
   private recordRule(at: number) {
     const on = (kind: string) => this.effects.some((e) => e.state === 1 && e.kind === kind);
-    const rule = on('drain') ? DRAIN_CAP : 0;
+    const rule = on('drain') ? DRAIN_RULE : 0;
     if (rule === this.ruleNow) return;
     this.ruleNow = rule;
     this.recorder?.rule(rule, at);

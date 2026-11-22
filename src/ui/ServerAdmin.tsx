@@ -529,8 +529,9 @@ const BAN_LENGTHS: [number | null, string][] = [
 ];
 
 /**
- * The server's players: a list to search, and for the one picked, what the owner or a moderator
- * may do to them (remove, ban, lift a ban; the owner also names moderators and resets passwords).
+ * The server's players: a list to search, and for the one picked, what an admin or a moderator
+ * may do to them (remove, ban, lift a ban; an admin also names admins and moderators and resets
+ * passwords). An admin is changed only by themselves: they can step down, unless they are the last.
  * What cannot be undone is asked first.
  */
 function Players({ users, owner, me, onChange }: { users: UserEntry[] | null; owner: boolean; me: string; onChange(): void }) {
@@ -553,7 +554,7 @@ function Players({ users, owner, me, onChange }: { users: UserEntry[] | null; ow
       },
       (e) => setNote((e as Error).message),
     );
-  // The owner is moderated by nobody, moderators only by the owner, and nobody by themselves.
+  // Admins are moderated by nobody, moderators only by an admin, and nobody by themselves.
   const reachable = (u: UserEntry) => u.name !== me && u.role !== 'owner' && (owner || u.role === 'player');
 
   return (
@@ -599,13 +600,41 @@ function Players({ users, owner, me, onChange }: { users: UserEntry[] | null; ow
               {user.bannedUntil !== null &&
                 ` · banned ${user.bannedUntil > 1e15 ? 'for good' : `until ${new Date(user.bannedUntil).toLocaleString()}`}${user.banReason ? `: ${user.banReason}` : ''}`}
             </p>
-            {!reachable(user) ? (
+            {user.name === me && owner ? (
+              <>
+                <p className="hint">That is you. You can step down; the server keeps at least one admin, so make someone else one first.</p>
+                <div className="admin-actions">
+                  {(['moderator', 'player'] as const).map((role) => (
+                    <button
+                      key={role}
+                      type="button"
+                      className="btn"
+                      onClick={() =>
+                        setAsking({
+                          title: `Step down to ${role}?`,
+                          hint: 'You stop being an admin now, and only another admin can make you one again.',
+                          yes: 'Step down',
+                          run: () =>
+                            void online.stepDown(role).then(
+                              () => (setNote(`You are a ${role} now.`), onChange()),
+                              (e) => setNote((e as Error).message),
+                            ),
+                        })
+                      }
+                    >
+                      <Shield strokeWidth={ICON_STROKE} aria-hidden />
+                      Step down to {role}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : !reachable(user) ? (
               <p className="hint">
                 {user.name === me
                   ? 'That is you.'
                   : user.role === 'owner'
-                    ? 'Nobody moderates the server’s admin.'
-                    : 'Only the server’s admin moderates moderators.'}
+                    ? 'Admins are not moderated, and only step down themselves.'
+                    : 'Only an admin moderates moderators.'}
               </p>
             ) : (
               <>
@@ -669,18 +698,34 @@ function Players({ users, owner, me, onChange }: { users: UserEntry[] | null; ow
                   )}
                   {owner && (
                     <>
-                      <button
-                        type="button"
-                        className="btn"
-                        onClick={() =>
-                          user.role === 'moderator'
-                            ? act('role', { role: 'player' }, `${user.name} is a player again.`)
-                            : act('role', { role: 'moderator' }, `${user.name} is a moderator.`)
-                        }
-                      >
-                        <Shield strokeWidth={ICON_STROKE} aria-hidden />
-                        {user.role === 'moderator' ? 'Make a player again' : 'Make a moderator'}
-                      </button>
+                      <div className="admin-role-pick">
+                        <span className="dim">Role</span>
+                        <div className="choice-pair" role="radiogroup" aria-label={`${user.name}’s role`}>
+                          {(['player', 'moderator', 'owner'] as const).map((role) => (
+                            <button
+                              key={role}
+                              type="button"
+                              role="radio"
+                              aria-checked={user.role === role}
+                              className={`choice ${user.role === role ? 'on' : ''}`}
+                              onClick={() => {
+                                if (user.role === role) return;
+                                const set = () =>
+                                  act('role', { role }, `${user.name} is ${role === 'owner' ? 'an admin' : `a ${role}`} now.`);
+                                if (role !== 'owner') return set();
+                                setAsking({
+                                  title: `Make ${user.name} an admin?`,
+                                  hint: 'They can do everything you can: run the server, its library and its players, and name admins. Only they can step down again.',
+                                  yes: 'Make an admin',
+                                  run: set,
+                                });
+                              }}
+                            >
+                              {ROLE[role]}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                       <button
                         type="button"
                         className="btn"

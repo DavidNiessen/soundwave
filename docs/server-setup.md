@@ -166,7 +166,9 @@ choose "Make an account", and enter this set-up code as the invite. It works onc
 4. You come back to the game signed in, as the server's **owner** (shown as Admin). The code is
    spent: nobody else can use it.
 
-The owner can do everything on the **Admin** page (`M` on the Online tab), and names moderators.
+The owner can do everything on the **Admin** page (`M` on the Online tab), and names moderators
+and more admins. Every admin can do all of it; an admin can only step down themselves, and the
+server always keeps at least one.
 
 ## 4. Invite your friends
 
@@ -239,8 +241,9 @@ copy `soundwave.db` together with its `-wal` and `-shm` files.
 **Moderation.** On the **Admin** page:
 
 - **Players**: find anyone, remove them, ban them (an hour, a day, a week or for good), lift a ban.
-  The owner can also name moderators and reset a forgotten password (there are no emails: you pass
-  the new one on).
+  An admin can also set anyone's role (Player, Moderator or Admin) and reset a forgotten password
+  (there are no emails: you pass the new one on). Admins are not moderated: each steps down
+  themselves (pick yourself in the list), and the last admin cannot.
 - **Moderation log**: everything the owner and moderators did, with the reasons.
 - **Reported songs**: songs players asked to have taken down, to remove everywhere at once.
 - **Server library** and **Showdown rotation**: the songs everyone can play, and the set a

@@ -35,8 +35,8 @@ export const HIT_PROTECTION_MS = 6_000;
 export const HIT_REPEAT_MS = 30_000;
 /** The most players who can have one player as their next target. */
 export const MAX_ATTACKERS = 2;
-/** Drain: the multiplier a hit caps the score's multiplier at. */
-export const DRAIN_CAP = 2;
+/** Drain: a hit halves the streak's multiplier (GameSession's RULE.halve); overdrive still doubles what is left. */
+export const DRAIN_RULE = 4;
 /** The fewest players in the last song of a Showdown: a final of four. */
 export const SHOWDOWN_FINAL = 4;
 

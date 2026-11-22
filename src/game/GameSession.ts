@@ -21,11 +21,13 @@ const NoteState = { Pending: 0, Hit: 1, Missed: 2 } as const;
 /** How early a sustain may be released and still count as complete. */
 const SUSTAIN_RELEASE_GRACE = 0.12;
 /**
- * Playing together changes the multiplier by a rule, a few bits: Showdown's Drain caps it (the
- * cap, 0..3, in the low bits). The rule is part of a run (replay.ts), so a re-judged score includes
- * it. Bits beyond the cap are ignored (an older version's band mode used them).
+ * Playing together changes the multiplier by a rule, a few bits. Showdown's Drain halves the
+ * streak's multiplier (`halve`; overdrive still doubles what is left), and in runs from before that
+ * it capped the whole multiplier (`cap`, 0..3, in the low bits), which those runs keep doing. The rule
+ * is part of a run (replay.ts), so a re-judged score includes it. Bits beyond these are ignored (an
+ * older version's band mode used them).
  */
-export const RULE = { cap: 3 } as const;
+export const RULE = { cap: 3, halve: 4 } as const;
 
 /** Fraction of the overdrive meter a completed phrase awards. */
 export const PHRASE_REWARD = 0.25;
@@ -86,7 +88,7 @@ export class GameSession {
   /** The score of a flawless run without overdrive: what the stars (and Showdown's shares) are measured against. */
   readonly par: number;
   /**
-   * What playing together does to the multiplier now (see `RULE`): Showdown's Drain caps it.
+   * What playing together does to the multiplier now (see `RULE`): Showdown's Drain halves it.
    */
   private rule = 0;
   /** The share of par that turns the stars gold on this chart (it depends on how much overdrive the chart offers). */
@@ -140,7 +142,8 @@ export class GameSession {
   }
 
   get multiplier() {
-    const m = multiplierFor(this.streak) * (this.overdriveActive ? OVERDRIVE_FACTOR : 1);
+    const streak = multiplierFor(this.streak);
+    const m = (this.rule & RULE.halve ? Math.max(1, Math.ceil(streak / 2)) : streak) * (this.overdriveActive ? OVERDRIVE_FACTOR : 1);
     const cap = this.rule & RULE.cap;
     return cap > 0 ? Math.min(cap, m) : m;
   }
@@ -258,7 +261,7 @@ export class GameSession {
   /** From song time t the multiplier follows `rule` (see `RULE`; 0 for none). */
   setRule(rule: number, t = this.now) {
     this.reach(t);
-    this.rule = rule & RULE.cap;
+    this.rule = rule & (RULE.cap | RULE.halve);
   }
 
   /**

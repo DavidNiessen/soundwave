@@ -172,7 +172,8 @@ both for you. nginx needs the WebSocket headers: see
 
 ## Moderation
 
-The owner names moderators; both remove players from the server, ban them (for a time or for good)
+The owner names more admins (role `owner`: each can do all the first one can) and moderators;
+admins and moderators remove players from the server, ban them (for a time or for good)
 and read the log of every moderation action, which records who did what to whom, when and why. In
 the game this is all on the **Admin** page (`M` on the Online tab): the players list, invites, the
 server library, the Showdown rotation, the moderation log and reported songs. The API takes a
@@ -184,12 +185,14 @@ signed-in owner's or moderator's access token:
 | `POST /mod/kick`                   | `{ name, reason? }`                                         |
 | `POST /mod/ban`                    | `{ name, hours?, reason? }` (no hours: for good)            |
 | `POST /mod/unban`                  | `{ name, reason? }`                                         |
-| `POST /mod/role` (owner)           | `{ name, role: "moderator" \| "player" }`                   |
+| `POST /mod/role` (owner)           | `{ name, role: "owner" \| "moderator" \| "player" }`        |
 | `POST /mod/reset-password` (owner) | `{ name }`: answers a new password to pass on               |
 | `GET /mod/audit`                   | The moderation log                                          |
 | `GET /mod/reports`                 | Reported songs                                              |
 
-Moderators can only act on players, and the owner on anyone but themselves.
+Moderators can only act on players, and admins on anyone but admins. An admin steps down only
+themselves (`/mod/role` with their own name), and never as the server's last admin; the last admin's
+account cannot be deleted either.
 
 ## What it keeps
 

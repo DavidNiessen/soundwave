@@ -137,7 +137,7 @@ export function PlayHud({ title, artist, position, total, chart, settings, onPau
           <span className="hud-mult" data-hud="mult" data-level="1">
             ×1
           </span>
-          {/* A Showdown hit's Drain holds the multiplier down while it lasts. */}
+          {/* A Showdown hit's Drain halves the multiplier while it lasts. */}
           <span className="hud-hold" aria-hidden>
             <Lock strokeWidth={ICON_STROKE} />
           </span>

@@ -121,6 +121,11 @@ export class Store {
     return !!this.db.prepare("SELECT 1 FROM users WHERE role = 'owner' LIMIT 1").get();
   }
 
+  /** How many admins (owners) the server has. */
+  owners(): number {
+    return (this.db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'owner'").get() as { n: number }).n;
+  }
+
   setRole(id: string, role: Role) {
     this.db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, id);
   }

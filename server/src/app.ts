@@ -18,7 +18,7 @@ import { zip } from './zip.ts';
 import { Rotation } from './rotation.ts';
 import { Scores } from './scores.ts';
 import { joinPage } from './joinPage.ts';
-import { donePage, inviteCode, LoginCodes, loginPage, readRequest, stopPage, validRequest } from './browserLogin.ts';
+import { donePage, LoginCodes, loginPage, readRequest, stopPage, validRequest } from './browserLogin.ts';
 import { Songs } from './songs.ts';
 import { PartySongs } from './partySongs.ts';
 import { clientMessage } from './validate.ts';
@@ -113,7 +113,8 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     send,
     clock,
     () => rotation.songs(),
-    (id) => partySongs.has(id),
+    // A song in the server's own library is there for a party as much as one a host sent.
+    (id) => partySongs.has(id) || songs.hasFile(id),
   );
   /** What each player online says they are doing. */
   const activity = new Map<string, string>();
@@ -288,6 +289,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       (req, _b, _ip, [id]) => {
         const u = me(req);
         if (!parties.inSet(u.id, id)) throw new Refusal(403, 'Only the players of a party with this song in its set can get it.');
+        if (!partySongs.has(id) && songs.hasFile(id)) return new Binary('application/x-soundwave', songs.file(id), `${id}.soundwave`);
         return new Binary('application/x-soundwave', partySongs.get(id), `${id}.soundwave`);
       },
     ],
@@ -473,7 +475,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
           ? await accounts.signUp({
               name,
               password,
-              ...(params.get('invite')?.trim() ? { invite: inviteCode(params.get('invite')!) } : {}),
+              ...(r.invite ? { invite: r.invite } : {}),
               ...(params.get('serverPassword') ? { serverPassword: params.get('serverPassword')! } : {}),
             })
           : await accounts.signIn(name, password);

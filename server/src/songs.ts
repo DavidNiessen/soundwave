@@ -191,6 +191,11 @@ export class Songs {
     return rows.map((r) => this.shared(r));
   }
 
+  /** Whether the server keeps this song's whole file (its audio too), for a party to fetch. */
+  hasFile(id: string): boolean {
+    return !!this.row(id)?.audio;
+  }
+
   /** A whole song file to download, where the server keeps audio. */
   file(id: string): Buffer {
     const r = this.row(id);

@@ -47,7 +47,7 @@ Signed in, the Online tab is your place on the server: start a party (`C`) or jo
 A party picks a mode:
 
 - **Versus**: everyone plays the same set at the same moment, each on their own part and difficulty, with a live board beside the highway and the set's standings at the end.
-- **Showdown**: scores count as a share of each chart's par, the lowest players go out after each song, and the overdrive button **strikes** the player above you (their highway fogs and their multiplier is held down for a while). The last one standing wins. It plays on a ring of podiums, one per player in their look.
+- **Showdown**: scores count as a share of each chart's par, the lowest players go out after each song, and the overdrive button **strikes** the player above you as it starts your own overdrive (their highway fogs and their multiplier is halved for a while). The last one standing wins. It plays on a ring of podiums, one per player in their look.
 
 Songs are matched by their audio. A song a player lacks reaches them by itself through the server, and the server's own library shows in everyone's music library, to stream or download. When the host starts a song, every player gets the host's chart for their part, and the song starts at the same moment for all: each game measures its clock against the server's. Your hits are judged on your own machine, so the connection's delay never touches your timing; only scores travel.
 

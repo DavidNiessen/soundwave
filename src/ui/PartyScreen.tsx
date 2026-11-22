@@ -150,7 +150,7 @@ export const MODES: Record<
     binding: 'party.showdown',
     steps: [
       ['Stay above the cut', 'After each song the lowest scores go out.'],
-      ['Strike the player above', 'Your overdrive hazes their highway and holds them at ×2.'],
+      ['Strike the player above', 'Your overdrive boosts you, hazes their highway and halves their multiplier.'],
       ['Be the last one in', 'The final leaves one winner.'],
     ],
   },
@@ -252,7 +252,8 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [serverPassword, setServerPassword] = useState('');
-  const [code, setCode] = useState('');
+  /** The invite field: filled in from an invite link the game was opened with, or typed. */
+  const [code, setCode] = useState(s.invite ?? '');
   const [busy, setBusy] = useState<'connect' | 'account' | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   /** The player chose to type another address while one is known. */
@@ -263,7 +264,7 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
   const [waiting, setWaiting] = useState<'signin' | 'signup' | null>(null);
   const browser = (how: 'signin' | 'signup') =>
     run('account', async () => {
-      await online.signInWithBrowser(how);
+      await online.signInWithBrowser(how, invite);
       setWaiting(how);
     });
   const info = changing ? null : s.info;
@@ -288,6 +289,7 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
   useEffect(() => {
     if (!s.invite) return;
     setHow('up');
+    setCode(s.invite);
     setChanging(false);
     if (s.server) setAddress(s.server.replace(/^https?:\/\//, ''));
   }, [s.invite, s.server]);
@@ -469,8 +471,8 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
                 </div>
                 {how === 'up' && (
                   <p className="hint connect-note">
-                    {s.invite
-                      ? 'Your invite lets you in.'
+                    {s.invite && code.trim() === s.invite
+                      ? 'Your invite is filled in below: it lets you in.'
                       : {
                           public: 'Anyone can make an account here.',
                           password: 'Making an account here needs the server’s password, or an invite.',
@@ -516,7 +518,7 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
                     </span>
                   </label>
                 )}
-                {how === 'up' && !s.invite && (
+                {how === 'up' && (
                   <label className="meta-field">
                     <span className="dim">
                       {mode === 'invite' ? 'Your invite link or code' : 'An invite link or code (if you have one)'}

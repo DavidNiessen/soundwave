@@ -136,7 +136,8 @@ export class Accounts {
   }
 
   deleteAccount(user: UserRow) {
-    if (user.role === 'owner') throw new Refusal(409, 'The owner’s account cannot be deleted: it runs the server.');
+    if (user.role === 'owner' && this.store.owners() <= 1)
+      throw new Refusal(409, 'The last admin’s account cannot be deleted: it runs the server. Make someone else an admin first.');
     this.store.deleteUser(user.id);
   }
 
@@ -147,7 +148,7 @@ export class Accounts {
    */
   makeInvite(by: UserRow, uses: unknown, hours: unknown): Invite {
     const mod = canModerate(by.role);
-    if (this.config.mode !== 'invite' && !mod) throw new Refusal(403, 'Only the owner and moderators can make invites here.');
+    if (this.config.mode !== 'invite' && !mod) throw new Refusal(403, 'Only admins and moderators can make invites here.');
     const code = randomToken(12);
     const n = !mod ? 1 : uses === null ? null : typeof uses === 'number' && Number.isInteger(uses) && uses > 0 ? Math.min(uses, 10_000) : 1;
     const h = !mod ? 24 * 7 : hours === null ? null : typeof hours === 'number' && hours > 0 ? Math.min(hours, 24 * 365) : 24 * 7;
@@ -167,12 +168,12 @@ export class Accounts {
 
   /** The account a moderation action is about, which the actor must outrank. */
   private target(actor: UserRow, name: unknown): UserRow {
-    if (!canModerate(actor.role)) throw new Refusal(403, 'Only the owner and moderators can do that.');
+    if (!canModerate(actor.role)) throw new Refusal(403, 'Only admins and moderators can do that.');
     const user = typeof name === 'string' ? this.store.userByName(name.trim()) : undefined;
     if (!user) throw new Refusal(404, 'There is no player with that name on this server.');
     if (user.id === actor.id) throw new Refusal(409, 'That is your own account.');
     if (user.role === 'owner' || (user.role === 'moderator' && actor.role !== 'owner'))
-      throw new Refusal(403, 'Moderators can only be moderated by the owner, and the owner by nobody.');
+      throw new Refusal(403, 'Moderators can only be moderated by an admin, and admins by nobody.');
     return user;
   }
 
@@ -201,18 +202,31 @@ export class Accounts {
     return user;
   }
 
-  /** The owner names or un-names a moderator. */
+  /**
+   * An admin names another admin (role "owner": every admin can do all the first one can) or a
+   * moderator, or makes a player of a moderator. An admin can only be stepped down by themselves,
+   * so no admin can push the others out, and never the last one: a server always has an admin.
+   */
   setRole(actor: UserRow, name: unknown, role: unknown) {
-    if (actor.role !== 'owner') throw new Refusal(403, 'Only the owner names moderators.');
-    if (role !== 'moderator' && role !== 'player') throw new Refusal(400, 'The role is "moderator" or "player".');
+    if (actor.role !== 'owner') throw new Refusal(403, 'Only an admin names admins and moderators.');
+    if (role !== 'owner' && role !== 'moderator' && role !== 'player')
+      throw new Refusal(400, 'The role is "owner", "moderator" or "player".');
+    const self = typeof name === 'string' && this.store.userByName(name.trim())?.id === actor.id;
+    if (self) {
+      if (role === 'owner') return;
+      if (this.store.owners() <= 1) throw new Refusal(409, 'You are the only admin. Make someone else an admin before you step down.');
+      this.store.setRole(actor.id, role);
+      this.store.log({ at: this.now(), actor: actor.id, action: `role ${role}`, target: actor.id, reason: 'Stepped down' });
+      return;
+    }
     const user = this.target(actor, name);
     this.store.setRole(user.id, role);
-    this.store.log({ at: this.now(), actor: actor.id, action: `role ${role}`, target: user.id, reason: '' });
+    this.store.log({ at: this.now(), actor: actor.id, action: `role ${role === 'owner' ? 'admin' : role}`, target: user.id, reason: '' });
   }
 
   /** The owner resets a forgotten password (there are no emails): a new one to pass on. */
   async resetPassword(actor: UserRow, name: unknown): Promise<string> {
-    if (actor.role !== 'owner') throw new Refusal(403, 'Only the owner resets passwords.');
+    if (actor.role !== 'owner') throw new Refusal(403, 'Only an admin resets passwords.');
     const user = this.target(actor, name);
     const password = randomToken(9);
     this.store.setHash(user.id, await hashPassword(password));
@@ -223,7 +237,7 @@ export class Accounts {
 
   /** Every account, for the admin's list of players (bans still running shown as such). */
   users(actor: UserRow, online: (id: string) => boolean): UserEntry[] {
-    if (!canModerate(actor.role)) throw new Refusal(403, 'Only the owner and moderators can see the players.');
+    if (!canModerate(actor.role)) throw new Refusal(403, 'Only admins and moderators can see the players.');
     const now = this.now();
     return this.store.users().map((u) => {
       const banned = u.banned_until !== null && u.banned_until > now;
@@ -239,7 +253,7 @@ export class Accounts {
   }
 
   audit(actor: UserRow) {
-    if (!canModerate(actor.role)) throw new Refusal(403, 'Only the owner and moderators can read the moderation log.');
+    if (!canModerate(actor.role)) throw new Refusal(403, 'Only admins and moderators can read the moderation log.');
     const name = (id: string) => this.store.userById(id)?.name ?? '(deleted account)';
     return this.store
       .auditLog()
