@@ -66,7 +66,9 @@ async function showScreenVideo(id: string | null) {
   }
   if (!id) return void sendScreenFrame(null);
   const url = await mediaUrl(id);
-  if (videoId !== id || !url) return;
+  if (videoId !== id) return;
+  // The file is gone (deleted, or the stage came from another device): the screens' own pictures again.
+  if (!url) return void sendScreenFrame(null);
   const v = document.createElement('video');
   v.muted = true;
   v.loop = true;
