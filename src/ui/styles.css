@@ -29,6 +29,14 @@
      a boosted stage would show as the panes suddenly changing colour then. */
   --glass-blur: blur(22px);
   --violet: #5b3ee0;
+  /* What the menus lay over the stage: a glow from below, two lights from the top corners and a
+     wash from top to bottom. */
+  --menu-glow: #3a1f9c;
+  --veil-1: rgb(93 242 214 / 0.2);
+  --veil-2: rgb(124 92 255 / 0.4);
+  --veil-top: rgb(14 8 40 / 0.86);
+  --veil-mid: rgb(26 14 84 / 0.66);
+  --veil-bottom: rgb(14 8 40 / 0.9);
 
   /* Ink, tinted from the night */
   --ink: #f6f3ff;
@@ -78,6 +86,7 @@
   font-family: var(--font);
   font-stretch: 100%;
 }
+
 :root[data-input='touch'] {
   --target: 3rem;
   --bar-h: 4.5rem;
@@ -668,7 +677,7 @@ img.cover {
 .menu {
   position: absolute;
   inset: 0;
-  background: radial-gradient(120% 90% at 50% 120%, #3a1f9c, transparent 62%), var(--night);
+  background: radial-gradient(120% 90% at 50% 120%, var(--menu-glow), transparent 62%), var(--night);
 }
 .menu > .layer {
   position: absolute;
@@ -692,14 +701,58 @@ img.cover {
 .stage3d.on {
   opacity: 1;
 }
+/* A venue loading behind the menus: the one before stays on screen, and this says what is coming. */
+.stage-loading {
+  position: absolute;
+  right: calc(var(--gutter) + var(--safe-r));
+  bottom: calc(var(--bar-h) + var(--safe-b) + 0.75rem);
+  z-index: 39;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.85rem 0.45rem 0.6rem;
+  border-radius: 999px;
+  background: rgb(9 5 28 / 0.78);
+  color: var(--ink-2);
+  font-size: 0.85rem;
+  font-weight: 700;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(0.4rem);
+  transition:
+    opacity 0.3s,
+    transform 0.3s var(--ease);
+}
+.stage-loading.on {
+  opacity: 1;
+  transform: none;
+}
+.stage-loading-ring {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  border: 2px solid rgb(255 255 255 / 0.18);
+  border-top-color: var(--pink);
+  animation: stage-loading-spin 0.8s linear infinite;
+}
+@keyframes stage-loading-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stage-loading-ring {
+    animation-duration: 2.4s;
+  }
+}
 /* The night between the stage and the panels, with a band of aurora light across the top. */
 .veil {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(70% 46% at 78% -6%, rgb(93 242 214 / 0.2), transparent 70%),
-    radial-gradient(60% 50% at 12% -10%, rgb(124 92 255 / 0.4), transparent 70%),
-    linear-gradient(180deg, rgb(14 8 40 / 0.86), rgb(26 14 84 / 0.66) 46%, rgb(14 8 40 / 0.9));
+    radial-gradient(70% 46% at 78% -6%, var(--veil-1), transparent 70%),
+    radial-gradient(60% 50% at 12% -10%, var(--veil-2), transparent 70%),
+    linear-gradient(180deg, var(--veil-top), var(--veil-mid) 46%, var(--veil-bottom));
   transition: opacity 0.5s;
 }
 .menu:is(.on-lobby, .on-results, .on-summary) .veil {
@@ -708,7 +761,7 @@ img.cover {
 /* The settings over a paused song: a menu of their own on top of it, under the action bar. */
 .settings-over {
   z-index: 35;
-  background: rgb(14 8 40 / 0.5);
+  background: color-mix(in srgb, var(--night) 50%, transparent);
   animation: fade-in 0.2s var(--ease);
 }
 /* The paused song shows through them, held still; its pause menu steps out of the way meanwhile. */
@@ -4865,8 +4918,8 @@ input.text {
 /* The lanes are read closely: the night behind them is a shade deeper than behind the menus. */
 .menu.on-editor .veil {
   background:
-    radial-gradient(70% 46% at 78% -6%, rgb(93 242 214 / 0.14), transparent 70%),
-    linear-gradient(180deg, rgb(14 8 40 / 0.93), rgb(22 12 72 / 0.84) 46%, rgb(14 8 40 / 0.95));
+    linear-gradient(rgb(0 0 0 / 0.45), rgb(0 0 0 / 0.45)), radial-gradient(70% 46% at 78% -6%, var(--veil-1), transparent 70%),
+    linear-gradient(180deg, var(--veil-top), var(--veil-mid) 46%, var(--veil-bottom));
 }
 
 .editor-head {
@@ -6054,17 +6107,27 @@ a.btn {
   animation: none;
 }
 
-/* The controls: a pane at the right foot of the screen, the scorebox's twin on the other side. */
-.replay-dock {
+/* The controls: a pane at the right foot of the screen, the scorebox's twin on the other side,
+   with the video being made (when one is) standing on top of it. */
+.replay-stack {
   position: absolute;
   right: calc(1.6% + var(--safe-r));
   bottom: calc(3.5% + var(--safe-b));
   z-index: 5;
-  width: clamp(22rem, 30vw, 34rem);
+  width: clamp(21.5rem, 25vw, 27rem);
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
-  padding: 0.7rem 0.8rem 0.75rem;
+  gap: 0.45rem;
+  pointer-events: none;
+}
+.replay-stack > * {
+  pointer-events: auto;
+}
+.replay-dock {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.55rem 0.65rem 0.55rem;
   border-radius: var(--r-l);
   background: var(--panel);
   backdrop-filter: var(--glass-blur);
@@ -6077,23 +6140,80 @@ a.btn {
     opacity 0.3s var(--ease),
     transform 0.4s var(--ease);
 }
-.replay.away .replay-dock {
+.replay.away :is(.replay-dock, .replay-export-box) {
   opacity: 0;
   transform: translateY(0.8rem);
   pointer-events: none;
 }
-:root[data-motion='reduced'] .replay-dock {
+:root[data-motion='reduced'] :is(.replay-dock, .replay-export-box) {
   transition: opacity 0.2s;
 }
-:root[data-motion='reduced'] .replay.away .replay-dock {
+:root[data-motion='reduced'] .replay.away :is(.replay-dock, .replay-export-box) {
   transform: none;
+}
+/* The video being made, while one is: a slim pane over the controls. */
+.replay-export-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.5rem 0.7rem 0.6rem;
+  border-radius: var(--r-l);
+  background: var(--panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-edge),
+    inset 0 1px 0 rgb(255 255 255 / 0.1);
+  animation: rise-in 0.35s var(--ease) backwards;
+  transition:
+    opacity 0.3s var(--ease),
+    transform 0.4s var(--ease);
+}
+.replay-export-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.replay-export-head svg {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  color: var(--pink);
+}
+.replay-export-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85rem;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.replay-export-more {
+  color: var(--ink-3);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+.replay-export-what {
+  color: var(--ink-2);
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.replay-export-bar {
+  height: 4px;
+}
+.replay-export-bar > span {
+  background: linear-gradient(90deg, #b3306f, var(--pink));
 }
 .replay-head {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 0.9rem;
-  padding: 0 0.35rem;
+  gap: 0.7rem;
+  padding: 0 0.3rem;
 }
 /* Back on the left, the video and hiding the controls on the right. */
 .replay-foot {
@@ -6102,7 +6222,7 @@ a.btn {
   align-items: center;
   justify-content: space-between;
   gap: 0.3rem 0.5rem;
-  padding-top: 0.45rem;
+  padding-top: 0.3rem;
   border-top: 1px solid var(--line);
 }
 .replay-foot-end {
@@ -6112,8 +6232,13 @@ a.btn {
 }
 .replay-foot .btn {
   gap: 0.4em;
-  padding-inline: 0.45rem 0.6rem;
-  font-size: 0.9rem;
+  min-height: 2rem;
+  padding-inline: 0.4rem 0.55rem;
+  font-size: 0.8rem;
+}
+/* Where the key or button is shown beside the label, the icon would only repeat it. */
+.replay-foot .btn:has(.keycap-hint, .hint-glyph) > svg.lucide {
+  display: none;
 }
 .replay-what {
   flex: 1;
@@ -6123,7 +6248,7 @@ a.btn {
   min-width: 0;
 }
 .replay-title {
-  font-size: 1.1rem;
+  font-size: 0.95rem;
   font-weight: 800;
   line-height: 1.2;
   white-space: nowrap;
@@ -6132,13 +6257,15 @@ a.btn {
 }
 .replay-sub {
   color: var(--ink-2);
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .replay-time {
+  flex: none;
+  font-size: 0.9rem;
   font-weight: 900;
   font-style: italic;
   font-variant-numeric: tabular-nums;
@@ -6148,16 +6275,19 @@ a.btn {
   color: var(--ink-3);
 }
 .replay-note {
+  padding: 0 0.3rem;
   color: var(--ink-2);
-  font-size: 0.85rem;
-  line-height: 1.35;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The timeline: where the notes are, what has been watched, where notes were missed. Wide enough
    to take a finger, though the line itself is thin. */
 .replay-scrub {
   position: relative;
-  height: 1.7rem;
+  height: 1.35rem;
   margin: 0 0.35rem;
   border-radius: var(--r-s);
   cursor: pointer;
@@ -6223,24 +6353,39 @@ a.btn {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.35rem;
+  margin-top: 1.25rem;
+}
+/* Touch shows no key hints: the buttons sit close under the timeline. */
+:root[data-input='touch'] .replay-transport {
   margin-top: 0.35rem;
 }
 .replay-btn {
-  min-width: var(--target);
-  padding: 0.35rem 0.55rem;
+  min-width: 2.3rem;
+  min-height: 2.3rem;
+  padding: 0.25rem 0.45rem;
+}
+.replay-btn svg {
+  width: 1rem;
+  height: 1rem;
 }
 .replay-play {
-  min-width: calc(var(--target) * 1.5);
+  min-width: 3.3rem;
+}
+:root[data-input='touch'] .replay-btn {
+  min-width: var(--target);
+  min-height: var(--target);
 }
 .replay-play svg {
   fill: currentColor;
 }
-/* Each control's key or button sits on its corner, so the row stays a row of symbols. */
+/* Each control's key or button stands just above it, clear of the focus ring round the control, so
+   the row stays a row of symbols and the hint is never covered. */
 .replay-transport :is(.replay-btn, .icon-btn) > :is(.keycap-hint, .hint-glyph) {
   position: absolute;
-  top: -0.55rem;
-  right: -0.35rem;
+  bottom: calc(100% + 0.45rem);
+  left: 50%;
+  translate: -50% 0;
   z-index: 1;
   pointer-events: none;
 }
@@ -6267,7 +6412,8 @@ a.btn {
 }
 .replay-speed .icon-btn {
   position: relative;
-  width: 2.3rem;
+  width: 2rem;
+  height: 2rem;
   border-radius: 999px;
 }
 .replay-speed .icon-btn:disabled {
@@ -6575,10 +6721,36 @@ a.btn {
   }
 }
 
+/* While videos are being made in the background: a chip on the main menu. */
+.export-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: inset 0 0 0 1px var(--glass-edge);
+  color: var(--ink);
+  font-size: 0.85rem;
+  font-weight: 850;
+  font-style: italic;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.export-chip svg {
+  width: 1rem;
+  height: 1rem;
+  color: var(--pink);
+}
+.export-more {
+  color: var(--ink-3);
+}
+
 /* Narrow screens and touch: the controls run along the foot of the screen, over the deck, and step
    aside while the replay plays. The score moves to the top, as it does for touch. */
 @media (max-width: 760px) {
-  .replay-dock {
+  .replay-stack {
     left: calc(0.6rem + var(--safe-l));
     right: calc(0.6rem + var(--safe-r));
     bottom: calc(0.6rem + var(--safe-b));
@@ -6596,7 +6768,7 @@ a.btn {
     display: none;
   }
 }
-:root[data-input='touch'] .replay-dock {
+:root[data-input='touch'] .replay-stack {
   left: calc(0.6rem + var(--safe-l));
   right: calc(var(--edge, 64px) + 1.6rem + var(--safe-r));
   bottom: calc(0.6rem + var(--safe-b));
@@ -6605,7 +6777,7 @@ a.btn {
   margin-inline: auto;
 }
 @media (max-width: 560px) {
-  :root[data-input='touch'] .replay-dock {
+  :root[data-input='touch'] .replay-stack {
     right: calc(0.6rem + var(--safe-r));
   }
   .replay-transport {
@@ -10592,6 +10764,319 @@ a.btn {
   width: 1.1rem;
   height: 1.1rem;
 }
+
+/* Stage browser                                                                                */
+
+/* The stage is the point here: it shows at full strength, with only a little night at the top
+   for the heading and at the bottom for the cards. */
+.menu:has(.home-body[data-tab='stage']) > .layer {
+  opacity: 1;
+}
+.menu:has(.home-body[data-tab='stage']) .veil {
+  background: linear-gradient(180deg, rgb(14 8 40 / 0.7), transparent 24%, transparent 58%, rgb(14 8 40 / 0.85));
+}
+.home-body[data-tab='stage'] {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.stages {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.stages .stages-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 1rem;
+  position: relative;
+}
+.stage-cards {
+  display: flex;
+  gap: 0.8rem;
+  overflow-x: auto;
+  padding: 0.6rem 0.2rem 0.4rem;
+  scrollbar-width: thin;
+  transition: opacity 0.25s;
+}
+.stages.is-editing .stage-cards {
+  opacity: 0.35;
+}
+.stage-card {
+  flex: 0 0 clamp(9.5rem, 13vw, 12.5rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem 0.5rem 0.65rem;
+  border-radius: var(--r-l);
+  background: var(--panel);
+  color: var(--ink);
+  text-align: left;
+  border: 2px solid transparent;
+  transition:
+    transform 0.22s var(--ease),
+    border-color 0.2s,
+    background 0.2s;
+}
+.stage-card:is(:hover, :focus-visible, .focused) {
+  transform: translateY(-0.3rem);
+  background: var(--raised);
+}
+.stage-card.active {
+  border-color: var(--pink);
+}
+/* A stage at a glance: its wash below, the two beam colours fanning up through it, darker the
+   darker the stage. */
+.stage-swatch {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 10;
+  border-radius: calc(var(--r-l) - 0.3rem);
+  overflow: hidden;
+  background:
+    linear-gradient(rgb(0 0 0 / calc(var(--dark) * 0.85)), rgb(0 0 0 / calc(var(--dark) * 0.85))),
+    radial-gradient(120% 70% at 50% 110%, var(--wash), transparent 70%), #07051a;
+}
+.stage-swatch::before,
+.stage-swatch::after {
+  content: '';
+  position: absolute;
+  bottom: -10%;
+  width: 22%;
+  height: 130%;
+  opacity: calc(0.35 + 0.65 * var(--beams));
+  filter: blur(3px);
+  transform-origin: 50% 100%;
+}
+.stage-swatch::before {
+  left: 24%;
+  background: linear-gradient(0deg, var(--key), transparent 85%);
+  transform: rotate(-18deg);
+}
+.stage-swatch::after {
+  right: 24%;
+  background: linear-gradient(0deg, var(--accent), transparent 85%);
+  transform: rotate(18deg);
+}
+/* A 3D stage's card: its venue, under the stage's own light and beams. The wash colours it from below. */
+.stage-swatch.venue {
+  background: #07051a;
+  box-shadow: inset 0 -2.2rem 2.4rem -1.2rem color-mix(in srgb, var(--wash) 70%, transparent);
+}
+.stage-swatch .venue-picture {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: brightness(calc(1.05 - var(--dark) * 0.7)) saturate(1.1);
+}
+.stage-swatch.venue::before,
+.stage-swatch.venue::after {
+  z-index: 1;
+  mix-blend-mode: screen;
+  opacity: calc(0.15 + 0.45 * var(--beams));
+}
+.stage-swatch.blank {
+  background: var(--well);
+  color: var(--ink-2);
+}
+.stage-swatch.blank::before,
+.stage-swatch.blank::after {
+  display: none;
+}
+.stage-swatch.blank svg {
+  width: 2rem;
+  height: 2rem;
+}
+.stage-cycle {
+  position: relative;
+  z-index: 1;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: rgb(255 255 255 / 0.85);
+  text-shadow: 0 1px 4px rgb(0 0 0 / 0.8);
+}
+.stage-name {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 800;
+  font-size: 1.02rem;
+}
+.stage-name .in-use {
+  width: 1rem;
+  height: 1rem;
+  color: var(--pink);
+}
+.stage-tags {
+  font-size: 0.78rem;
+  color: var(--ink-3);
+  line-height: 1.3;
+}
+.stage-card.new .stage-name {
+  color: var(--ink-2);
+}
+
+/* The editor: a panel on the right, the stage in view beside it. */
+.stage-editor {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(30rem, 46vw);
+  overflow-y: auto;
+  animation: stage-editor-in 0.3s var(--ease) backwards;
+  z-index: 2;
+}
+@keyframes stage-editor-in {
+  from {
+    opacity: 0;
+    transform: translateX(1.5rem);
+  }
+}
+.stage-sheet .set-row {
+  grid-template-columns: minmax(7rem, 0.8fr) 1.2fr;
+}
+/* In the stage's drawers each row says what it does all the time, quietly, so nothing moves when
+   the pointer or the focus passes over the rows. */
+.stage-sheet .set-help {
+  display: block;
+  grid-column: 1 / -1;
+  margin: 0.1rem 0 0.15rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--ink-3);
+  opacity: 0.85;
+}
+.stage-sheet .set-row {
+  transition:
+    background 0.18s var(--ease),
+    box-shadow 0.18s var(--ease);
+}
+.stage-sheet .set-row.active .set-help {
+  color: var(--ink-2);
+  opacity: 1;
+}
+.color-row {
+  display: grid;
+  grid-template-columns: minmax(7rem, 0.8fr) 1.2fr;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.8rem;
+}
+.color-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.color-dot,
+.color-own {
+  width: 1.45rem;
+  height: 1.45rem;
+  border-radius: 50%;
+  border: 2px solid rgb(255 255 255 / 0.25);
+  cursor: pointer;
+  transition:
+    transform 0.15s,
+    border-color 0.15s;
+}
+.color-dot:is(:hover, :focus-visible) {
+  transform: scale(1.15);
+}
+.color-dot.on {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 2px var(--pink);
+}
+.color-own {
+  position: relative;
+  overflow: hidden;
+  background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red);
+}
+.color-own input {
+  position: absolute;
+  inset: -0.5rem;
+  opacity: 0;
+  cursor: pointer;
+}
+.stage-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.8rem;
+}
+.stage-tools .btn svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+@media (max-width: 760px) {
+  .stage-editor {
+    position: relative;
+    width: 100%;
+    flex: 1;
+  }
+}
+
+/* A stage's own background in place of the 3D stage: darkened for the notes in front of it, and
+   swelling a little with the bass. */
+.stage-backdrop {
+  pointer-events: none;
+  overflow: hidden;
+  background: #000;
+}
+.backdrop-fill {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: brightness(calc((1 - var(--dim, 0.35)) * (0.92 + 0.22 * var(--pulse, 0))));
+}
+.menu:has(.home-body[data-tab='stage']) > .stage-backdrop {
+  opacity: 1;
+}
+.stage-swatch.media {
+  background: var(--well);
+}
+.stage-swatch.media::before,
+.stage-swatch.media::after {
+  display: none;
+}
+.stage-swatch.media :is(img, video) {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.stage-swatch .media-icon {
+  position: relative;
+  z-index: 1;
+  width: 1.6rem;
+  height: 1.6rem;
+  color: #fff;
+  filter: drop-shadow(0 1px 4px rgb(0 0 0 / 0.8));
+}
+.stage-note {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0.8rem;
+  color: var(--ink-3);
+  font-size: 0.85rem;
+}
+.stage-note svg {
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+}
 /* What to colour: three cards, each with the colour it has now. */
 .look-slots {
   display: grid;
@@ -11845,4 +12330,821 @@ a.btn {
     grid-template-columns: minmax(0, 1fr);
     align-items: start;
   }
+}
+
+/* Your stages, then the templates: two groups in one row that runs sideways. */
+.stage-cards {
+  gap: 1.6rem;
+  align-items: flex-end;
+}
+.card-group {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.card-group + .card-group {
+  padding-left: 1.6rem;
+  border-left: 1px solid var(--line);
+}
+.card-group-label {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  text-shadow: 0 1px 6px rgb(0 0 0 / 0.7);
+}
+.card-row {
+  display: flex;
+  gap: 0.8rem;
+}
+.stage-card {
+  flex: none;
+  width: clamp(9.5rem, 13vw, 12.5rem);
+}
+
+/* New stage: a wide card with four tiles, each with a picture of what it puts behind the highway. */
+.overlay.card.new-stage-card .dialog {
+  width: min(52rem, 100%);
+}
+.new-stage {
+  padding: clamp(1.1rem, 2.4vw, 1.8rem);
+}
+.new-stage-kicker {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--pink-2);
+}
+.new-stage-title {
+  margin-top: 0.25rem;
+  font-size: clamp(1.25rem, 2.2vw, 1.7rem);
+  line-height: 1.15;
+}
+.new-stage-foot {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: var(--ink-3);
+}
+.start-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.8rem;
+  margin-top: 1.2rem;
+}
+.start-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0 0 0.85rem;
+  overflow: hidden;
+  border-radius: var(--r-l);
+  border: 2px solid transparent;
+  background: var(--raised);
+  color: var(--ink);
+  text-align: left;
+  transition:
+    transform 0.22s var(--ease),
+    border-color 0.2s,
+    background 0.2s;
+}
+.start-option:is(:hover, :focus-visible) {
+  transform: translateY(-3px);
+  border-color: var(--pink);
+  background: var(--raised-hi);
+}
+.start-art {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  margin-bottom: 0.35rem;
+  color: #fff;
+}
+.start-art svg {
+  width: 2.6rem;
+  height: 2.6rem;
+  filter: drop-shadow(0 2px 8px rgb(0 0 0 / 0.5));
+}
+.start-venue .start-art {
+  background:
+    linear-gradient(200deg, transparent 40%, rgb(107 230 255 / 0.55) 41%, transparent 48%),
+    linear-gradient(160deg, transparent 40%, rgb(255 102 194 / 0.55) 41%, transparent 48%),
+    radial-gradient(110% 80% at 50% 115%, #4d33ff, #0c0726 70%);
+}
+.start-video .start-art {
+  background: linear-gradient(135deg, #1b1035, #5b3ee0 55%, #ff4d9d);
+}
+.start-image .start-art {
+  background: radial-gradient(30% 30% at 72% 30%, #ffd23d, transparent 70%), linear-gradient(180deg, #2a2f88, #ff8a3d 75%, #3a1c2a 76%);
+}
+.start-gradient .start-art {
+  background: linear-gradient(160deg, #1a0f4c, #ff4d9d);
+}
+.start-label {
+  padding: 0 0.85rem;
+  font-weight: 800;
+  font-size: 1.05rem;
+}
+.start-help {
+  padding: 0 0.85rem;
+  font-size: 0.8rem;
+  color: var(--ink-3);
+  line-height: 1.35;
+}
+@media (max-width: 760px) {
+  .start-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.more-toggle {
+  align-self: flex-start;
+  margin: 0.2rem 0.8rem 0;
+}
+.more-toggle svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  transition: transform 0.2s;
+}
+.more-toggle.open svg {
+  transform: rotate(180deg);
+}
+.stage-editor {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The editor stands out against a busy stage behind it. */
+.stage-editor {
+  background: rgb(14 8 40 / 0.92);
+  border: 1px solid var(--line);
+  box-shadow: 0 1rem 3rem rgb(0 0 0 / 0.45);
+}
+.btn.quiet-danger {
+  background: var(--well);
+  color: var(--danger);
+}
+.btn.small svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+/* Every template, in a panel beside the stage: a row each, the whole row picks it. */
+.template-panel {
+  gap: 0.2rem;
+}
+.template-head {
+  padding: 0.4rem 0.8rem 0.6rem;
+}
+.template-sub {
+  margin-top: 0.2rem;
+  font-size: 0.85rem;
+  color: var(--ink-3);
+}
+.template-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.template-row {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  border-radius: var(--r-m);
+  transition: background 0.18s;
+}
+.template-row:is(:hover, :focus-within, .shown) {
+  background: var(--row-hi);
+}
+.template-row.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.55rem;
+  bottom: 0.55rem;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--pink);
+}
+.template-use {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.5rem 0.5rem 0.5rem 0.8rem;
+  background: none;
+  color: var(--ink);
+  text-align: left;
+  border-radius: var(--r-m);
+}
+.template-use .stage-swatch {
+  aspect-ratio: 16 / 10;
+}
+.template-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.template-text .stage-name {
+  gap: 0.5rem;
+}
+.template-text .pill {
+  font-size: 0.68rem;
+}
+.template-copy {
+  flex: none;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  margin-right: 0.5rem;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-3);
+  opacity: 0;
+  transition:
+    opacity 0.15s,
+    background 0.15s,
+    color 0.15s;
+}
+.template-row:is(:hover, :focus-within, .shown) .template-copy,
+:root[data-input='touch'] .template-copy {
+  opacity: 1;
+}
+.template-copy:is(:hover, :focus-visible) {
+  background: var(--raised-hi);
+  color: var(--ink);
+}
+.template-copy svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+/* Every card the same size and the same glass, whatever is on it. */
+.stage-card {
+  background: rgb(14 8 40 / 0.78);
+  border: 2px solid rgb(255 255 255 / 0.06);
+}
+.stage-card:is(:hover, :focus-visible, .focused) {
+  background: rgb(36 22 96 / 0.86);
+  border-color: rgb(255 255 255 / 0.18);
+}
+.stage-card.active,
+.stage-card.active:is(:hover, :focus-visible, .focused) {
+  border-color: var(--pink);
+}
+.stage-card .stage-swatch {
+  flex: none;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+}
+.stage-card .stage-name {
+  min-height: 1.3em;
+  line-height: 1.25;
+}
+.stage-card .stage-tags {
+  min-height: 2.6em;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+/* The cards that make or open something: an outlined frame in place of a picture. */
+.stage-swatch.blank {
+  background: rgb(255 255 255 / 0.04);
+  border: 2px dashed rgb(255 255 255 / 0.22);
+  color: var(--ink-2);
+  transition:
+    border-color 0.2s,
+    color 0.2s;
+}
+.stage-card:is(:hover, :focus-visible) .stage-swatch.blank {
+  border-color: var(--pink-2);
+  color: var(--ink);
+}
+.card-group-label {
+  padding-left: 0.2rem;
+}
+
+/* The stage's drawers (its editor, the templates) are the same drawer as a song's details: only the
+   shade over the stage is lighter, so the stage they change stays in view. */
+.stage-drawer .set-section {
+  display: flex;
+  flex-direction: column;
+}
+.stage-drawer .set-heading {
+  margin-bottom: 0.2rem;
+}
+.stage-drawer .color-row,
+.stage-drawer .stage-tools {
+  padding-left: 0.9rem;
+  padding-right: 0.5rem;
+}
+.stage-drawer .more-toggle {
+  margin: 0;
+}
+.stage-drawer .template-list {
+  margin-top: -0.4rem;
+}
+
+/* The stage's drawers scroll smoothly, and their rows keep clear of the drawer's edges. */
+.stage-drawer .dialog {
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+}
+.stage-drawer .sheet-body {
+  padding-bottom: 2rem;
+}
+.stage-drawer .set-row {
+  margin-inline: 0.15rem;
+}
+
+/* The stage's drawers, compact: a smaller heading, tighter rows, and what a row does in one line at
+   the foot (the rows themselves never change size). */
+.stage-drawer .sheet-body {
+  gap: 0.35rem;
+  padding: 1rem 1.1rem 0;
+}
+.stage-drawer .meta-heading {
+  font-size: clamp(1.25rem, 1.8vw, 1.55rem);
+}
+.stage-drawer .meta-heading + .hint {
+  font-size: 0.85rem;
+  margin-top: 0.15rem;
+}
+.stage-drawer .set-heading {
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0.9rem 0 0.25rem 0.9rem;
+}
+.stage-drawer .set-row {
+  min-height: 2.6rem;
+  padding-block: 0.2rem;
+}
+.stage-sheet .set-help {
+  display: none;
+}
+.stage-drawer .color-row {
+  padding-block: 0.3rem;
+}
+.stage-foot {
+  margin-top: 1rem;
+  padding: 0.9rem 0 1.2rem;
+  border-top: 1px solid var(--line);
+}
+.stage-help {
+  min-height: 2.6em;
+  font-size: 0.85rem;
+  line-height: 1.3;
+  color: var(--ink-2);
+}
+
+/* New stage, cleaner: four even tiles, each a soft glow of colour with its symbol, and one line. */
+.overlay.card.new-stage-card .dialog {
+  width: min(44rem, 100%);
+}
+.new-stage {
+  padding: 1.4rem 1.5rem 1.5rem;
+}
+.new-stage-title {
+  font-size: 1.5rem;
+  line-height: 1.1;
+}
+.new-stage-sub {
+  margin-top: 0.3rem;
+  font-size: 0.9rem;
+  color: var(--ink-3);
+}
+.new-stage .start-grid {
+  margin-top: 1.1rem;
+  gap: 0.7rem;
+}
+.new-stage .start-option {
+  gap: 0.2rem;
+  padding: 0 0 0.8rem;
+  background: rgb(255 255 255 / 0.04);
+  border: 1px solid rgb(255 255 255 / 0.08);
+}
+.new-stage .start-option:is(:hover, :focus-visible) {
+  background: rgb(255 255 255 / 0.08);
+  border-color: var(--pink);
+}
+.new-stage .start-art {
+  aspect-ratio: 16 / 10;
+  margin: 0.45rem 0.45rem 0.4rem;
+  border-radius: calc(var(--r-l) - 0.35rem);
+  background: radial-gradient(80% 90% at 50% 100%, var(--tint), transparent 75%), rgb(255 255 255 / 0.03);
+}
+.new-stage .start-art svg {
+  width: 2rem;
+  height: 2rem;
+  filter: none;
+  opacity: 0.95;
+}
+.new-stage .start-venue {
+  --tint: rgb(255 77 157 / 0.55);
+}
+.new-stage .start-video {
+  --tint: rgb(124 92 255 / 0.6);
+}
+.new-stage .start-image {
+  --tint: rgb(255 138 61 / 0.55);
+}
+.new-stage .start-gradient {
+  --tint: rgb(93 242 214 / 0.45);
+}
+.new-stage .start-label {
+  font-size: 1rem;
+}
+.new-stage .start-help {
+  font-size: 0.8rem;
+}
+
+/* The editor's header stays in view: its title, and what the setting in use does. */
+.stage-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -1rem -1.1rem 0;
+  padding: 1rem 3rem 0.7rem 1.1rem;
+  background: var(--panel-solid);
+  border-bottom: 1px solid var(--line);
+}
+.stage-head .stage-help {
+  margin-top: 0.25rem;
+}
+/* Only the row under the pointer (or the focus) is lit: a row focused earlier lets go of its light. */
+.stage-sheet .set-row.is-focus:not(.active) {
+  background: transparent;
+}
+.stage-sheet .set-row.disabled.active {
+  background: rgb(255 255 255 / 0.03);
+}
+
+/* The rainbow dot opens the colour picker; a colour of the player's own shows in its middle. */
+button.color-own {
+  padding: 0;
+}
+.color-own.on::after {
+  content: '';
+  position: absolute;
+  inset: 22%;
+  border-radius: 50%;
+  background: var(--own);
+  box-shadow: 0 0 0 2px rgb(0 0 0 / 0.5);
+}
+.color-own:is(.on, .open) {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 2px var(--pink);
+}
+
+/* The colour picker: opens under its row, smoothly. */
+.color-block.open {
+  margin: 0.2rem 0.15rem 0.5rem;
+  padding-bottom: 0.2rem;
+  border-radius: var(--r-m);
+  background: rgb(255 255 255 / 0.035);
+}
+.color-picker {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.3rem 0.8rem 0.6rem;
+  animation: picker-in 0.22s var(--ease);
+}
+@keyframes picker-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.4rem);
+  }
+}
+.cp-field {
+  position: relative;
+  height: 9.5rem;
+  border-radius: var(--r-m);
+  background: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, var(--hue));
+  cursor: crosshair;
+  touch-action: none;
+}
+.cp-hue {
+  position: relative;
+  height: 1.1rem;
+  border-radius: 999px;
+  background: linear-gradient(to right, #f00, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00);
+  cursor: pointer;
+  touch-action: none;
+}
+.cp-thumb {
+  position: absolute;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.45),
+    0 2px 6px rgb(0 0 0 / 0.5);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition:
+    width 0.15s,
+    height 0.15s;
+}
+.cp-hue .cp-thumb {
+  top: 50%;
+}
+.cp-field:is(:focus-visible, .is-focus) .cp-thumb,
+.cp-hue:is(:focus-visible, .is-focus) .cp-thumb,
+.cp-field:active .cp-thumb,
+.cp-hue:active .cp-thumb {
+  width: 1.45rem;
+  height: 1.45rem;
+}
+.cp-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.cp-preview {
+  flex: none;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: var(--r-m);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.15);
+}
+.cp-hex {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0 0.7rem;
+  height: 2.4rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-weight: 700;
+}
+.cp-hash {
+  color: var(--ink-3);
+}
+.cp-hex input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-transform: uppercase;
+  outline: none;
+}
+.cp-hex:has(input[aria-invalid='true']) {
+  box-shadow: inset 0 0 0 2px var(--danger);
+}
+.cp-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+/* The rainbow dot is a button now: round like the colours beside it, not a button's rounded square. */
+.color-swatches button.color-own,
+.color-swatches button.color-dot {
+  border-radius: 50%;
+  flex: none;
+}
+
+/* The rainbow dot, drawn so it is a circle whatever a button would be: the wheel and the colour of
+   the player's own are inner circles, clipped round; the dot itself only carries the ring. */
+.color-swatches button.color-own {
+  position: relative;
+  overflow: visible;
+  background: none;
+  outline: none;
+  aspect-ratio: 1;
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s,
+    border-color 0.15s;
+}
+.color-swatches button.color-own:is(:hover, :focus-visible) {
+  transform: scale(1.15);
+}
+.color-own.on::after {
+  content: none;
+}
+.own-wheel,
+.own-fill {
+  position: absolute;
+  border-radius: 50%;
+  clip-path: circle(50%);
+  pointer-events: none;
+}
+.own-wheel {
+  inset: 0;
+  background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red);
+}
+.own-fill {
+  inset: 24%;
+  background: var(--own);
+  box-shadow: 0 0 0 2px rgb(0 0 0 / 0.5);
+}
+
+/* The stage cards are the main menu's tiles: the picture edge to edge, the title in the display face
+   and the details under it, no frame; they rise into place one after another, and lift and brighten
+   under the pointer or the focus. The stage in use wears a badge on its picture. */
+.card-row .stage-card {
+  position: relative;
+  width: clamp(10.5rem, 14vw, 13.5rem);
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--r-l);
+  background: var(--panel);
+  animation:
+    tile-rise 0.5s var(--ease-soft) backwards,
+    tile-fade 0.25s ease-out backwards;
+  transition:
+    transform 0.28s var(--ease),
+    background 0.2s;
+}
+.card-row .stage-card:nth-child(2) {
+  animation-delay: 50ms;
+}
+.card-row .stage-card:nth-child(3) {
+  animation-delay: 100ms;
+}
+.card-row .stage-card:nth-child(4) {
+  animation-delay: 150ms;
+}
+.card-row .stage-card:nth-child(n + 5) {
+  animation-delay: 200ms;
+}
+.card-row .stage-card:is(.is-focus, .focused),
+:root[data-input='mouse'] .card-row .stage-card:hover {
+  transform: translateY(-0.4rem);
+  background: var(--raised);
+  border: 0;
+}
+.card-row .stage-card:active {
+  transform: scale(0.98);
+}
+.card-row .stage-card.active {
+  border: 0;
+}
+/* A stage picked for the menu (Ctrl-click, Select): a mint ring, and its mark in the corner the In use badge leaves free. */
+.card-row .stage-card.selected {
+  box-shadow: inset 0 0 0 2px var(--mint);
+}
+.stage-art .select-mark {
+  top: 0.5rem;
+  left: auto;
+  right: 0.5rem;
+  z-index: 2;
+}
+.stage-art {
+  position: relative;
+  display: grid;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  background: var(--deep);
+}
+.card-row .stage-art .stage-swatch {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+.stage-art .mosaic.blank {
+  margin: 0.6rem;
+}
+.stage-art .mosaic.blank svg {
+  width: 2.2rem;
+  height: 2.2rem;
+}
+.card-row .stage-card:is(:hover, .is-focus) .mosaic.dashed {
+  border-color: var(--ink-3);
+  color: var(--ink-2);
+}
+.stage-badge {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.55rem 0.2rem 0.4rem;
+  border-radius: 999px;
+  background: var(--pink);
+  color: var(--pink-ink);
+  font-size: 0.72rem;
+  font-weight: 800;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.35);
+}
+.stage-badge svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+.card-row .stage-card .tile-text {
+  gap: 0.3rem;
+  padding: 0.75rem 0.9rem 0.9rem;
+}
+.stage-title {
+  font-size: clamp(1rem, 1.25vw, 1.2rem);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stage-meta {
+  min-height: 2.5em;
+  font-size: 0.82rem;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.card-group-label {
+  font-stretch: 112%;
+  font-style: italic;
+  font-weight: 900;
+}
+
+/* New stage, like the game's other cards: the display heading, and its four choices as small tiles
+   of the main menu (the picture edge to edge, the title in the display face, lifting on hover). */
+.overlay.card.new-stage-card .dialog {
+  width: min(46rem, 100%);
+}
+.new-stage.pause-card {
+  padding: 1.5rem;
+}
+.new-stage .new-stage-title {
+  font-size: clamp(1.7rem, 3vw, 2.4rem);
+}
+.new-stage .start-grid {
+  margin-top: 0.6rem;
+  gap: 0.75rem;
+}
+.new-stage .start-option {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--r-l);
+  background: var(--panel);
+  animation:
+    tile-rise 0.45s var(--ease-soft) backwards,
+    tile-fade 0.22s ease-out backwards;
+  transition:
+    transform 0.28s var(--ease),
+    background 0.2s;
+}
+.new-stage .start-option:nth-child(2) {
+  animation-delay: 45ms;
+}
+.new-stage .start-option:nth-child(3) {
+  animation-delay: 90ms;
+}
+.new-stage .start-option:nth-child(4) {
+  animation-delay: 135ms;
+}
+.new-stage .start-option:is(.is-focus, :focus-visible),
+:root[data-input='mouse'] .new-stage .start-option:hover {
+  transform: translateY(-0.35rem);
+  background: var(--raised);
+  border: 0;
+}
+.new-stage .start-option:active {
+  transform: scale(0.98);
+}
+.new-stage .start-art {
+  margin: 0;
+  border-radius: 0;
+  aspect-ratio: 4 / 3;
+  background: radial-gradient(90% 100% at 50% 100%, var(--tint), transparent 80%), var(--deep);
+}
+.new-stage .start-art svg {
+  width: 2.3rem;
+  height: 2.3rem;
+}
+.new-stage .tile-text {
+  gap: 0.3rem;
+  padding: 0.75rem 0.9rem 0.9rem;
+}
+.new-stage .start-label {
+  padding: 0;
+  font-size: 1.05rem;
+}
+.new-stage .start-help {
+  padding: 0;
+  font-size: 0.8rem;
+  line-height: 1.3;
 }

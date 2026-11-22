@@ -164,7 +164,7 @@ jobs:
       id-token: write
     environment:
       name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      url: ${{ steps.deploy.outputs.page_url || steps.deploy-again.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -181,8 +181,23 @@ jobs:
         env:
           # The site lives under /<repository>/ on github.io.
           BASE_PATH: ${{ steps.pages.outputs.base_path }}/
+      # Named after the attempt: "Re-run failed jobs" uploads the site again, and the deploy refuses
+      # a run that holds two artifacts of the same name.
       - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
+          name: github-pages-${{ github.run_attempt }}
+      # The deploy can ask for the artifact before GitHub lists it ("No artifacts named ... were
+      # found"): it tries once more after a moment.
       - uses: actions/deploy-pages@v5
         id: deploy
+        continue-on-error: true
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
+      - if: steps.deploy.outcome == 'failure'
+        run: sleep 30
+      - uses: actions/deploy-pages@v5
+        id: deploy-again
+        if: steps.deploy.outcome == 'failure'
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}

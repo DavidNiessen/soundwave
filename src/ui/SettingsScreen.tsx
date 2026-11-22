@@ -148,7 +148,7 @@ interface Base {
   help: string;
   disabled?: boolean;
 }
-type Row =
+export type Row =
   | (Base & { kind: 'choice'; value: string; options: Option[]; set(v: string): void })
   | (Base & { kind: 'slider'; value: number; min: number; max: number; step: number; format(v: number): string; set(v: number): void })
   | (Base & { kind: 'action'; button: string; run(): void; note?: ReactNode; danger?: boolean })
@@ -179,7 +179,7 @@ function assign(list: string[], index: number, input: string): string[] {
   return out;
 }
 
-const ON_OFF: Option[] = [
+export const ON_OFF: Option[] = [
   { value: 'off', label: 'Off' },
   { value: 'on', label: 'On' },
 ];
@@ -1330,7 +1330,7 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
           kind: 'info',
           id: 'analysisDevice',
           label: 'Runs on',
-          help: 'On a graphics card a song takes about a minute. Without one the processor does the work, which takes several minutes per song. Phones and tablets do not have the memory for it: they can play songs that were analyzed elsewhere or charted by hand, but not analyze songs.',
+          help: 'On a graphics card a song takes about a minute. Without one the processor does the work, which takes several minutes per song. Splitting a song into its instruments needs about 2.5 GB of memory while it runs: on a phone or tablet the browser may close the game partway through, and the song is then best analyzed on a computer.',
           body:
             c.device === 'gpu'
               ? 'Graphics card'
@@ -1414,7 +1414,19 @@ function useBindingMoves(ref: React.RefObject<HTMLElement | null>, on: boolean) 
   }, [ref, on]);
 }
 
-function RowView({ row, active, first, touch, onActive }: { row: Row; active: boolean; first: boolean; touch: boolean; onActive(): void }) {
+export function RowView({
+  row,
+  active,
+  first,
+  touch,
+  onActive,
+}: {
+  row: Row;
+  active: boolean;
+  first: boolean;
+  touch: boolean;
+  onActive(): void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLSpanElement>(null);
   const index =

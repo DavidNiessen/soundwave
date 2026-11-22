@@ -1,12 +1,10 @@
-import { Circle, Info, ListMinus, ListPlus, PencilRuler, RotateCcw, Share, Trash2, X, type LucideIcon, Tag } from 'lucide-react';
+import { Info, ListMinus, ListPlus, PencilRuler, RotateCcw, Share, Trash2, Tag } from 'lucide-react';
 import { canPlay } from '../analysis/manager';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { SET_MAX } from '../game/setlist';
-import { getInputMode, usesFocus } from '../input/inputMode';
-import { focusables } from '../input/menuNav';
 import type { SongMeta } from '../storage/db';
-import { CONFIRM_HINT, useActions } from './actions';
-import { Dialog, useExit } from './Dialog';
+import { ContextMenu, type MenuItem } from './ContextMenu';
+import { Dialog } from './Dialog';
 import { ICON_STROKE } from './icons';
 import type { SongStatus } from './LibraryScreen';
 
@@ -23,15 +21,6 @@ export interface SongActions {
   remove(songs: SongMeta[]): Promise<void>;
 }
 
-interface Item {
-  id: string;
-  label: string;
-  icon: LucideIcon;
-  disabled?: boolean;
-  danger?: boolean;
-  run(): void;
-}
-
 interface Props {
   /** The songs it is for: one, or every song selected. */
   songs: SongMeta[];
@@ -40,6 +29,8 @@ interface Props {
   /** Where it opens: the pointer, or beside the song for keys and controllers. */
   at: { x: number; y: number };
   actions: SongActions;
+  /** Opens straight on the question whether to remove them (the Delete key). */
+  confirming?: boolean;
   onClose(): void;
 }
 
@@ -49,11 +40,8 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
  * A song's menu (right-click, a long press, or the Options button): what its detail sheet offers,
  * at hand. For several selected songs it offers what makes sense for all of them at once.
  */
-export function SongMenu({ songs, status, setlist, at, actions, onClose }: Props) {
-  const [confirm, setConfirm] = useState(false);
-  const [leaving, close] = useExit(onClose);
-  const ref = useRef<HTMLDivElement>(null);
-  const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
+export function SongMenu({ songs, status, setlist, at, actions, confirming = false, onClose }: Props) {
+  const [confirm, setConfirm] = useState(confirming);
 
   const one = songs.length === 1 ? songs[0] : null;
   const st = (s: SongMeta) => status[s.id] ?? { state: 'idle' as const };
@@ -65,21 +53,8 @@ export function SongMenu({ songs, status, setlist, at, actions, onClose }: Props
   const addable = ready.filter((s) => !setlist.includes(s.id));
   const analyzable = songs.filter((s) => !busy(s));
 
-  // Every item closes the menu as it runs, except Remove, which asks first. Focus goes back where it
-  // was first, so what the item opens (the song's details) hands it back there when it closes.
-  const before = useRef<HTMLElement | null>(null);
-  const item = (i: Item): Item => ({
-    ...i,
-    run:
-      i.id === 'remove'
-        ? i.run
-        : () => {
-            close();
-            if (before.current?.isConnected) before.current.focus({ preventScroll: true });
-            i.run();
-          },
-  });
-  const items: Item[] = one
+  // Every item closes the menu as it runs, except Remove, which asks first.
+  const items: MenuItem[] = one
     ? [
         { id: 'details', label: 'Song details', icon: Info, run: () => actions.details(one) },
         inSet.length
@@ -104,8 +79,8 @@ export function SongMenu({ songs, status, setlist, at, actions, onClose }: Props
         { id: 'edit', label: 'Edit charts', icon: PencilRuler, disabled: st(one).state !== 'ready', run: () => actions.edit(one) },
         { id: 'meta', label: 'Edit metadata', icon: Tag, run: () => actions.editMeta(one) },
         { id: 'export', label: 'Export', icon: Share, run: () => actions.exportSong(one) },
-        { id: 'remove', label: 'Remove…', icon: Trash2, danger: true, run: () => setConfirm(true) },
-      ].map(item)
+        { id: 'remove', label: 'Remove…', icon: Trash2, danger: true, stays: true, run: () => setConfirm(true) },
+      ]
     : [
         ...(addable.length || !inSet.length
           ? [
@@ -132,54 +107,15 @@ export function SongMenu({ songs, status, setlist, at, actions, onClose }: Props
               },
             ]
           : []),
-        { id: 'remove', label: `Remove ${plural(songs.length, 'song')}…`, icon: Trash2, danger: true, run: () => setConfirm(true) },
-      ].map(item);
-
-  useActions(
-    confirm
-      ? []
-      : [
-          { id: CONFIRM_HINT, label: 'Choose', icon: Circle, bar: false, run: () => {} },
-          { id: 'close', label: 'Close', icon: X, kbd: 'Escape', sfx: 'back', run: close },
-        ],
-  );
-
-  // Placed at the pointer, kept on screen (measured before it is first painted).
-  useLayoutEffect(() => {
-    const menu = ref.current?.querySelector<HTMLElement>('.ctx-menu');
-    if (!menu) return;
-    const r = menu.getBoundingClientRect();
-    const margin = 8;
-    setPlace({
-      left: Math.max(margin, Math.min(at.x, innerWidth - r.width - margin)),
-      top: Math.max(margin, Math.min(at.y, innerHeight - r.height - margin)),
-    });
-  }, [at.x, at.y, confirm]);
-
-  // Focus moves in (the first item for keys and controllers), stays in, and goes back where it was.
-  useEffect(() => {
-    if (confirm) return;
-    const was = document.activeElement as HTMLElement | null;
-    before.current = was;
-    const box = ref.current!;
-    const first = usesFocus(getInputMode()) ? focusables(box)[0] : undefined;
-    (first ?? box.querySelector<HTMLElement>('.ctx-menu')!).focus({ preventScroll: true });
-    const trap = (e: KeyboardEvent) => {
-      if (e.key !== 'Tab') return;
-      const all = focusables(box);
-      if (!all.length) return e.preventDefault();
-      const i = all.indexOf(document.activeElement as HTMLElement);
-      e.preventDefault();
-      all[e.shiftKey ? (i <= 0 ? all.length - 1 : i - 1) : i === all.length - 1 ? 0 : i + 1].focus();
-    };
-    box.addEventListener('keydown', trap);
-    return () => {
-      box.removeEventListener('keydown', trap);
-      // Only while the focus is still the menu's: what an item opened keeps it.
-      const now = document.activeElement;
-      if (was?.isConnected && (!now || now === document.body || box.contains(now))) was.focus({ preventScroll: true });
-    };
-  }, [confirm]);
+        {
+          id: 'remove',
+          label: `Remove ${plural(songs.length, 'song')}…`,
+          icon: Trash2,
+          danger: true,
+          stays: true,
+          run: () => setConfirm(true),
+        },
+      ];
 
   if (confirm)
     return (
@@ -209,40 +145,12 @@ export function SongMenu({ songs, status, setlist, at, actions, onClose }: Props
     );
 
   return (
-    <div
-      ref={ref}
-      className={`overlay popover ${leaving ? 'leaving' : ''}`}
-      data-modal
-      onPointerDown={(e) => e.target === e.currentTarget && close()}
-      onContextMenu={(e) => {
-        // A right-click outside closes this menu (the browser's own never shows).
-        e.preventDefault();
-        if (e.target === e.currentTarget) close();
-      }}
-    >
-      <div
-        className="ctx-menu"
-        role="menu"
-        aria-label={one ? `${one.title} options` : `${plural(songs.length, 'song')} options`}
-        tabIndex={-1}
-        data-ring="none"
-        style={place ?? { left: at.x, top: at.y }}
-      >
-        <p className="ctx-title">{one ? one.title : `${plural(songs.length, 'song')} selected`}</p>
-        {items.map((i) => (
-          <button
-            key={i.id}
-            type="button"
-            role="menuitem"
-            className={`ctx-item ${i.danger ? 'danger' : ''}`}
-            disabled={i.disabled}
-            onClick={i.run}
-          >
-            <i.icon strokeWidth={ICON_STROKE} aria-hidden />
-            {i.label}
-          </button>
-        ))}
-      </div>
-    </div>
+    <ContextMenu
+      title={one ? one.title : `${plural(songs.length, 'song')} selected`}
+      label={one ? `${one.title} options` : `${plural(songs.length, 'song')} options`}
+      at={at}
+      items={items}
+      onClose={onClose}
+    />
   );
 }

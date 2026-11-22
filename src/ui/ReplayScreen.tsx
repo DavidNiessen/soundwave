@@ -16,6 +16,7 @@ import { playShowdownSfx } from '../audio/showdownSfx';
 import { Hint, useActions, useHints } from './actions';
 import { Dialog } from './Dialog';
 import { DIFFICULTY_LABEL, ICON_STROKE, PART_LABEL, Stars } from './icons';
+import { ExportBox } from './ExportProgress';
 import { hudRefs, PlayHud } from './PlayHud';
 
 interface Props {
@@ -353,127 +354,132 @@ export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, 
         </p>
       )}
 
-      <section className="replay-dock" aria-label="Replay controls" data-nav-group="replay">
-        <header className="replay-head">
-          <div className="replay-what">
-            <span className="replay-title">{replay.title}</span>
-            <span className="replay-sub">
-              {what} · {replayDate(replay.date)}
+      <div className="replay-stack">
+        <ExportBox replayId={replay.id} />
+        <section className="replay-dock" aria-label="Replay controls" data-nav-group="replay">
+          <header className="replay-head">
+            <div className="replay-what">
+              <span className="replay-title" title={replay.title}>
+                {replay.title}
+              </span>
+              <span className="replay-sub">
+                {what} · {replayDate(replay.date)}
+              </span>
+            </div>
+            <span className="replay-time" aria-hidden>
+              <span ref={timeRef}>0:00</span>
+              <span className="replay-total"> / {clock(duration)}</span>
             </span>
+          </header>
+          {silent && <p className="replay-note">Plays without music: the song is no longer in your library.</p>}
+          <div
+            ref={scrubRef}
+            className="replay-scrub"
+            role="slider"
+            tabIndex={0}
+            aria-label="Where in the replay"
+            aria-valuemin={0}
+            aria-valuemax={Math.floor(duration)}
+            aria-valuenow={0}
+            onPointerDown={onScrubDown}
+            onPointerMove={onScrubMove}
+            onPointerUp={onScrubUp}
+            onPointerCancel={onScrubUp}
+          >
+            <div className="replay-track" style={shape ? { ['--segments' as string]: shape } : undefined}>
+              <div className="replay-fill" />
+            </div>
+            {misses.map((p) => (
+              <span key={p} className="replay-miss" style={{ ['--at' as string]: p }} aria-hidden />
+            ))}
+            <span className="replay-head-dot" aria-hidden />
           </div>
-          <span className="replay-time" aria-hidden>
-            <span ref={timeRef}>0:00</span>
-            <span className="replay-total"> / {clock(duration)}</span>
-          </span>
-        </header>
-        {silent && <p className="replay-note">The song is no longer in your library, so its replay plays without the music.</p>}
-        <div
-          ref={scrubRef}
-          className="replay-scrub"
-          role="slider"
-          tabIndex={0}
-          aria-label="Where in the replay"
-          aria-valuemin={0}
-          aria-valuemax={Math.floor(duration)}
-          aria-valuenow={0}
-          onPointerDown={onScrubDown}
-          onPointerMove={onScrubMove}
-          onPointerUp={onScrubUp}
-          onPointerCancel={onScrubUp}
-        >
-          <div className="replay-track" style={shape ? { ['--segments' as string]: shape } : undefined}>
-            <div className="replay-fill" />
-          </div>
-          {misses.map((p) => (
-            <span key={p} className="replay-miss" style={{ ['--at' as string]: p }} aria-hidden />
-          ))}
-          <span className="replay-head-dot" aria-hidden />
-        </div>
-        <div className="replay-transport">
-          <button type="button" className="btn replay-btn" data-action="restart" aria-label="From the start" onClick={restart}>
-            <Hint {...keysOf('replay.restart')} {...hints} />
-            <SkipBack strokeWidth={ICON_STROKE} aria-hidden />
-          </button>
-          <button
-            type="button"
-            className="btn replay-btn"
-            data-action="rewind"
-            aria-label={`Back ${JUMP} seconds`}
-            onClick={() => seekBy(-JUMP)}
-          >
-            <Hint {...keysOf('replay.back')} {...hints} />
-            <Rewind strokeWidth={ICON_STROKE} aria-hidden />
-          </button>
-          <button
-            type="button"
-            className="btn primary replay-btn replay-play"
-            data-action="play"
-            data-sfx="none"
-            data-autofocus
-            aria-label={playing ? 'Pause' : ended || phase === 'finished' ? 'Watch again' : 'Play'}
-            onClick={toggle}
-          >
-            <Hint {...keysOf('replay.play')} {...hints} />
-            {playing ? <Pause strokeWidth={ICON_STROKE} aria-hidden /> : <Play strokeWidth={ICON_STROKE} aria-hidden />}
-          </button>
-          <button
-            type="button"
-            className="btn replay-btn"
-            data-action="forward"
-            aria-label={`Forward ${JUMP} seconds`}
-            onClick={() => seekBy(JUMP)}
-          >
-            <Hint {...keysOf('replay.forward')} {...hints} />
-            <FastForward strokeWidth={ICON_STROKE} aria-hidden />
-          </button>
-          <div className="replay-speed" role="group" aria-label={`Speed ${speedLabel(rate)}`}>
+          <div className="replay-transport">
+            <button type="button" className="btn replay-btn" data-action="restart" aria-label="From the start" onClick={restart}>
+              <Hint {...keysOf('replay.restart')} {...hints} />
+              <SkipBack strokeWidth={ICON_STROKE} aria-hidden />
+            </button>
             <button
               type="button"
-              className="icon-btn small"
-              aria-label="Slower"
-              disabled={slowest}
-              data-sfx="none"
-              onClick={() => stepRate(-1)}
+              className="btn replay-btn"
+              data-action="rewind"
+              aria-label={`Back ${JUMP} seconds`}
+              onClick={() => seekBy(-JUMP)}
             >
-              <Hint kbd={prev.kbd} pad={prev.pad} {...hints} />
-              <Minus strokeWidth={ICON_STROKE} aria-hidden />
+              <Hint {...keysOf('replay.back')} {...hints} />
+              <Rewind strokeWidth={ICON_STROKE} aria-hidden />
             </button>
-            <span className="replay-rate" aria-live="polite">
-              {speedLabel(rate)}
-            </span>
             <button
               type="button"
-              className="icon-btn small"
-              aria-label="Faster"
-              disabled={fastest}
+              className="btn primary replay-btn replay-play"
+              data-action="play"
               data-sfx="none"
-              onClick={() => stepRate(1)}
+              data-autofocus
+              aria-label={playing ? 'Pause' : ended || phase === 'finished' ? 'Watch again' : 'Play'}
+              onClick={toggle}
             >
-              <Plus strokeWidth={ICON_STROKE} aria-hidden />
-              <Hint kbd={next.kbd} pad={next.pad} {...hints} />
+              <Hint {...keysOf('replay.play')} {...hints} />
+              {playing ? <Pause strokeWidth={ICON_STROKE} aria-hidden /> : <Play strokeWidth={ICON_STROKE} aria-hidden />}
             </button>
+            <button
+              type="button"
+              className="btn replay-btn"
+              data-action="forward"
+              aria-label={`Forward ${JUMP} seconds`}
+              onClick={() => seekBy(JUMP)}
+            >
+              <Hint {...keysOf('replay.forward')} {...hints} />
+              <FastForward strokeWidth={ICON_STROKE} aria-hidden />
+            </button>
+            <div className="replay-speed" role="group" aria-label={`Speed ${speedLabel(rate)}`}>
+              <button
+                type="button"
+                className="icon-btn small"
+                aria-label="Slower"
+                disabled={slowest}
+                data-sfx="none"
+                onClick={() => stepRate(-1)}
+              >
+                <Hint kbd={prev.kbd} pad={prev.pad} {...hints} />
+                <Minus strokeWidth={ICON_STROKE} aria-hidden />
+              </button>
+              <span className="replay-rate" aria-live="polite">
+                {speedLabel(rate)}
+              </span>
+              <button
+                type="button"
+                className="icon-btn small"
+                aria-label="Faster"
+                disabled={fastest}
+                data-sfx="none"
+                onClick={() => stepRate(1)}
+              >
+                <Plus strokeWidth={ICON_STROKE} aria-hidden />
+                <Hint kbd={next.kbd} pad={next.pad} {...hints} />
+              </button>
+            </div>
           </div>
-        </div>
-        <footer className="replay-foot">
-          <button type="button" className="btn small quiet" data-action="back" data-sfx="back" onClick={onBack}>
-            <Hint kbd="Escape" pad={backInput(hints.style)} {...hints} />
-            <ArrowLeft strokeWidth={ICON_STROKE} aria-hidden />
-            Back
-          </button>
-          <span className="replay-foot-end">
-            <button type="button" className="btn small quiet" data-action="export" onClick={exportVideo}>
-              <Hint {...keysOf('replay.export')} {...hints} />
-              <Film strokeWidth={ICON_STROKE} aria-hidden />
-              Video
+          <footer className="replay-foot">
+            <button type="button" className="btn small quiet" data-action="back" data-sfx="back" onClick={onBack}>
+              <Hint kbd="Escape" pad={backInput(hints.style)} {...hints} />
+              <ArrowLeft strokeWidth={ICON_STROKE} aria-hidden />
+              Back
             </button>
-            <button type="button" className="btn small quiet" data-action="controls" onClick={toggleControls}>
-              <Hint {...keysOf('replay.controls')} {...hints} />
-              <EyeOff strokeWidth={ICON_STROKE} aria-hidden />
-              Hide
-            </button>
-          </span>
-        </footer>
-      </section>
+            <span className="replay-foot-end">
+              <button type="button" className="btn small quiet" data-action="export" onClick={exportVideo}>
+                <Hint {...keysOf('replay.export')} {...hints} />
+                <Film strokeWidth={ICON_STROKE} aria-hidden />
+                Video
+              </button>
+              <button type="button" className="btn small quiet" data-action="controls" onClick={toggleControls}>
+                <Hint {...keysOf('replay.controls')} {...hints} />
+                <EyeOff strokeWidth={ICON_STROKE} aria-hidden />
+                Hide
+              </button>
+            </span>
+          </footer>
+        </section>
+      </div>
 
       {ended && (
         <Dialog title="Replay over" variant="card" closeLabel="Stay here" onClose={() => setEnded(false)}>

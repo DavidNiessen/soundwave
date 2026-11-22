@@ -149,3 +149,23 @@ describe('library backups with replays', () => {
     expect(b.replays).toEqual([]);
   });
 });
+
+describe('library backups with stage files', () => {
+  it('carry each video and picture whole, with its details', async () => {
+    const bytes = Uint8Array.from({ length: 300 }, (_, i) => i & 0xff);
+    const media = { id: 'media-abc-123', name: 'Clouds', type: 'video/mp4', addedAt: 42, blob: new Blob([bytes], { type: 'video/mp4' }) };
+    const b = await readBackup(
+      await packBackup({ createdAt: 1, preferences: {}, scores: [], songs: [await song('One', 500)], media: [media] }),
+    );
+    expect(b.songs).toHaveLength(1);
+    expect(b.media).toHaveLength(1);
+    const [back] = b.media;
+    expect({ ...back, blob: undefined }).toEqual({ ...media, blob: undefined });
+    expect(back.blob.type).toBe('video/mp4');
+    expect(new Uint8Array(await back.blob.arrayBuffer())).toEqual(bytes);
+  });
+
+  it('from before stages read as having none', async () => {
+    expect((await readBackup(await packBackup({ createdAt: 1, preferences: {}, scores: [], songs: [] }))).media).toEqual([]);
+  });
+});

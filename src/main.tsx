@@ -2,6 +2,8 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { applyDisplayMode, inDesktopApp } from './game/displayMode';
 import { loadSettings } from './game/settings';
+import { findStage } from './game/stages';
+import { setActiveStage } from './render/stage/showStage';
 import { preloadStage } from './render/stage/StageView';
 import { App } from './ui/App';
 import { bootDone, bootFonts } from './ui/boot';
@@ -39,7 +41,10 @@ if (import.meta.env.DEV && location.hash.startsWith('#stage')) {
   void import('./debug/StagePreview').then((m) => m.runStagePreview(root));
 } else {
   // The stage's worker starts on the venue at once, while the page is still being put together.
+  const { stage } = loadSettings();
   preloadStage();
+  // The menus' stage stands in the venue of the player's stage from its very first frame.
+  setActiveStage(findStage(stage, stage.active));
   createRoot(root).render(
     <StrictMode>
       <App />

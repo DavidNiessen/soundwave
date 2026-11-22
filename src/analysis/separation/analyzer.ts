@@ -54,9 +54,7 @@ async function modelInput(buffer: AudioBuffer): Promise<[Float32Array, Float32Ar
 export const stemAnalyzer: StemAnalyzer = async (songId, onProgress, signal) => {
   const device = await analysisDevice();
   if (device === 'none')
-    throw new Error(
-      'This device cannot analyze songs. Splitting a song into its instruments takes more memory than a phone or tablet gives the game; analyze on a computer.',
-    );
+    throw new Error('Analyzing is switched off on this device (the development switch). Charts can still be made by hand.');
 
   if (stemModel.snapshot().state !== 'ready') {
     const report = () => {

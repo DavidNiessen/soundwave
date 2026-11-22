@@ -1,11 +1,12 @@
 import { applyPreset, DEFAULT_GRAPHICS, type GraphicsPreset } from '../game/graphics';
-import { AuroraStage } from '../render/aurora/AuroraStage';
+import { Stage } from '../render/stage/Stage';
+import { DEFAULT_VENUE, isVenueId } from '../render/venues/catalog';
 
 /**
  * Dev-only: the 3D stage full screen with a simulated song, for checking looks and performance
  * without playing. Open /#stage?preset=high&bpm=126&shot=hero&level=0.9&mode=play (shot pins one
- * camera, level pins how busy the music is, od = seconds until overdrive, ring = a Showdown ring of that many
- * players, with a Strike every few seconds).
+ * camera, level pins how busy the music is, od = seconds until overdrive, venue = a venue's id, ring = a
+ * Showdown ring of that many players, with a Strike every few seconds).
  */
 export async function runStagePreview(root: HTMLElement) {
   const q = new URLSearchParams(location.hash.split('?')[1] ?? '');
@@ -16,6 +17,8 @@ export async function runStagePreview(root: HTMLElement) {
   // No fade-in here: a capture right after loading should show the stage, not the fade.
   canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;display:block;background:#000';
   root.replaceChildren(canvas);
+  const choice = q.get('venue');
+  const venue = isVenueId(choice) ? choice : DEFAULT_VENUE;
   const seats = Number(q.get('ring') ?? 0);
   const parts = ['lead', 'bass', 'drums', 'vocals'] as const;
   const looks = [
@@ -24,7 +27,7 @@ export async function runStagePreview(root: HTMLElement) {
     { top: '#ffc94a', bottom: '#3a2a6e', finish: '#ffffff' },
   ];
   const ring = Array.from({ length: seats }, (_, i) => ({ id: `p${i}`, part: parts[i % 4], avatar: looks[i % 3], me: i === 0 }));
-  const stage = await AuroraStage.create(canvas, g, { mode: q.get('mode') === 'menu' ? 'menu' : 'play', part: 'lead', ring });
+  const stage = await Stage.create(canvas, g, { mode: q.get('mode') === 'menu' ? 'menu' : 'play', part: 'lead', venue, ring });
   if (seats) {
     stage.setPlaces(ring.map((p, i) => ({ id: p.id, place: i + 1, hit: i === 2 })));
     let n = 0;
@@ -35,7 +38,7 @@ export async function runStagePreview(root: HTMLElement) {
   }
   const fit = () => stage.setSize(innerWidth, innerHeight, devicePixelRatio);
   fit();
-  (window as unknown as { __stage: AuroraStage }).__stage = stage;
+  (window as unknown as { __stage: Stage }).__stage = stage;
   const shot = q.get('shot');
   if (shot) {
     const d = stage.director as unknown as { shots: { name: string }[]; current: unknown; update: () => boolean };
@@ -72,5 +75,30 @@ export async function runStagePreview(root: HTMLElement) {
   };
   loop();
   addEventListener('resize', fit);
+  // From the console: jump to a shot, or run the show ahead by simulated seconds (a page in the
+  // background gets few frames, so time is moved on by hand; performance.now is pinned for it).
+  let fake = performance.now();
+  let simBeat = 0;
+  Object.assign(window, {
+    __shot(name: string) {
+      const d = stage.director as unknown as { shots: { name: string }[]; current: unknown; shotTime: number; update: () => boolean };
+      d.current = d.shots.find((s) => s.name === name) ?? d.current;
+      d.shotTime = 0;
+      d.update = () => false;
+    },
+    __sim(seconds: number, intensity = 0.9, overdrive = false) {
+      performance.now = () => fake;
+      for (let i = 0; i < seconds * 30; i++) {
+        fake += 1000 / 30;
+        const t = fake / 1000;
+        const b = Math.floor(t / spb);
+        const ev = b !== simBeat ? (b % 4 === 0 ? 'downbeat' : 'beat') : 'none';
+        simBeat = b;
+        stage.setBands({ low: 0.3 + 0.5 * intensity * (ev !== 'none' ? 1 : 0.5), mid: 0.4 * intensity, high: 0.3 * intensity });
+        stage.render({ beat: ev, intensity, overdrive, barSeconds: spb * 4 });
+      }
+      return stage.debugInfo();
+    },
+  });
   document.title = 'stage ready';
 }

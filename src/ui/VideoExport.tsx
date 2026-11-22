@@ -4,11 +4,10 @@ import { getEngine } from '../audio/engine';
 import type { Chart } from '../chart/types';
 import { PlayController, REPLAY_START } from '../game/PlayController';
 import type { ReplayInputs } from '../game/replay';
-import { multiplierFor, MAX_MULTIPLIER, STREAK_PER_MULTIPLIER } from '../game/scoring';
 import type { Settings } from '../game/settings';
 import { videoBitrate, VideoRecorder, videoSize, type VideoExportSettings } from '../game/videoExport';
-import { drawVideoHud } from '../render/videoHud';
-import { planVideo, startFrameEncoder, type FrameEncoder, type VideoPlan } from '../game/videoRender';
+import { composeVideoFrame, videoHudFrame } from '../render/videoHud';
+import { planVideo, songSamples, startFrameEncoder, type FrameEncoder, type VideoPlan } from '../game/videoRender';
 import type { SaveTarget } from '../storage/share';
 import type { ReplayMeta } from '../storage/replays';
 import { backInput } from '../input/pads';
@@ -81,7 +80,6 @@ export function ExportVideoDialog({ replay, silent, settings: s, onChange, onSta
     // oxlint-disable-next-line react/exhaustive-deps -- `key` holds what the plan depends on
   }, [key]);
   const format = plan ? (plan.kind === 'live' ? plan.format : null) : null;
-  const size = videoSize(s);
   const set = (patch: Partial<VideoExportSettings>) => onChange({ ...s, ...patch });
   const onOff = (on: string, off: string) => [
     { value: true, label: on },
@@ -146,17 +144,17 @@ export function ExportVideoDialog({ replay, silent, settings: s, onChange, onSta
           {plan === undefined ? (
             <p className="hint export-summary">Checking what this device can encode…</p>
           ) : plan ? (
-            <p className="hint export-summary">
-              {plan.ext.toUpperCase()} · {size.width}×{size.height} · {s.fps} fps{music ? '' : ' · no sound'}.{' '}
-              {plan.kind === 'frames'
-                ? 'Made frame by frame, as fast as this device can draw them: usually well under the song’s length.'
-                : `Recorded as the replay plays, so it takes ${clock(replay.duration + 4)}. Keep the game in front until it is done.`}
-              {format?.ext === 'webm' &&
-                ' This browser cannot write MP4: the video is saved as WebM. The desktop app and Chrome write MP4.'}
-              {silent && ' The song is no longer in your library, so the video has no music.'}
-            </p>
+            // Only what is out of the ordinary is said: how the video is usually made needs no words.
+            (plan.kind === 'live' || silent) && (
+              <p className="hint export-summary">
+                {plan.kind === 'live' &&
+                  `This browser records the video as the replay plays, so it takes ${clock(replay.duration + 4)}. Keep the game in front until it is done.`}
+                {format?.ext === 'webm' && ' It cannot write MP4: the video is saved as WebM.'}
+                {silent && `${plan.kind === 'live' ? ' ' : ''}The song is no longer in your library, so the video has no music.`}
+              </p>
+            )
           ) : (
-            <p className="error">This browser cannot make video. The desktop app, Chrome, Edge and Safari can.</p>
+            <p className="error">This browser cannot export video. The desktop app, Chrome, Edge and Safari can.</p>
           )}
           <button
             type="button"
@@ -166,7 +164,7 @@ export function ExportVideoDialog({ replay, silent, settings: s, onChange, onSta
             onClick={() => plan && onStart({ ...s, music }, plan)}
           >
             <Film strokeWidth={ICON_STROKE} aria-hidden />
-            {plan?.kind === 'live' ? 'Record video' : 'Make video'}
+            Export video
           </button>
           <button type="button" className="btn quiet wide" data-sfx="back" onClick={close}>
             Cancel
@@ -241,9 +239,6 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
     );
     const out = outRef.current!;
     const g = out.getContext('2d', { alpha: false })!;
-    const night = g.createLinearGradient(0, 0, 0, height);
-    night.addColorStop(0, '#1a0f4c');
-    night.addColorStop(1, '#05030f');
     const scoreLabel = `${PART_LABEL[chart.part]} score`;
     const length = Math.max(chart.duration, buffer.duration);
     let shownSecond = -1;
@@ -253,39 +248,24 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
      * as it was drawn), the HUD. `now`: the clock it was drawn on, ms.
      */
     const compose = (t: number, stageFrame: ImageBitmap | null, now: number, highway: CanvasImageSource = hwRef.current!) => {
-      g.fillStyle = video.stage ? '#05030f' : night;
-      g.fillRect(0, 0, width, height);
-      if (stageFrame) g.drawImage(stageFrame, 0, 0, width, height);
       const hw = hwRef.current!;
-      // During an interlude the highway leaves (see breaks.highwayAway), and the deck's dial with it.
-      g.globalAlpha = 1 - ctrl.away;
-      g.drawImage(highway, 0, 0, width, height);
-      g.globalAlpha = 1;
-      if (video.hud) {
-        const s = ctrl.session;
-        const layout = ctrl.hudLayout();
-        const k = width / Math.max(1, hw.clientWidth);
-        const top = multiplierFor(s.streak) >= MAX_MULTIPLIER;
-        const fb = ctrl.lastFeedback;
-        drawVideoHud(g, width, height, {
-          t,
-          duration: chart.duration,
-          title: replay.title,
-          artist: replay.artist,
-          scoreLabel,
-          score: s.score,
-          multiplier: s.multiplier,
-          level: multiplierFor(s.streak),
-          streakP: top ? 1 : (s.streak % STREAK_PER_MULTIPLIER) / STREAK_PER_MULTIPLIER,
-          streak: s.streak,
-          overdrive: s.overdrive,
-          overdriveActive: s.overdriveActive,
-          stars: s.progressStars,
-          starP: s.nextStarProgress,
-          feedback: fb ? { ...fb, age: (now - fb.at) / 1000 } : null,
-          deck: layout && ctrl.away < 0.5 ? { x: layout.x * k, y: layout.y * k, foot: layout.foot * k, width: layout.width * k } : null,
-        });
-      }
+      const layout = video.hud ? ctrl.hudLayout() : null;
+      const k = width / Math.max(1, hw.clientWidth);
+      const hud = video.hud
+        ? videoHudFrame({
+            t,
+            now,
+            duration: chart.duration,
+            title: replay.title,
+            artist: replay.artist,
+            scoreLabel,
+            session: ctrl.session,
+            feedback: ctrl.lastFeedback,
+            // During an interlude the highway leaves (see breaks.highwayAway), and the deck's dial with it.
+            deck: layout && ctrl.away < 0.5 ? { x: layout.x * k, y: layout.y * k, foot: layout.foot * k, width: layout.width * k } : null,
+          })
+        : null;
+      composeVideoFrame(g, width, height, video.stage ? stageFrame : null, highway, hud, 1 - ctrl.away);
       const p = Math.max(0, Math.min(1, (t - REPLAY_START) / (length + TAIL - REPLAY_START)));
       barRef.current?.style.setProperty('width', `${(p * 100).toFixed(2)}%`);
       const sec = Math.floor(Math.max(0, Math.min(t, chart.duration)));
@@ -338,7 +318,7 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
         await document.fonts?.load(`italic 900 32px "Archivo Variable"`).catch(() => undefined);
         await ctrl.ready;
         if (!live || finished) return;
-        encoder = await startFrameEncoder(out, plan, video, video.music ? { buffer, leadIn: -REPLAY_START } : null);
+        encoder = await startFrameEncoder(out, plan, video, video.music ? { ...songSamples(buffer), leadIn: -REPLAY_START } : null);
         if (!live || finished) return void encoder.cancel();
         const clock0 = performance.now();
         const step = 1000 / video.fps;
@@ -465,7 +445,7 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
 
   const status = {
     preparing: 'Getting the stage ready…',
-    recording: plan.kind === 'frames' ? (speed ? `Rendering · ${speed.toFixed(1)}× the song’s speed` : 'Rendering') : 'Recording',
+    recording: speed ? `Exporting · ${speed.toFixed(1)}× the song’s speed` : 'Exporting',
     paused: 'Paused while the game is in the background',
     saving: 'Saving the video…',
     saved: 'Saved',
@@ -510,12 +490,12 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
             <span ref={barRef} style={{ width: stage === 'saved' ? '100%' : '0%' }} />
           </span>
           {stage === 'saved' && <p className="hint">{fileName} is saved.</p>}
-          {stage === 'failed' && <p className="error">The video could not be made: {error}</p>}
+          {stage === 'failed' && <p className="error">The video could not be exported: {error}</p>}
           {working && stage !== 'saving' && (
             <p className="hint">
               {plan.kind === 'frames'
-                ? 'Each frame is drawn and encoded as fast as this device can; the song does not play meanwhile.'
-                : 'The video is recorded as the replay plays. Keep the game in front until it is done; the song plays along.'}
+                ? 'The video is exported as fast as this device can; the song does not play meanwhile.'
+                : 'The video is exported as the replay plays. Keep the game in front until it is done; the song plays along.'}
             </p>
           )}
           {working ? (

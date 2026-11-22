@@ -3,6 +3,7 @@ import type { Part } from '../../chart/types';
 import type { Avatar } from '../../net/protocol';
 import type { Shot, Vec3 } from '../stage/Director';
 import type { Particles } from '../stage/Particles';
+import { Spawn } from '../stage/pyro';
 import type { Figures, Person } from './figures';
 import { seatMaterial, type DeckInfo } from './materials';
 
@@ -357,14 +358,14 @@ export class Ring {
       b.trail.setMatrixAt(i, M);
     }
     b.trail.instanceMatrix.needsUpdate = true;
-    sparks.spawn(
+    spark(
+      sparks,
       TMP.copy(b.head.position),
       V.set((Math.random() - 0.5) * 2, Math.random() * 2, (Math.random() - 0.5) * 2),
       [b.colour.r / 3, b.colour.g / 3, b.colour.b / 3],
       0.35,
       0.5,
       2,
-      0,
     );
     if (t < 1) return;
     // Landed.
@@ -376,7 +377,7 @@ export class Ring {
       V.set(Math.random() - 0.5, Math.random() * 0.8 + 0.2, Math.random() - 0.5)
         .normalize()
         .multiplyScalar(4 + Math.random() * 6);
-      sparks.spawn(b.head.position, V, [b.colour.r / 2.5, b.colour.g / 2.5, b.colour.b / 2.5], 0.5, 0.5 + Math.random() * 0.5, 1.5, 0);
+      spark(sparks, b.head.position, V, [b.colour.r / 2.5, b.colour.g / 2.5, b.colour.b / 2.5], 0.5, 0.5 + Math.random() * 0.5, 1.5);
     }
     b.from = b.to = undefined;
   }
@@ -411,4 +412,29 @@ function arc(from: Seat, to: Seat, t: number, out: THREE.Vector3) {
 function norm2(x: number, z: number): [number, number] {
   const l = Math.hypot(x, z) || 1;
   return [x / l, z / l];
+}
+
+const SPARK = new Spawn();
+/** One spark of a Strike's bolt: at `p`, moving at `v`, in a colour, with a size, a life and a drag. */
+function spark(
+  sparks: Particles,
+  p: THREE.Vector3,
+  v: THREE.Vector3,
+  c: [number, number, number],
+  size: number,
+  life: number,
+  drag: number,
+) {
+  const s = SPARK.reset();
+  s.x = p.x;
+  s.y = p.y;
+  s.z = p.z;
+  s.vx = v.x;
+  s.vy = v.y;
+  s.vz = v.z;
+  [s.r, s.g, s.b] = c;
+  s.size = size;
+  s.life = life;
+  s.drag = drag;
+  sparks.sim.spawn(s);
 }

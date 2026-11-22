@@ -1,6 +1,8 @@
 /**
- * What this device can run the stem model on: its graphics card (seconds per song), its processor
- * (minutes per song), or nothing, on phones and tablets, where the model does not fit in memory.
+ * What this device runs the stem model on: its graphics card (seconds per song) or its processor
+ * (minutes per song). Every device is let try, phones and tablets too, though separating a song
+ * takes about 2.5 GB while it runs and a phone's browser may not give a page that much. (`none`
+ * is left for the development switch below.)
  */
 export type AnalysisDevice = 'gpu' | 'cpu' | 'none';
 
@@ -18,12 +20,7 @@ async function detect(): Promise<AnalysisDevice> {
   }
   const nav = navigator as Navigator & {
     gpu?: { requestAdapter(): Promise<{ isFallbackAdapter?: boolean; info?: { isFallbackAdapter?: boolean } } | null> };
-    deviceMemory?: number;
-    userAgentData?: { mobile?: boolean };
   };
-  const handheld = nav.userAgentData?.mobile ?? /Android|iPhone|iPad|iPod/i.test(nav.userAgent);
-  // A segment needs about 2.5 GB while it runs.
-  if (handheld || (nav.deviceMemory !== undefined && nav.deviceMemory < 4)) return 'none';
   try {
     // A software stand-in for a graphics card would be far slower than the processor path.
     const adapter = await nav.gpu?.requestAdapter();
@@ -32,6 +29,16 @@ async function detect(): Promise<AnalysisDevice> {
     /* no adapter */
   }
   return 'cpu';
+}
+
+/**
+ * A phone or tablet. They analyze too, but fetch the stem model (90 MB) only when the first song
+ * is analyzed rather than as soon as the game opens, which may be over mobile data.
+ */
+export function isHandheld(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const nav = navigator as Navigator & { userAgentData?: { mobile?: boolean } };
+  return nav.userAgentData?.mobile ?? /Android|iPhone|iPad|iPod/i.test(nav.userAgent);
 }
 
 export function analysisDevice(): Promise<AnalysisDevice> {

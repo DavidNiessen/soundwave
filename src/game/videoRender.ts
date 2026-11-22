@@ -106,15 +106,28 @@ export interface FrameEncoder {
   cancel(): Promise<void>;
 }
 
+/** A song's samples as they are given to the encoder: one array per channel. */
+export interface SongSamples {
+  channels: Float32Array[];
+  sampleRate: number;
+}
+
+/** A decoded song's samples (its own arrays, not copies). */
+export const songSamples = (buffer: AudioBuffer): SongSamples => ({
+  channels: Array.from({ length: buffer.numberOfChannels }, (_, i) => buffer.getChannelData(i)),
+  sampleRate: buffer.sampleRate,
+});
+
 /**
  * Starts an MP4 of `canvas`'s frames at `fps`, with the song when `audio` is given: its samples
- * start `leadIn` seconds into the video (the replay starts a moment before the song does).
+ * start `leadIn` seconds into the video (the replay starts a moment before the song does). Works on
+ * the page and in a worker alike.
  */
 export async function startFrameEncoder(
-  canvas: HTMLCanvasElement,
+  canvas: HTMLCanvasElement | OffscreenCanvas,
   plan: Extract<VideoPlan, { kind: 'frames' }>,
   s: VideoExportSettings,
-  audio: { buffer: AudioBuffer; leadIn: number } | null,
+  audio: (SongSamples & { leadIn: number }) | null,
 ): Promise<FrameEncoder> {
   const mb = await loadMediabunny();
   const file = new PatchedFile();
@@ -127,33 +140,39 @@ export async function startFrameEncoder(
   });
   const video = new mb.CanvasSource(canvas, { codec: plan.video, bitrate: videoBitrate(s), keyFrameInterval: 2 });
   output.addVideoTrack(video, { frameRate: s.fps });
-  const sound = audio && plan.audio ? new mb.AudioBufferSource({ codec: plan.audio, bitrate: 192_000 }) : null;
+  const sound = audio && plan.audio ? new mb.AudioSampleSource({ codec: plan.audio, bitrate: 192_000 }) : null;
   if (sound) output.addAudioTrack(sound);
   await output.start();
 
   // The song goes in a second at a time, a little ahead of the frames, so the file is written with
   // sound and picture side by side: silence until `leadIn`, then the song.
   let audioUntil = 0;
-  const audioEnd = audio ? audio.leadIn + audio.buffer.duration : 0;
+  const songLength = audio ? (audio.channels[0]?.length ?? 0) / audio.sampleRate : 0;
+  const audioEnd = audio ? audio.leadIn + songLength : 0;
   const feed = async (until: number) => {
     if (!sound || !audio) return;
-    const { buffer, leadIn } = audio;
-    const rate = buffer.sampleRate;
+    const { channels, sampleRate: rate, leadIn } = audio;
+    const n = channels.length;
     while (audioUntil < Math.min(until, audioEnd)) {
       const from = audioUntil;
       const to = Math.min(audioEnd, from + 1);
       const length = Math.max(1, Math.round((to - from) * rate));
-      const piece = new AudioBuffer({ length, numberOfChannels: buffer.numberOfChannels, sampleRate: rate });
+      // Planar: each channel's samples after the one before.
+      const data = new Float32Array(length * n);
       const start = Math.round((from - leadIn) * rate);
-      for (let c = 0; c < buffer.numberOfChannels; c++) {
-        const src = buffer.getChannelData(c);
-        const dst = piece.getChannelData(c);
+      for (let c = 0; c < n; c++) {
+        const src = channels[c];
         const a = Math.max(0, -start);
         const b = Math.min(length, src.length - start);
-        if (b > a) dst.set(src.subarray(start + a, start + b), a);
+        if (b > a) data.set(src.subarray(start + a, start + b), c * length + a);
       }
       audioUntil = to;
-      await sound.add(piece);
+      const sample = new mb.AudioSample({ data, format: 'f32-planar', numberOfChannels: n, sampleRate: rate, timestamp: from });
+      try {
+        await sound.add(sample);
+      } finally {
+        sample.close();
+      }
     }
     if (audioUntil >= audioEnd && audioEnd > 0) sound.close();
   };

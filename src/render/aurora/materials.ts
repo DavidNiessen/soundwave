@@ -47,6 +47,15 @@ void main() {
   float ndv = max(0.0, dot(n, v));
   float g = clamp(vUv.x + 0.035 * sin(vUv.y * 12.566 + vUv.x * 9.0 + uTime * 0.35), 0.0, 1.0);
   vec3 base = g < 0.55 ? mix(uA, uB, smoothstep(0.0, 0.55, g)) : mix(uB, uC, smoothstep(0.55, 1.0, g));
+  vec3 rim = uRim;
+  if (uPaintMix > 0.0) {
+    // The player's own colours, at the brightness the form has: the wash at one end, the key at the other.
+    vec3 own = g < 0.55 ? mix(uPaintA, uPaintB, smoothstep(0.0, 0.55, g)) : mix(uPaintB, uPaintC, smoothstep(0.55, 1.0, g));
+    vec3 lum = vec3(0.2126, 0.7152, 0.0722);
+    own *= dot(base, lum) / max(0.02, dot(own, lum));
+    base = mix(base, own, uPaintMix);
+    rim = mix(rim, mix(uPaintC, vec3(1.0), 0.35), uPaintMix);
+  }
   float ao = mix(0.28, 1.0, vAo);
   // Panel seams across the form, and an inset face framed by piping along both rims, give the
   // big surfaces scale and a second tone.
@@ -87,8 +96,10 @@ void main() {
   col += base * uGlow * mix(0.55, 1.0, ao) * (0.5 + 0.22 * uBarPulse + 0.1 * uLow) * inside;
 
   float fres = pow(max(0.0, 1.0 - ndv), 3.0);
-  col += uRim * fres * (0.22 + 0.26 * uEnergy) * ao;
-  col += uRim * pipe * (0.2 + 0.3 * (0.5 + 0.5 * sin(vUv.x * 14.0 - uTime * 1.6)) + 0.22 * uPulse) * mix(0.5, 1.0, ao);
+  // A black stage puts the forms out; their piping and rims still catch a little light.
+  col *= 0.04 + 0.96 * min(1.0, uVenueLevel);
+  col += rim * fres * (0.22 + 0.26 * uEnergy) * ao * (0.3 + 0.7 * min(1.0, uVenueLevel));
+  col += rim * pipe * (0.2 + 0.3 * (0.5 + 0.5 * sin(vUv.x * 14.0 - uTime * 1.6)) + 0.22 * uPulse) * mix(0.5, 1.0, ao);
   col += skyGradient(reflect(-v, n)) * (0.04 + fres) * 1.6;
   #ifdef GLITTER
     col += mix(uC, vec3(1.0), 0.5) * glitter(vWPos, n, v, dist) * uGlitter * 3.0 * mix(0.4, 1.0, ao) * (0.8 + 0.7 * uHigh);
@@ -148,7 +159,7 @@ void main() {
  * audience, treble at the back). It is a picture: it glows by itself, on a grid of lamps, and
  * mirrors nothing but a little sky on its glass.
  */
-const PODIUM_FRAGMENT = /* glsl */ `
+export const PODIUM_FRAGMENT = /* glsl */ `
 ${COMMON}
 uniform float uWho; uniform vec2 uRadii; uniform float uFloor; uniform vec4 uSeat;
 varying vec3 vWPos; varying vec3 vWNorm; varying vec2 vUv; varying float vAo;
@@ -469,14 +480,36 @@ void main() {
 const SCREEN_FRAGMENT = /* glsl */ `
 ${COMMON}
 uniform float uCells;
+uniform sampler2D uScreenVideo; uniform float uScreenVideoOn; uniform float uScreenVideoAspect;
+uniform float uScreenVideoTurn; uniform float uScreenVideoMirror;
 varying vec3 vWPos; varying vec3 vWNorm; varying vec2 vUv; varying float vAo;
+/**
+ * The player's video on a screen of this width over height, filling it (cropped, not stretched),
+ * turned and mirrored as they set it.
+ */
+vec3 videoOn(vec2 uv, float screen) {
+  // The screens' pictures run from the bottom up; a video's rows from the top down.
+  vec2 q = vec2(uv.x - 0.5, 0.5 - uv.y);
+  if (uScreenVideoMirror > 0.5) q.x = -q.x;
+  float turn = floor(uScreenVideoTurn + 0.5);
+  if (turn == 1.0) q = vec2(q.y, -q.x);
+  else if (turn == 2.0) q = -q;
+  else if (turn == 3.0) q = vec2(-q.y, q.x);
+  // Turned a quarter, the screen is as wide in the video as it is tall on the stage.
+  float s = mod(turn, 2.0) == 1.0 ? 1.0 / screen : screen;
+  if (uScreenVideoAspect > s) q.x *= s / uScreenVideoAspect;
+  else q.y *= uScreenVideoAspect / s;
+  return texture2D(uScreenVideo, q + 0.5).rgb;
+}
 void main() {
   #ifdef MOON
     vec3 col = moonContent(vUv) * 0.46;
     vec2 cells = vUv * uCells;
+    if (uScreenVideoOn > 0.5) col = videoOn(vUv, 1.0) * (0.55 + 0.25 * uScreenLevel);
   #else
     vec3 col = wingContent(vUv) * 1.0;
     vec2 cells = vUv * vec2(uCells * 5.0, uCells);
+    if (uScreenVideoOn > 0.5) col = videoOn(vUv, 5.0) * (0.55 + 0.25 * uScreenLevel);
   #endif
   // The LED grid shows up close and melts away with distance.
   vec2 gcell = abs(fract(cells) - 0.5);

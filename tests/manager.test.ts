@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { AnalysisManager, type Assist, type LocalAnalyzer } from '../src/analysis/manager';
+import { AnalysisManager, DIED, type Assist, type LocalAnalyzer } from '../src/analysis/manager';
 import type { StemAnalyzer } from '../src/analysis/separation/analyzer';
-import type { AnalysisResult } from '../src/analysis/types';
+import { ANALYSIS_VERSION, type AnalysisResult } from '../src/analysis/types';
+import type { SongEdits } from '../src/editor/edits';
 
 const result = (): AnalysisResult => ({
   version: 1,
@@ -143,5 +144,112 @@ describe('AnalysisManager', () => {
     m.enqueue('song');
     for (let i = 0; i < 5 && m.snapshot().song?.state !== 'error'; i++) await tick();
     expect(m.snapshot().song).toMatchObject({ state: 'error', error: 'decode failed' });
+  });
+});
+
+describe('AnalysisManager after the analysis version is raised', () => {
+  const ownGrid: SongEdits = {
+    version: 1,
+    grid: { kind: 'fixed', bpm: 120, offset: 0, beatsPerBar: 4 },
+    duration: 10,
+    charts: {},
+    updatedAt: 1,
+  };
+  const env = (canAnalyze: boolean, older: boolean) => ({
+    olderAnalyses: async () => (older ? [{ version: ANALYSIS_VERSION - 1, data: { ...result(), source: 'ml' } }] : []),
+    canAnalyze: async () => canAnalyze,
+  });
+  const settle = async (m: AnalysisManager, id: string) => {
+    for (let i = 0; i < 10 && m.snapshot()[id]?.state !== 'ready'; i++) await tick();
+  };
+
+  it('analyzes a song again that was analyzed before and then given a grid of its own', async () => {
+    let calls = 0;
+    const m = new AnalysisManager(async () => (calls++, result()), null, env(true, true));
+    await m.saveEdits('song', ownGrid);
+    await m.check('song', true);
+    expect(['queued', 'analyzing']).toContain(m.snapshot().song?.state);
+    await settle(m, 'song');
+    expect(m.snapshot().song?.state).toBe('ready');
+    expect(calls).toBe(1);
+  });
+
+  it('leaves a song started from scratch alone: it was never analyzed', async () => {
+    let calls = 0;
+    const m = new AnalysisManager(async () => (calls++, result()), null, env(true, false));
+    await m.saveEdits('song', ownGrid);
+    await m.check('song', true);
+    await tick();
+    expect(m.snapshot().song?.state).toBe('ready');
+    expect(calls).toBe(0);
+  });
+
+  it('plays by the older analysis on a device that cannot analyze', async () => {
+    let calls = 0;
+    const m = new AnalysisManager(async () => (calls++, result()), null, env(false, true));
+    await m.check('song', true);
+    expect(m.snapshot().song?.state).toBe('ready');
+    expect((await m.analysis('song'))?.beats).toEqual(result().beats);
+    expect(calls).toBe(0);
+  });
+
+  it('still analyzes where it can rather than play by an older analysis', async () => {
+    let calls = 0;
+    const m = new AnalysisManager(async () => (calls++, result()), null, env(true, true));
+    await m.check('song', true);
+    await settle(m, 'song');
+    expect(calls).toBe(1);
+  });
+});
+
+describe('a page that closed while analyzing', () => {
+  /** What the page keeps across reloads (localStorage in the game). */
+  const store = () => {
+    let kept: string | null = null;
+    return { read: () => kept, write: (id: string | null) => void (kept = id) };
+  };
+  const env = (running: ReturnType<typeof store>) => ({ olderAnalyses: async () => [], canAnalyze: async () => true, running });
+
+  it('starts no song by itself until an analysis ends, so the page does not close every time it opens', async () => {
+    const running = store();
+    let calls = 0;
+    // The first page: the analysis never ends (the browser closes the page for its memory).
+    const first = new AnalysisManager(() => (calls++, new Promise<AnalysisResult>(() => {})), null, env(running));
+    await first.check('song', true);
+    await tick();
+    expect(first.snapshot().song?.state).toBe('analyzing');
+    expect(running.read()).toBe('song');
+
+    // The page opens again: the song it closed on says why, and no song starts by itself.
+    const second = new AnalysisManager(() => (calls++, Promise.resolve(result())), null, env(running));
+    await second.check('song', true);
+    await second.check('other', true);
+    await tick();
+    expect(second.snapshot().song).toMatchObject({ state: 'error', error: DIED });
+    expect(second.snapshot().other?.state).toBe('idle');
+    expect(calls).toBe(1);
+
+    // And not on the next opening either, while nothing has been analyzed since.
+    const third = new AnalysisManager(() => (calls++, Promise.resolve(result())), null, env(running));
+    await third.check('other', true);
+    await tick();
+    expect(third.snapshot().other?.state).toBe('idle');
+
+    // Asked for by the player, a song runs; once it ended, songs start by themselves again.
+    third.enqueue('other');
+    for (let i = 0; i < 5 && third.snapshot().other?.state !== 'ready'; i++) await tick();
+    expect(third.snapshot().other?.state).toBe('ready');
+    expect(running.read()).toBeNull();
+    await third.check('new', true);
+    for (let i = 0; i < 5 && third.snapshot().new?.state !== 'ready'; i++) await tick();
+    expect(third.snapshot().new?.state).toBe('ready');
+  });
+
+  it('notes nothing once an analysis has ended, failed ones too', async () => {
+    const running = store();
+    const m = new AnalysisManager(() => Promise.reject(new Error('no')), null, env(running));
+    m.enqueue('song');
+    for (let i = 0; i < 5 && m.snapshot().song?.state !== 'error'; i++) await tick();
+    expect(running.read()).toBeNull();
   });
 });

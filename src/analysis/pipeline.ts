@@ -1,4 +1,5 @@
-import { extendGrid, findDownbeats, refineBeats, estimateTempo, smoothBeats, trackBeats } from './dsp/beats';
+import type { Beats } from './beat/track';
+import { barsOnGrid, extendGrid, findDownbeats, refineBeats, estimateTempo, smoothBeats, trackBeats } from './dsp/beats';
 import { beatChroma, chromagram, estimateKey, harmonicEvents } from './dsp/chroma';
 import { findSections, resampleCurve, rmsCurve } from './dsp/energy';
 import { hpss } from './dsp/hpss';
@@ -23,6 +24,7 @@ import {
 } from './types';
 
 export type Transcriber = (audio: Float32Array, onProgress: (p: number) => void) => Promise<PitchedNote[]>;
+export type BeatTracker = (audio: Float32Array, onProgress: (p: number) => void) => Promise<Beats>;
 
 export interface PipelineOptions {
   /** Optional neural transcriber; falls back to harmonic-salience tracking when missing or failing. */
@@ -36,6 +38,11 @@ export interface PipelineOptions {
   /** Separated stems at the analysis rate; with `stemNotes`, lines are timed by their attacks. */
   stems?: Partial<Record<StemName, Float32Array>>;
   stemNotes?: StemNotes;
+  /**
+   * Optional beat model (see beat/track.ts): its beats and bar starts are the grid's source. The
+   * tracker here decides when it is missing, fails or finds too few beats.
+   */
+  beatTracker?: BeatTracker;
 }
 
 const NFFT = 2048;
@@ -85,12 +92,35 @@ export async function analyzeSignal(signal: Float32Array, opts: PipelineOptions 
   const rms = rmsCurve(signal, HOP);
   // Band-balanced onset envelope so kicks count as much as broadband noise.
   const env = onsetEnvelope(spec);
-  const tempo = estimateTempo(env, fps);
-  report('rhythm', 0.3);
-  const beatFrames = trackBeats(env, fps, tempo);
-  let beats = refineBeats(beatFrames, env, fps);
-  // Drop beats the tracker invented in silence.
-  beats = beats.filter((t) => (rms[Math.min(rms.length - 1, Math.round(t * fps))] ?? 0) > 0.06);
+  // The beat model's beats when there are enough of them to be a grid; else the tracker here.
+  let modelled: Beats | undefined;
+  if (opts.beatTracker) {
+    try {
+      const found = await opts.beatTracker(signal, (p) => report('rhythm', p * 0.3));
+      if (found.beats.length >= 8) modelled = found;
+      else opts.onLog?.('the beat model found too few beats; using the beat tracker');
+    } catch (err) {
+      opts.onLog?.(`the beat model failed (${(err as Error).message || String(err)}); using the beat tracker`);
+    }
+  }
+  let tempo: number;
+  let beats: number[];
+  if (modelled) {
+    // The model answers in steps of 20 ms: the local fit takes the step out of a steady pulse.
+    beats = smoothBeats(modelled.beats);
+    const gaps = beats
+      .slice(1)
+      .map((t, i) => t - beats[i])
+      .sort((a, b) => a - b);
+    tempo = 60 / gaps[gaps.length >> 1];
+  } else {
+    tempo = estimateTempo(env, fps);
+    report('rhythm', 0.3);
+    const beatFrames = trackBeats(env, fps, tempo);
+    beats = refineBeats(beatFrames, env, fps);
+    // Drop beats the tracker invented in silence.
+    beats = beats.filter((t) => (rms[Math.min(rms.length - 1, Math.round(t * fps))] ?? 0) > 0.06);
+  }
   report('rhythm', 0.6);
   let drums: DrumHit[];
   if (opts.drumSignal) {
@@ -118,7 +148,9 @@ export async function analyzeSignal(signal: Float32Array, opts: PipelineOptions 
     const kick = Math.max(lowEnv[f - 1] ?? 0, lowEnv[f] ?? 0, lowEnv[f + 1] ?? 0);
     return kick + (changeAt.get(t) ?? 0) * 1.2;
   });
-  const downbeats = findDownbeats(accent);
+  // Where the model heard no bar at all, the accents decide as before.
+  const modelBars = modelled ? barsOnGrid(beats, modelled.downbeats) : [];
+  const downbeats = modelBars.length ? modelBars : findDownbeats(accent);
   report('harmony', 1);
   await yieldNow();
 

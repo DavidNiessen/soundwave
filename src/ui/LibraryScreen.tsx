@@ -11,6 +11,7 @@ import {
   Plus,
   Search,
   Share2,
+  Trash2,
   Upload,
   Volume2,
   X,
@@ -137,7 +138,7 @@ export function LibraryScreen({
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [anchor, setAnchor] = useState<string | null>(null);
   /** The open song menu: the songs it is for and where it opens. */
-  const [menu, setMenu] = useState<{ ids: string[]; at: { x: number; y: number } } | null>(null);
+  const [menu, setMenu] = useState<{ ids: string[]; at: { x: number; y: number }; remove?: boolean } | null>(null);
   const [sort, setSort] = useState<Sort>(loadSort);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const search = useRef<HTMLInputElement>(null);
@@ -222,7 +223,7 @@ export function LibraryScreen({
    * Opens the song menu: for the selection when there is one (and the song pressed is in it), else
    * for that song alone. Without a pointer it opens beside the song.
    */
-  const openMenu = (song: SongMeta | null = current, at?: { x: number; y: number }) => {
+  const openMenu = (song: SongMeta | null = current, at?: { x: number; y: number }, remove = false) => {
     let ids: string[];
     if (selected.size && (!song || selected.has(song.id))) ids = shown.filter((s) => selected.has(s.id)).map((s) => s.id);
     else if (song) {
@@ -234,7 +235,7 @@ export function LibraryScreen({
       const r = row?.getBoundingClientRect();
       at = r ? { x: r.left + r.width * 0.45, y: r.bottom + 4 } : { x: innerWidth / 2, y: innerHeight / 3 };
     }
-    setMenu({ ids, at });
+    setMenu({ ids, at, remove });
   };
 
   // The keyboard's menu key and Shift+F10 open the menu too; Ctrl+A selects every song shown.
@@ -297,7 +298,7 @@ export function LibraryScreen({
       id: 'options',
       label: selecting ? `Options for ${selected.size}` : 'Options',
       icon: Ellipsis,
-      ...keysOf('library.options'),
+      ...keysOf('lists.options'),
       disabled: !current && !selecting,
       run: () => openMenu(),
     },
@@ -305,9 +306,19 @@ export function LibraryScreen({
       id: 'select',
       label: isSelected ? 'Deselect' : 'Select',
       icon: CheckSquare,
-      ...keysOf('library.select'),
+      ...keysOf('lists.select'),
       disabled: !current,
       run: () => current && pick(current.id),
+    },
+    {
+      id: 'delete',
+      label: selecting ? `Remove ${selected.size}` : 'Remove',
+      icon: Trash2,
+      ...keysOf('lists.delete'),
+      bar: false,
+      disabled: !current && !selecting,
+      // Asks first, as Remove in the song menu does.
+      run: () => openMenu(selecting ? null : current, undefined, true),
     },
     { id: 'search', label: 'Search', icon: Search, ...keysOf('library.search'), bar: false, run: () => search.current?.focus() },
     { id: 'sort', label: 'Sort', icon: ArrowUpDown, ...keysOf('library.sort'), bar: false, run: cycleSort },
@@ -603,6 +614,7 @@ export function LibraryScreen({
           status={status}
           setlist={setlist}
           at={menu.at}
+          confirming={menu.remove}
           actions={actions}
           onClose={() => setMenu(null)}
         />

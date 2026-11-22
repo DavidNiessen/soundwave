@@ -1,6 +1,7 @@
 import { Crown, LogOut, Play, RotateCcw, Settings as SettingsIcon, SkipForward } from 'lucide-react';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { showSong } from '../app/discord';
+import { StageBackdrop } from './StageBackdrop';
 import { getEngine } from '../audio/engine';
 import { playSfx } from '../audio/sfx';
 import { playShowdownSfx } from '../audio/showdownSfx';
@@ -19,7 +20,7 @@ import { ICON_STROKE, PART_ICON } from './icons';
 import { PlayerFace } from './PartyScreen';
 import { BOARD_INTERVAL_MS, STRIKE_MIN_CHARGE } from '../net/protocol';
 import { online } from '../net/client';
-import type { Avatars } from '../render/aurora/AuroraStage';
+import type { Avatars } from '../render/stage/Stage';
 import type { RingSeat } from '../render/aurora/ring';
 
 interface Props {
@@ -368,6 +369,7 @@ export function PlayScreen({
       inert={settingsOpen}
     >
       <div ref={stageRef} className="layer stage-host" />
+      <StageBackdrop />
       <canvas ref={hwRef} className="layer highway" />
       <div ref={hudRef} className="hud">
         <PlayHud
