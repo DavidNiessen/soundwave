@@ -34,8 +34,9 @@ export function MenuBackground({ graphics, onReady }: { graphics: GraphicsSettin
       if (!live) return;
       acquired = true;
       const g = resolveGraphics(graphics);
-      // Menus never need the full show: cap the frame rate so the machine stays light.
-      const stage = acquireMenuStage(stageRef.current!, { ...g, fpsCap: g.fpsCap && g.fpsCap < 60 ? g.fpsCap : 60, effects: 'off' }, venue);
+      // Menus never need the full show: cap the frame rate so the machine stays light. The effects
+      // level stays as set: the stage's pyro fires only in a drop tried out in the stage browser.
+      const stage = acquireMenuStage(stageRef.current!, { ...g, fpsCap: g.fpsCap && g.fpsCap < 60 ? g.fpsCap : 60 }, venue);
       stage.ready.then(ready, (err) => {
         console.warn('3D stage unavailable', err);
         ready();

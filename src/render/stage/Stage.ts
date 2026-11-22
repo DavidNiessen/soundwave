@@ -77,9 +77,12 @@ export class Stage {
   static async create(canvas: HTMLCanvasElement | OffscreenCanvas, g: GraphicsSettings, opts: StageOptions): Promise<Stage> {
     const cast = await loadCast();
     const focus = opts.part === 'vocals' ? 'vox' : opts.part;
+    const menu = opts.mode === 'menu';
     const venue = await buildVenue(opts.venue ?? DEFAULT_VENUE, {
-      g,
-      menu: opts.mode === 'menu',
+      // The menus' venue has no lasers: they would run all the time. Its pyro (below) only fires in
+      // a drop tried out in the stage browser.
+      g: menu ? { ...g, effects: 'off' } : g,
+      menu,
       part: opts.part,
       focus,
       cast,
@@ -112,6 +115,10 @@ export class Stage {
   private readonly confetti: Confetti | null = null;
   /** Seconds of finale left, the time to its next salvo, and how many it has fired. */
   private finaleLeft = 0;
+  /** The menus' stage: no drifting smoke, and its pyro only fires in a drop. */
+  private readonly menu: boolean;
+  /** Seconds left of a drop tried out in the stage browser (see drop). */
+  private dropLeft = 0;
   private finaleNext = 0;
   private finaleShot = 0;
   private readonly sparks: Particles;
@@ -176,6 +183,7 @@ export class Stage {
     canvas.addEventListener('webglcontextlost', this.onContextLost);
     canvas.addEventListener('webglcontextrestored', this.onContextRestored as EventListener);
     const menu = opts.mode === 'menu';
+    this.menu = menu;
     this.show = new LightShow(menu);
     this.director = new Director(venue.shots, menu ? 'calm' : 'auto', 7, menu);
     this.looks = venue.looks;
@@ -196,19 +204,21 @@ export class Stage {
     this.scene.add(this.beams.group);
     this.owned.push(this.beams);
 
-    if (SPARKS[g.effects] && !menu && venue.flames?.length) {
+    // The menus' stage has its pyro too, for a drop tried out in the stage browser (see drop): it
+    // costs nothing while nothing burns.
+    if (SPARKS[g.effects] && venue.flames?.length) {
       this.flames = new Flames(venue.flames);
       this.scene.add(this.flames.mesh);
       this.owned.push(this.flames);
     }
-    if (CONFETTI[g.effects] && !menu && venue.confetti?.length) {
+    if (CONFETTI[g.effects] && venue.confetti?.length) {
       this.confetti = new Confetti(CONFETTI[g.effects]);
       this.scene.add(this.confetti.points);
       this.owned.push(this.confetti);
     }
     this.sparks = new Particles(SPARKS[g.effects] || 1, 'sparks');
     this.smoke = new Particles(SMOKE[g.effects] || 1, 'smoke');
-    this.pyro = new Pyro(this.sparks.sim, this.smoke.sim, PYRO[menu ? 'off' : g.effects]);
+    this.pyro = new Pyro(this.sparks.sim, this.smoke.sim, PYRO[g.effects]);
     this.pyro.gravity = venue.sparkGravity ?? -9;
     // A burst lights the room in its colour (see roomLights), unless a brighter one still does.
     this.pyro.onBurst = (x, y, z, c, strength) => {
@@ -375,6 +385,16 @@ export class Stage {
   }
 
   /**
+   * A drop on the menus' stage, as the stage browser's Test the drop asks for: everything fires as
+   * when overdrive starts in a song, and for `seconds` the flame jets keep time on the stage's own
+   * beat (the menus hear none). The show runs at full tilt meanwhile from its input (see menuStage).
+   */
+  drop(seconds: number) {
+    this.show.overdriveStart(true);
+    this.dropLeft = seconds;
+  }
+
+  /**
    * The song is over: for `seconds` the flame jets burn in one long burst, the fireworks go off
    * one salvo after another, confetti flies and the crowd applauds.
    */
@@ -445,7 +465,14 @@ export class Stage {
     const advance = Math.max(step * 0.4, step + this.beatDrift * Math.min(1, dt * 8));
     this.beatDrift -= advance - step;
     this.beatClock += advance;
+    const beatsBefore = this.beats;
     this.beats = Math.floor(this.beatClock);
+    // In a drop with no beats heard (the menus), the jets go on the stage's own clock.
+    let jetBeat = beat;
+    if (this.dropLeft > 0) {
+      this.dropLeft -= dt;
+      if (beat === 'none' && this.beats !== beatsBefore) jetBeat = this.beats % 4 === 0 ? 'downbeat' : 'beat';
+    }
     const bands = this.bandsIn;
     const look = this.look;
     const intensity = showIntensity(look, f.intensity);
@@ -457,9 +484,9 @@ export class Stage {
       } else this.co2(e.strength);
     }
     // In overdrive the jets keep time: all of them on the bar, every other one on the beats between.
-    if (this.flames && look.pyro && this.finaleLeft <= 0 && this.show.state.overdrive > 0.5 && beat !== 'none') {
+    if (this.flames && look.pyro && this.finaleLeft <= 0 && this.show.state.overdrive > 0.5 && jetBeat !== 'none') {
       const turn = this.beats;
-      if (beat === 'downbeat') this.fireJets(() => true, 0.9);
+      if (jetBeat === 'downbeat') this.fireJets(() => true, 0.9);
       else this.fireJets((i) => (i + turn) % 2 === 0, 0.55);
     }
     // The finale: salvos in turn (the middle, the sides, the lot), with smoke on every third.
@@ -487,7 +514,7 @@ export class Stage {
     shared.uFire.value = (this.flames?.glow(t) ?? 0) * (0.86 + 0.14 * Math.sin(t * 23) * Math.sin(t * 37 + 1));
     // Low fog in quiet passages: it gathers slowly and thins as the music picks up.
     this.fog += ((this.show.state.level === 'calm' ? 1 : 0) - this.fog) * Math.min(1, dt * 0.25);
-    this.pyro.drift(dt, this.venue.co2, FOG[this.g.effects] * this.fog, TMP_C.copy(this.wash).lerp(WHITE, 0.8));
+    this.pyro.drift(dt, this.venue.co2, (this.menu ? 0 : FOG[this.g.effects]) * this.fog, TMP_C.copy(this.wash).lerp(WHITE, 0.8));
     this.pyro.update(dt);
     this.sparks.update(dt, this.venue.sparkGravity ?? -9);
     this.smoke.update(dt, 1);
@@ -621,6 +648,9 @@ export class Stage {
       scale: this.dynScale,
       size: [this.renderer.domElement.width, this.renderer.domElement.height],
       calls: this.renderer.info.render.calls,
+      // Pyro in flight (sparks and smoke puffs drawn).
+      sparks: this.sparks.mesh.geometry.instanceCount,
+      smoke: this.smoke.mesh.geometry.instanceCount,
     };
   }
 

@@ -45,6 +45,8 @@ export type ToStage =
   /** The newest frame of the player's video on the stage's screens (null: their own pictures again). */
   | { type: 'screen'; id: number; frame: ImageBitmap | null }
   | { type: 'overdrive'; id: number }
+  /** A drop tried out in the stage browser: the pyro fires, and the jets keep time for `seconds`. */
+  | { type: 'drop'; id: number; seconds: number }
   | { type: 'finale'; id: number; seconds: number }
   | { type: 'debug'; id: number }
   /** Sends a copy of every frame drawn (`frame`) while on: for recording a video. */

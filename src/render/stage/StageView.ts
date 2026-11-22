@@ -336,6 +336,11 @@ export class StageView {
     this.send({ type: 'overdrive', id: this.id });
   }
 
+  /** A drop tried out in the stage browser (see Stage.drop). */
+  drop(seconds: number) {
+    this.send({ type: 'drop', id: this.id, seconds });
+  }
+
   finale(seconds: number) {
     this.send({ type: 'finale', id: this.id, seconds });
   }

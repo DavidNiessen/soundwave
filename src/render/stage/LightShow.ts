@@ -93,7 +93,7 @@ export class LightShow {
   private sinceCo2 = 99;
   private pending: ShowEvent[] = [];
 
-  /** `menu`: no pyro, gentler motion, levels from the live audio only. */
+  /** `menu`: no pyro (but for a drop tried out, see overdriveStart), gentler motion, levels from the live audio only. */
   constructor(private readonly menu = false) {}
 
   update(f: ShowFrame): ShowEvent[] {
@@ -159,9 +159,9 @@ export class LightShow {
     return events;
   }
 
-  /** Overdrive kicks in: everything fires. */
-  overdriveStart() {
-    if (this.menu) return;
+  /** Overdrive kicks in: everything fires. On the menus' stage only when `drop` (Test the drop). */
+  overdriveStart(drop = false) {
+    if (this.menu && !drop) return;
     this.pending.push({ type: 'fireworks', which: 'all' }, { type: 'co2', strength: 1 });
     this.state.blinder = 1;
     this.sinceFireworks = 0;

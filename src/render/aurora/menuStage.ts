@@ -38,6 +38,8 @@ let boostUntil = 0;
 /** Plays a drop on the menu stage for `seconds`: the stage browser's Test the drop. */
 export function boostMenuStage(seconds = 5) {
   boostUntil = performance.now() + seconds * 1000;
+  // Its pyro fires, and the flame jets keep time while it lasts.
+  held?.stage.drop(seconds);
 }
 
 export const menuStageBoosted = (now = performance.now()) => now < boostUntil;

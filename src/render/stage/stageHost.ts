@@ -176,6 +176,9 @@ export function createStageHost(post: (m: FromStage) => void, transfer: (m: From
       case 'overdrive':
         slot.stage?.overdriveStart();
         break;
+      case 'drop':
+        slot.stage?.drop(m.seconds);
+        break;
       case 'finale':
         slot.stage?.finale(m.seconds);
         break;
