@@ -27,7 +27,6 @@ import {
   randomColors,
   RANGES,
   stageMedia,
-  stageWeight,
   SKIES,
   SWATCHES,
   TEMPLATE_INFO,
@@ -60,7 +59,6 @@ interface Options {
 
 /** The show's own colours, for the cards of stages without colours of their own. */
 const SHOW_COLORS: StageColors = { key: '#ff66c2', accent: '#6be6ff', wash: '#4d33ff' };
-const WEIGHT_LABEL = { light: 'Light to draw', medium: 'Medium to draw', heavy: 'Heavy to draw' } as const;
 const BACKDROP_LABEL: Record<BackdropKind, string> = { venue: '3D stage', video: 'Video', image: 'Picture', gradient: 'Colour' };
 const SHOW_OPTIONS = [
   { value: 'chill', label: 'Chill', help: 'Slow, soft light changes. Easy on the eyes.' },
@@ -551,9 +549,8 @@ function StageCard({
 }) {
   const b = def.backdrop;
   const tags = [
-    b.kind !== 'venue' ? BACKDROP_LABEL[b.kind] : !def.colors ? 'Changes with the show' : null,
+    b.kind !== 'venue' ? BACKDROP_LABEL[b.kind] : def.colors ? 'Own colours' : 'Changes with the show',
     b.kind === 'venue' && def.screens ? 'Video on the screens' : null,
-    WEIGHT_LABEL[stageWeight(def)],
   ].filter(Boolean);
   return (
     <button

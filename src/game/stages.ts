@@ -106,7 +106,6 @@ export const TEMPLATE_INFO: Record<string, string> = {
   ice: 'Cold blue and white light, crisp beams.',
   sunset: 'Warm orange and pink washes.',
   neon: 'Green and magenta at full tilt.',
-  minimal: 'No crowd, no fireworks: the highway in a quiet fog. The lightest to draw.',
 };
 
 /** The templates shown in the browser itself; the rest are in its list of all templates. */
@@ -139,18 +138,6 @@ export const BUILT_IN: readonly StageDef[] = [
   { ...base, id: 'ice', name: 'Ice', colors: { key: '#7fd8ff', accent: '#ffffff', wash: '#1f4fd1' }, haze: 1.2 },
   { ...base, id: 'sunset', name: 'Sunset', colors: { key: '#ff8a3d', accent: '#ff5fa8', wash: '#c0392b' }, brightness: 1.1 },
   { ...base, id: 'neon', name: 'Neon', colors: { key: '#39ff88', accent: '#ff2bd6', wash: '#3a1cff' }, show: 'festival', beams: 1.3 },
-  {
-    ...base,
-    id: 'minimal',
-    name: 'Minimal',
-    venue: 0.3,
-    beams: 0.5,
-    haze: 0.4,
-    show: 'chill',
-    flashes: false,
-    crowd: false,
-    pyro: false,
-  },
 ];
 
 export const DEFAULT_STAGES: StageSettings = { active: 'festival', mine: [] };
@@ -305,12 +292,4 @@ function hsl(h: number, s: number, l: number): Hex {
       .padStart(2, '0');
   };
   return `#${f(0)}${f(8)}${f(4)}`;
-}
-
-/** A rough feel of how heavy a stage is to draw, for its card. */
-export function stageWeight(d: StageDef): 'light' | 'medium' | 'heavy' {
-  if (d.backdrop.kind === 'image' || d.backdrop.kind === 'gradient') return 'light';
-  if (d.backdrop.kind === 'video') return 'medium';
-  const score = (d.crowd ? 2 : 0) + (d.pyro ? 1 : 0) + d.beams + d.haze * 0.5;
-  return score < 1.5 ? 'light' : score < 3.5 ? 'medium' : 'heavy';
 }
