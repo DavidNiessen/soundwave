@@ -49,7 +49,7 @@ class VideoExports {
 
   snapshot = (): readonly ExportItem[] => this.items;
 
-  /** Called when an export is saved, fails or is cancelled. */
+  /** Called when an export is saved, fails or is cancelled (it has then left the list). */
   onFinished(fn: (item: ExportItem) => void) {
     this.finishers.add(fn);
     return () => void this.finishers.delete(fn);
@@ -91,12 +91,6 @@ class VideoExports {
     this.finish(id, { state: 'cancelled' });
   }
 
-  /** Takes a finished export off the list. */
-  dismiss(id: string) {
-    this.items = this.items.filter((i) => i.id !== id || isActive(i.state));
-    this.changed();
-  }
-
   /** Holds the exports while a song is played (or the editor is open), and lets them go on after. */
   hold(on: boolean) {
     if (on === this.held) return;
@@ -122,10 +116,14 @@ class VideoExports {
     this.changed();
   }
 
+  /** An export is over: those listening hear how it went, and it leaves the list. */
   private finish(id: string, change: Partial<ExportItem>) {
-    this.patch(id, change);
-    const item = this.items.find((i) => i.id === id);
-    if (item) for (const f of this.finishers) f(item);
+    const was = this.items.find((i) => i.id === id);
+    if (!was) return;
+    const item = { ...was, ...change };
+    this.items = this.items.filter((i) => i.id !== id);
+    this.changed();
+    for (const f of this.finishers) f(item);
   }
 
   private getWorker(): Worker | null {

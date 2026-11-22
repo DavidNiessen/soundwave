@@ -33,7 +33,7 @@ import { Mosaic } from './Cover';
 import { ICON_STROKE } from './icons';
 import { TrackPicker, type TrackPickerProps } from './TrackPicker';
 import { ReplaysPanel, type ReplayActions, type ReplayCommands } from './ReplaysPanel';
-import { ExportsChip } from './ExportsList';
+import { ExportsChip } from './ExportProgress';
 import type { ReplayMeta } from '../storage/replays';
 import { useSlide } from './useSlide';
 import { keysOf } from '../input/bindings';

@@ -1,11 +1,16 @@
-import { Film, X } from 'lucide-react';
+import { Film } from 'lucide-react';
 import { useSyncExternalStore } from 'react';
 import { isActive, videoExports, type ExportItem } from '../video/exports';
 import { ICON_STROKE } from './icons';
 
-/** The exports, as the list and the menu's chip show them. */
+/** The videos being made, as the replay list, the replay screen and the menu's chip show them. */
 export function useExports(): readonly ExportItem[] {
   return useSyncExternalStore(videoExports.subscribe, videoExports.snapshot);
+}
+
+/** The video being made of a replay, if one is (the first of several asked for). */
+export function exportOf(items: readonly ExportItem[], replayId: string): ExportItem | undefined {
+  return items.find((i) => i.replayId === replayId && isActive(i.state));
 }
 
 const pct = (p: number) => `${Math.round(p * 100)}%`;
@@ -30,45 +35,32 @@ export function exportStatus(i: ExportItem): string {
   }
 }
 
+/** A replay's row while its video is made: how far it is, short. */
+export const exportShort = (i: ExportItem) =>
+  i.state === 'waiting' ? 'Video next' : i.state === 'saving' ? 'Saving' : `Video ${pct(i.progress)}`;
+
 /**
- * The videos being made in the background, and those just finished: how far each one is, and a
- * button to cancel it (or to take a finished one off the list).
+ * While watching a replay: the video being made, how far it is, over the replay's controls. The
+ * one of this replay when there is one, else the one being made now. Nothing when none is.
  */
-export function ExportsList() {
-  const items = useExports();
-  if (!items.length) return null;
+export function ExportBox({ replayId }: { replayId: string }) {
+  const items = useExports().filter((i) => isActive(i.state));
+  const item = exportOf(items, replayId) ?? items.find((i) => i.state === 'rendering' || i.state === 'saving') ?? items[0];
+  if (!item) return null;
   return (
-    <ul className="exports" aria-label="Videos" data-nav-group="exports">
-      {items.map((i) => {
-        const active = isActive(i.state);
-        return (
-          <li key={i.id} className={`export-item ${i.state}`}>
-            <Film className="export-icon" strokeWidth={ICON_STROKE} aria-hidden />
-            <span className="export-text">
-              <span className="export-name">{i.title}</span>
-              <span className="export-what" role="status">
-                {exportStatus(i)}
-              </span>
-            </span>
-            {active && (
-              <span className="meter export-bar" aria-hidden>
-                <span style={{ width: pct(i.progress) }} />
-              </span>
-            )}
-            <button
-              type="button"
-              className="btn small quiet"
-              aria-label={active ? `Cancel the video of ${i.title}` : `Take the video of ${i.title} off the list`}
-              data-sfx={active ? 'back' : undefined}
-              onClick={() => (active ? videoExports.cancel(i.id) : videoExports.dismiss(i.id))}
-            >
-              <X strokeWidth={ICON_STROKE} aria-hidden />
-              {active ? 'Cancel' : 'Dismiss'}
-            </button>
-          </li>
-        );
-      })}
-    </ul>
+    <section className="replay-export-box" aria-label="Video being made">
+      <div className="replay-export-head">
+        <Film strokeWidth={ICON_STROKE} aria-hidden />
+        <span className="replay-export-title">{item.title}</span>
+        {items.length > 1 && <span className="replay-export-more">+{items.length - 1}</span>}
+      </div>
+      <span className="replay-export-what" role="status">
+        {exportStatus(item)}
+      </span>
+      <span className="meter replay-export-bar" aria-hidden>
+        <span style={{ width: pct(item.progress) }} />
+      </span>
+    </section>
   );
 }
 
