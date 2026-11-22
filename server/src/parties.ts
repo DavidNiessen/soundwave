@@ -26,6 +26,7 @@ import {
   HIT_WARNING_MS,
   MAX_ATTACKERS,
   PARTY_MAX,
+  picksPerPlayer,
   RECONNECT_GRACE_MS,
   SHOWDOWN_FINAL,
   START_LEAD_MS,
@@ -204,6 +205,7 @@ export class Parties {
     switch (msg.type) {
       case 'set':
         if (!host) return fail('Only the host picks the set.');
+        if (s.everyonePicks) return fail('Everyone picks the songs in this party. Turn that off to pick the whole set.');
         if (s.phase === 'playing') return fail('The set can be changed once this song is over.');
         if (s.showdown?.rotation) return fail('This Showdown plays the server’s rotation. Turn that off to pick your own set.');
         this.newSet(party, msg.songs);
@@ -214,9 +216,23 @@ export class Parties {
         const wasRotation = !!s.showdown?.rotation;
         s.mode = msg.mode;
         s.showdown = msg.mode === 'showdown' ? (s.showdown ?? { hits: true, part: null, rotation: false }) : null;
+        if (msg.mode !== 'versus') s.everyonePicks = false;
         this.newSet(party, wasRotation && !s.showdown?.rotation ? [] : s.set);
         return this.share(party);
       }
+      case 'everyone-picks':
+        if (!host) return fail('Only the host decides who picks the songs.');
+        if (s.phase === 'playing') return fail('Wait for this song to end.');
+        if (s.mode !== 'versus') return fail('Everyone picks songs in Versus.');
+        s.everyonePicks = msg.on;
+        if (msg.on) this.setFromPicks(party, true);
+        return this.share(party);
+      case 'picks':
+        if (!s.everyonePicks) return fail('The host picks the set in this party.');
+        if (s.phase === 'playing') return fail('Your picks can change once this song is over.');
+        me.picks = msg.songs;
+        this.setFromPicks(party);
+        return this.share(party);
       case 'showdown':
         if (!host) return fail('Only the host sets up a Showdown.');
         if (s.phase === 'playing') return fail('A Showdown can be set up once this song is over.');
@@ -446,6 +462,27 @@ export class Parties {
     this.sendBoard(party);
   }
 
+  /**
+   * Versus with everyone picking: the set is the players' picks taken in turn (the host's first song,
+   * the next player's first, and round again), each player's cut to their share, a song picked twice
+   * in once. A new set only when the songs change (`always`: even when they do not).
+   */
+  private setFromPicks(party: Party, always = false) {
+    const s = party.state;
+    if (!s.everyonePicks) return;
+    const each = picksPerPlayer(s.members.length);
+    const order = [...s.members].sort((a, b) => (a.id === s.host ? -1 : b.id === s.host ? 1 : 0));
+    const songs: SetSong[] = [];
+    for (let round = 0; round < each; round++)
+      for (const m of order) {
+        const song = m.picks?.[round];
+        if (song && !songs.some((x) => x.id === song.id))
+          songs.push({ id: song.id, title: song.title, artist: song.artist, duration: song.duration });
+      }
+    const same = songs.length === s.set.length && songs.every((x, i) => x.id === s.set[i].id);
+    if (!same || always) this.newSet(party, songs);
+  }
+
   /** A new set: no results yet, nobody ready, and in a Showdown everyone in again. */
   private newSet(party: Party, songs: SetSong[]) {
     const s = party.state;
@@ -556,6 +593,8 @@ export class Parties {
       connected: true,
     });
     this.partyOf.set(player.id, party);
+    // One more player can change how many songs each picks.
+    if (party.state.phase !== 'playing') this.setFromPicks(party);
     this.share(party);
   }
 
@@ -567,6 +606,8 @@ export class Parties {
     // Gone from the song too: the others' results no longer wait for them.
     party.song?.board.delete(id);
     party.song?.playing.delete(id);
+    // Their picks leave the set with them.
+    if (party.state.phase !== 'playing') this.setFromPicks(party);
     this.share(party);
     this.maybeEndSong(party);
   }

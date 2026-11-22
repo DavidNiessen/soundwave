@@ -61,6 +61,7 @@ import { partySongs, type Transfer } from '../net/partySongs';
 import {
   PARTY_MAX,
   PARTY_MODES,
+  picksPerPlayer,
   type BoardLine,
   type Member,
   type PartyMode,
@@ -970,13 +971,29 @@ function ModeLobby({
   const serverOn = !!s.info?.partySongs;
 
   // The host's setlist is the party's set: picked in the library, sent here as it changes. A
-  // Showdown on the server's rotation plays that instead.
+  // Showdown on the server's rotation plays that instead. With everyone picking (Versus), each
+  // player's setlist gives their picks instead: its first songs, as many as each player puts in.
+  const everyone = mode === 'versus' && !!party.everyonePicks;
+  const quota = picksPerPlayer(party.members.length);
+  const asSet = (x: SongMeta): SetSong => ({ id: x.id, title: x.title, artist: x.artist, duration: x.duration });
   const setKey = setlist.map((x) => x.id).join(',');
   const partyKey = party.set.map((x) => x.id).join(',');
   useEffect(() => {
-    if (!host || sd?.rotation || party.phase !== 'lobby' || setKey === partyKey) return;
-    online.setSet(setlist.map((x): SetSong => ({ id: x.id, title: x.title, artist: x.artist, duration: x.duration })));
-  }, [host, sd?.rotation, party.phase, setKey, partyKey, setlist]);
+    if (everyone || !host || sd?.rotation || party.phase !== 'lobby' || setKey === partyKey) return;
+    online.setSet(setlist.map(asSet));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [everyone, host, sd?.rotation, party.phase, setKey, partyKey, setlist]);
+  const mine = setlist.slice(0, quota);
+  const mineKey = mine.map((x) => x.id).join(',');
+  const sentKey = (me.picks ?? []).map((x) => x.id).join(',');
+  useEffect(() => {
+    if (!everyone || party.phase === 'playing' || mineKey === sentKey) return;
+    online.setPicks(mine.map(asSet));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [everyone, party.phase, mineKey, sentKey]);
+  const toggleEveryone = () => online.setEveryonePicks(!everyone);
+  /** Who put each song in, with everyone picking. */
+  const pickedBy = (id: string) => (everyone ? party.members.find((m) => m.picks?.some((p) => p.id === id))?.name : undefined);
 
   const choose = (part: Part, difficulty: Difficulty) => {
     onPick({ part, difficulty });
@@ -1027,6 +1044,9 @@ function ModeLobby({
     },
     { id: 'party-part', label: 'Next part', icon: PART_ICON[me.part], ...keysOf('party.part'), bar: false, run: nextPart },
     { id: 'party-difficulty', label: 'Next difficulty', icon: Gauge, ...keysOf('party.difficulty'), bar: false, run: nextDifficulty },
+    ...(everyone && !host
+      ? [{ id: 'party-pick-songs', label: 'Pick songs', icon: ListMusic, ...keysOf('party.pickSongs'), bar: false, run: onPickSongs }]
+      : []),
     ...(host
       ? [
           ...(sd?.rotation
@@ -1041,6 +1061,18 @@ function ModeLobby({
                   run: onPickSongs,
                 },
               ]),
+          ...(mode === 'versus'
+            ? [
+                {
+                  id: 'party-everyone-picks',
+                  label: everyone ? 'Host picks' : 'Everyone picks',
+                  icon: Users,
+                  ...keysOf('party.everyonePicks'),
+                  bar: false,
+                  run: toggleEveryone,
+                },
+              ]
+            : []),
           { id: 'party-change-mode', label: 'Other mode', icon: Undo2, ...keysOf('party.changeMode'), bar: false, run: changeMode },
           ...(sd
             ? [
@@ -1080,11 +1112,25 @@ function ModeLobby({
               </span>
             )}
           </h2>
-          {host && !sd?.rotation && (
+          {(host || everyone) && !sd?.rotation && (
             <button type="button" className="btn small" data-action="party-pick-songs" onClick={onPickSongs}>
               <Hint {...keysOf('party.pickSongs')} {...hints} />
               <ListMusic strokeWidth={ICON_STROKE} aria-hidden />
-              Pick songs
+              {everyone ? `Your picks · ${Math.min(mine.length, quota)} of ${quota}` : 'Pick songs'}
+            </button>
+          )}
+          {host && mode === 'versus' && (
+            <button
+              type="button"
+              className={`btn small ${everyone ? 'is-on' : ''}`}
+              data-action="party-everyone-picks"
+              aria-pressed={everyone}
+              disabled={watching}
+              onClick={toggleEveryone}
+            >
+              <Hint {...keysOf('party.everyonePicks')} {...hints} />
+              <Users strokeWidth={ICON_STROKE} aria-hidden />
+              {everyone ? 'Everyone picks' : 'You pick all'}
             </button>
           )}
           {host && (
@@ -1101,11 +1147,15 @@ function ModeLobby({
               <ListMusic strokeWidth={ICON_STROKE} />
             </span>
             <span className="song-text">
-              <span className="song-title">{host ? 'No songs yet' : 'The host is picking the songs'}</span>
+              <span className="song-title">
+                {everyone ? 'Everyone picks the songs' : host ? 'No songs yet' : 'The host is picking the songs'}
+              </span>
               <span className="song-artist">
-                {host
-                  ? 'Pick up to four from your library. Players who lack one get it from you through the server.'
-                  : 'Songs you lack come to you by themselves.'}
+                {everyone
+                  ? `Each of you puts in ${quota === 1 ? 'one song' : `${quota} songs`}: the first of your setlist. They are played in turn, and players who lack one get it through the server.`
+                  : host
+                    ? 'Pick up to four from your library. Players who lack one get it from you through the server.'
+                    : 'Songs you lack come to you by themselves.'}
               </span>
             </span>
           </div>
@@ -1122,6 +1172,7 @@ function ModeLobby({
                 serverOn={serverOn}
                 transfer={transfers[song.id]}
                 held={!!held[song.id]}
+                by={pickedBy(song.id)}
               />
             ))}
           </ol>
@@ -1289,6 +1340,7 @@ function SetCard({
   serverOn,
   transfer,
   held,
+  by,
 }: {
   song: SetSong;
   i: number;
@@ -1299,6 +1351,8 @@ function SetCard({
   transfer: Transfer | undefined;
   /** Downloaded for this party only: it goes when the player leaves, unless they keep it. */
   held: boolean;
+  /** With everyone picking: who put it in. */
+  by?: string;
 }) {
   const done = party.results.some((r) => r.songIndex === i);
   const count = party.members.filter((m) => m.have.includes(song.id)).length;
@@ -1359,6 +1413,7 @@ function SetCard({
         <span className="song-artist">
           {song.artist}
           {song.duration > 0 && ` · ${formatTime(song.duration)}`}
+          {by && ` · picked by ${by}`}
         </span>
         <span className="set-notes">{note}</span>
       </span>

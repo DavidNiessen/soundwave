@@ -138,6 +138,7 @@ export const COMMANDS: Command[] = [
     { id: 'party.versus', label: 'Play Versus', key: 'Digit1' },
     { id: 'party.showdown', label: 'Play a Showdown', key: 'Digit2' },
     { id: 'party.changeMode', label: 'Pick another mode', key: 'KeyX' },
+    { id: 'party.everyonePicks', label: 'Versus: everyone picks songs, or the host alone', key: 'KeyK' },
     { id: 'party.hits', label: 'Showdown hits on or off', key: 'KeyA' },
     { id: 'party.onePart', label: 'Showdown on one part, or any', key: 'KeyE' },
     { id: 'party.rotation', label: 'Showdown on the server’s rotation, or my set', key: 'KeyW' },

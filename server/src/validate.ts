@@ -92,6 +92,14 @@ export function clientMessage(raw: unknown): ClientMessage | undefined {
       if (songs.some((s) => !s) || new Set(songs.map((s) => s!.id)).size !== songs.length) return undefined;
       return { type: 'set', songs: songs as SetSong[] };
     }
+    case 'everyone-picks':
+      return typeof raw.on === 'boolean' ? { type: 'everyone-picks', on: raw.on } : undefined;
+    case 'picks': {
+      if (!Array.isArray(raw.songs) || raw.songs.length > SET_LIMIT) return undefined;
+      const songs = raw.songs.map(setSong);
+      if (songs.some((s) => !s) || new Set(songs.map((s) => s!.id)).size !== songs.length) return undefined;
+      return { type: 'picks', songs: songs as SetSong[] };
+    }
     case 'ready': {
       if (!PARTS.includes(raw.part as Part) || !DIFFICULTIES.includes(raw.difficulty as Difficulty) || typeof raw.ready !== 'boolean')
         return undefined;

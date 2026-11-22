@@ -818,6 +818,14 @@ class OnlineClient {
   setSet(songs: SetSong[]) {
     this.send({ type: 'set', songs });
   }
+  /** Versus: the host lets every player pick songs, or picks the set alone again. */
+  setEveryonePicks(on: boolean) {
+    this.send({ type: 'everyone-picks', on });
+  }
+  /** Versus with everyone picking: the songs this player puts in the set. */
+  setPicks(songs: SetSong[]) {
+    this.send({ type: 'picks', songs });
+  }
   ready(part: Part, difficulty: Difficulty, ready: boolean, have: string[], calibrated = false) {
     this.send({ type: 'ready', part, difficulty, ready, have, calibrated });
   }

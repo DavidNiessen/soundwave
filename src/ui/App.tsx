@@ -1143,7 +1143,7 @@ export function App() {
     const song = party?.set[index];
     if (!party || !song) return;
     if (!byId.has(song.id)) await serverSongs.ensure([song.id]);
-    if (!(byId.has(song.id) && canPlay(analysisStatus[song.id])) && !serverSongs.snapshot().held[song.id])
+    if (!(byId.has(song.id) && canPlay(analysisStatus[song.id])) && !serverSongs.snapshot().held[song.id] && !partySongs.songs()[song.id])
       return toast(`You need "${song.title}" in your library, with notes, to start it: everyone plays your charts.`);
     try {
       const made = new Map<string, Chart | null>();

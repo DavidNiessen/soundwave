@@ -110,13 +110,16 @@ class PartySongSync {
     }
     if (!party || !me) return;
     const host = party.host === me;
+    const picked = new Set(party.members.find((m) => m.id === me)?.picks?.map((p) => p.id) ?? []);
     for (const song of party.set) {
+      // A song is sent by whoever brought it: the host, or with everyone picking, its picker.
+      const mine = host || (!!party.everyonePicks && picked.has(song.id));
       if (ctx.has(song.id)) {
         // In the library now (kept, or added by hand): nothing is held or on its way for it any more.
         if (this.held[song.id]) this.release(song.id);
         if (this.state[song.id]?.state === 'getting') this.set(song.id, null);
         const lacking = party.members.some((m) => m.id !== me && m.connected && !m.have.includes(song.id));
-        if (ctx.serverOn && host && ctx.share && !song.cached && lacking) void this.send(ctx, song.id);
+        if (ctx.serverOn && mine && ctx.share && !song.cached && lacking) void this.send(ctx, song.id);
       } else if (this.held[song.id]) {
         if (ctx.keep) void this.keep(song.id);
       } else if (ctx.serverOn && song.cached) void this.get(ctx, song.id, song.title);

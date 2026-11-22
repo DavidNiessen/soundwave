@@ -236,7 +236,15 @@ export interface Member {
   eliminated?: boolean;
   /** Their look on the stage, if they made one. */
   avatar?: Avatar;
+  /** Versus with everyone picking (PartyState.everyonePicks): the songs this player put in, in order. */
+  picks?: SetSong[];
 }
+
+/**
+ * Versus with everyone picking: how many songs each player puts in the set. Two players pick two
+ * each, more pick one each, so a set stays a handful of songs.
+ */
+export const picksPerPlayer = (players: number) => (players <= 2 ? 2 : 1);
 
 /** How one player's song went: the score of record, judged again from their inputs. */
 export interface SongScore {
@@ -286,6 +294,11 @@ export interface PartyState {
   showdown: ShowdownOptions | null;
   /** Private: never offered to friends on Discord (spec 5.4). */
   private: boolean;
+  /**
+   * Versus: every player puts songs in the set (picksPerPlayer each), taken in turn (the host's
+   * first, then the next player's, and round again), rather than the host picking it all.
+   */
+  everyonePicks?: boolean;
 }
 
 /** A chart as it is sent: the same shape as the game's own (src/chart/types.ts). */
@@ -329,6 +342,10 @@ export type ClientMessage =
   | { type: 'party-leave' }
   /** The host picks the set. */
   | { type: 'set'; songs: SetSong[] }
+  /** Versus: the host lets every player pick songs for the set, or takes it back. */
+  | { type: 'everyone-picks'; on: boolean }
+  /** Versus with everyone picking: the songs this player puts in (the first picksPerPlayer count). */
+  | { type: 'picks'; songs: SetSong[] }
   /** A player's own choices, and which of the set's songs they have. */
   | { type: 'ready'; part: Part; difficulty: Difficulty; ready: boolean; have: string[]; calibrated?: boolean }
   /**
