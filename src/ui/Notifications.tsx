@@ -8,7 +8,7 @@ import { pads } from '../input/pads';
 import { menuPulse, type MenuPulse } from '../input/rumble';
 import { Hint, useHints } from './actions';
 import { ICON_STROKE } from './icons';
-import { dismiss, dismissNewest, hold, onRaised, snapshot, subscribe, type Tone } from './notifications';
+import { dismiss, dismissNewest, hold, onRaised, snapshot, subscribe, type Tone } from './notify';
 
 const LOOK: Record<Tone, { icon: LucideIcon; label: string; sfx: Sfx; pulse: MenuPulse | null }> = {
   error: { icon: CircleX, label: 'Error', sfx: 'error', pulse: 'error' },

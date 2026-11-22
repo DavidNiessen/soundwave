@@ -638,7 +638,7 @@ A dialog dims and blurs the screen, takes focus and directional navigation (a co
 
 ### Notifications
 
-Short news that comes and goes by itself (`ui/notifications.ts` raises them, `ui/Notifications.tsx` shows them). Each is a Solid Panel card (0.75rem radius, the glass edge and blur, the notification shadow) with a round icon on a wash of its tone's colour, the message in body type, a close mark (the Dismiss a notification key on the newest one for a keyboard, Z by default) and a 2px line along its foot in the tone's colour that runs out with the time it has left. A faint wash of the tone lights the card from the left. The tone says what kind of news it is, and never trades places:
+Short news that comes and goes by itself (`ui/notify.ts` raises them, `ui/Notifications.tsx` shows them). Each is a Solid Panel card (0.75rem radius, the glass edge and blur, the notification shadow) with a round icon on a wash of its tone's colour, the message in body type, a close mark (the Dismiss a notification key on the newest one for a keyboard, Z by default) and a 2px line along its foot in the tone's colour that runs out with the time it has left. A faint wash of the tone lights the card from the left. The tone says what kind of news it is, and never trades places:
 
 - **Error** (soft pink-red #ffa3b4, a circled cross): something the player asked for failed. The error sound and pulse. Stays 8s.
 - **Warning** (soft amber #ffc98a, a triangle): the game did not do something, for a reason the player can act on (the setlist is full, no notes at this difficulty). The back sound and pulse. Stays 6s.

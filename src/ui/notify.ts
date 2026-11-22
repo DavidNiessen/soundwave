@@ -2,6 +2,8 @@
  * Notifications: short messages that come and go on their own, for news that does not need a
  * screen of its own (a file saved, an import refused, a video finished). Anything in the game can
  * raise one with `notify`; `Notifications` (Notifications.tsx) shows them and gives each its sound.
+ * (This file is not called notifications.ts: on a file system that ignores case, as macOS and
+ * Windows do, that name and Notifications.tsx are one file to the module resolver.)
  *
  * A notification has a tone that says what kind of news it is, and the tone sets its colour, icon,
  * sound and how long it stays:

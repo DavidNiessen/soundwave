@@ -11,7 +11,7 @@ import {
   onRaised,
   resetNotifications,
   snapshot,
-} from '../src/ui/notifications';
+} from '../src/ui/notify';
 
 const live = () => snapshot().items.filter((n) => !n.leaving);
 

@@ -14,7 +14,7 @@ import { Cover } from './Cover';
 import { Dialog } from './Dialog';
 import { DIFFICULTY_LABEL, ICON_STROKE, PART_ICON, PART_LABEL } from './icons';
 import { analysisLabel, type SongStatus } from './LibraryScreen';
-import { notify } from './notifications';
+import { notify } from './notify';
 import { usePreviewRows } from './usePreviewRows';
 import { keysOf } from '../input/bindings';
 

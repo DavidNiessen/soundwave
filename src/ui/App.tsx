@@ -89,7 +89,7 @@ import { StageBackdrop } from './StageBackdrop';
 import type { SongActions } from './SongMenu';
 import { SongSheet } from './SongSheet';
 import { MetadataSheet } from './MetadataSheet';
-import { notify } from './notifications';
+import { notify } from './notify';
 import { Notifications } from './Notifications';
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { installUiSounds } from './uiSounds';
