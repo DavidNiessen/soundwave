@@ -117,7 +117,7 @@ export const BUILT_IN: readonly StageDef[] = [
   {
     ...base,
     id: 'blackout',
-    name: 'Blackout',
+    name: 'Dark night',
     colors: { key: '#ffffff', accent: '#cfe3ff', wash: '#2a2f4a' },
     venue: 0,
     haze: 0.7,

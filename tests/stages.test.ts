@@ -92,12 +92,12 @@ describe('stages', () => {
   it('copies a stage under a name not taken yet', () => {
     const blackout = BUILT_IN.find((d) => d.id === 'blackout')!;
     const first = copyStage({ active: 'festival', mine: [] }, blackout);
-    expect(first.name).toBe('My Blackout');
+    expect(first.name).toBe('My Dark night');
     expect(first.id).not.toBe(blackout.id);
     expect(first.colors).toEqual(blackout.colors);
     expect(first.colors).not.toBe(blackout.colors);
     const second = copyStage({ active: 'festival', mine: [first] }, blackout);
-    expect(second.name).toBe('My Blackout 2');
+    expect(second.name).toBe('My Dark night 2');
   });
 
   it('gives the renderer linear colours, and none for the show’s own', () => {
