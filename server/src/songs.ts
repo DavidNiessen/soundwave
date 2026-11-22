@@ -70,8 +70,8 @@ export class Songs {
         audio INTEGER NOT NULL,
         cover_type TEXT,
         created INTEGER NOT NULL,
-        uid TEXT,
-        hash TEXT
+        uid TEXT NOT NULL UNIQUE,
+        hash TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS not_duplicates (
         a TEXT NOT NULL,
@@ -86,22 +86,6 @@ export class Songs {
         at INTEGER NOT NULL
       );
     `);
-    this.migrate();
-  }
-
-  /** Gives songs stored before internal ids and hashes theirs (a server updated from an older version). */
-  private migrate() {
-    const cols = (this.store.db.prepare('PRAGMA table_info(songs)').all() as { name: string }[]).map((c) => c.name);
-    if (!cols.includes('uid')) this.store.db.exec('ALTER TABLE songs ADD COLUMN uid TEXT');
-    if (!cols.includes('hash')) this.store.db.exec('ALTER TABLE songs ADD COLUMN hash TEXT');
-    const missing = this.store.db.prepare('SELECT id, audio FROM songs WHERE uid IS NULL OR hash IS NULL').all() as {
-      id: string;
-      audio: number;
-    }[];
-    for (const r of missing)
-      this.store.db
-        .prepare('UPDATE songs SET uid = COALESCE(uid, ?), hash = COALESCE(hash, ?) WHERE id = ?')
-        .run(randomUUID(), this.fileHash(r.id, !!r.audio), r.id);
   }
 
   /** The hash of what the server keeps of a song: its whole file, or its charts without the audio. */

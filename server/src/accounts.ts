@@ -2,24 +2,13 @@
  * Accounts on a server: making one (as the server's mode allows), signing in, staying signed in,
  * invites, and what owners and moderators can do (docs/specs/online-play.md, 3.2).
  *
- * A player signs in with their identity (identity.ts): no password. Accounts made with a password
- * before identities sign in with it once more, and their game gives the account its key then
- * (`linkKey`), which deletes the password. A player who lost their identity gets a recovery link
- * from an admin (or from the server's command line, cli.ts) that binds their new one.
+ * A player signs in with their identity (identity.ts): no password. A player who lost their identity
+ * gets a recovery link from an admin (or from the server's command line, cli.ts) that binds their
+ * new one.
  */
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { Account, Invite, Recovery, Role, Session, SignUp, UserEntry } from '../../src/net/protocol.ts';
-import {
-  ACCESS_TTL_MS,
-  checkPassword,
-  cleanName,
-  hashPassword,
-  randomToken,
-  REFRESH_TTL_MS,
-  sha256,
-  Signer,
-  type AccessClaims,
-} from './auth.ts';
+import { ACCESS_TTL_MS, cleanName, randomToken, REFRESH_TTL_MS, sha256, Signer, type AccessClaims } from './auth.ts';
 import type { Config } from './config.ts';
 import { FOREVER, type Store, type UserRow } from './db.ts';
 import { Identities } from './identity.ts';
@@ -50,8 +39,6 @@ export class Accounts {
   readonly identities: Identities;
   /** The code the owner signs up with, while the server has no owner (printed when it starts). */
   readonly ownerCode: string | undefined;
-  /** Hashes a password that matches no account, so signing in as nobody takes as long as signing in. */
-  private readonly decoy: Promise<string>;
   private readonly store: Store;
   private readonly config: Config;
   private readonly now: () => number;
@@ -71,12 +58,11 @@ export class Accounts {
       let code = store.getMeta('owner-code');
       if (!code || !store.invite(code)) {
         code = randomToken(12);
-        store.addInvite({ code, by: null, uses: 1, expires: null, role: 'owner', kind: 'invite', created: now() });
+        store.addInvite({ code, by: null, uses: 1, expires: null, role: 'owner', created: now() });
         store.setMeta('owner-code', code);
       }
       this.ownerCode = code;
     }
-    this.decoy = hashPassword(randomToken());
   }
 
   /** Makes an account for an identity, if the server's mode lets this request make one, and signs it in. */
@@ -96,11 +82,11 @@ export class Accounts {
     if (!req.invite && mode === 'invite')
       throw new Refusal(403, 'Making an account here needs an invite. Ask someone on the server for an invite link.');
     if (req.invite) {
-      const invite = this.store.useInvite(req.invite, 'invite', now);
+      const invite = this.store.useInvite(req.invite, now);
       if (!invite) throw new Refusal(403, 'That invite has run out or was used up. Ask for a new link.');
       role = invite.role === 'owner' ? 'owner' : 'player';
     }
-    const user = { id: randomUUID(), name, hash: '', pubkey, role, created: now };
+    const user = { id: randomUUID(), name, pubkey, role, created: now };
     this.store.addUser(user);
     if (role === 'owner')
       this.store.log({ at: now, actor: user.id, action: 'owner', target: user.id, reason: 'Signed up with the set-up code' });
@@ -113,17 +99,6 @@ export class Accounts {
     if (!user) throw new Refusal(404, 'You have no account on this server yet.');
     this.checkBan(user);
     return this.issue(user);
-  }
-
-  /**
-   * An account made with a password, signed in with it once more: it takes the player's identity
-   * from now on, and the password is deleted.
-   */
-  linkKey(user: UserRow, proof: unknown) {
-    const pubkey = this.identities.check(proof);
-    const other = this.store.userByKey(pubkey);
-    if (other && other.id !== user.id) throw new Refusal(409, `Your identity has another account here already: ${other.name}.`);
-    this.store.setKey(user.id, pubkey);
   }
 
   /** A player changes their own name on this server. */
@@ -173,16 +148,6 @@ export class Accounts {
     this.store.dropRefreshes(user.id);
     this.checkBan(user);
     return this.issue(this.store.userById(user.id)!);
-  }
-
-  /** Signs in with a password: only accounts made before identities, to move them over (see linkKey). */
-  async signIn(name: unknown, password: unknown): Promise<Session> {
-    const found = typeof name === 'string' ? this.store.userByName(name.trim()) : undefined;
-    const user = found?.hash ? found : undefined;
-    const ok = typeof password === 'string' && password.length <= 200 && (await checkPassword(password, user?.hash || (await this.decoy)));
-    if (!user || !ok) throw new Refusal(401, 'That name and password do not match an account on this server.');
-    this.checkBan(user);
-    return this.issue(user);
   }
 
   /** Trades a refresh token (single-use) for a new pair. */
@@ -236,7 +201,7 @@ export class Accounts {
     const n = !mod ? 1 : uses === null ? null : typeof uses === 'number' && Number.isInteger(uses) && uses > 0 ? Math.min(uses, 10_000) : 1;
     const h = !mod ? 24 * 7 : hours === null ? null : typeof hours === 'number' && hours > 0 ? Math.min(hours, 24 * 365) : 24 * 7;
     const expires = h === null ? null : this.now() + h * 3_600_000;
-    this.store.addInvite({ code, by: by.id, uses: n, expires, role: 'player', kind: 'invite', created: this.now() });
+    this.store.addInvite({ code, by: by.id, uses: n, expires, role: 'player', created: this.now() });
     return { code, uses: n, expires, link: inviteLink(this.config.publicUrl, code) };
   }
 
@@ -244,7 +209,7 @@ export class Accounts {
   inviteValid(code: string): boolean {
     const i = this.store.invite(code);
     const now = this.now();
-    return !!i && i.kind === 'invite' && (i.expires === null || i.expires > now) && (i.uses === null || i.uses > 0);
+    return !!i && (i.expires === null || i.expires > now) && (i.uses === null || i.uses > 0);
   }
 
   /* Moderation ------------------------------------------------------------------------------- */
@@ -344,7 +309,6 @@ export class Accounts {
         ? { until: user.banned_until >= FOREVER ? 'for ever' : new Date(user.banned_until).toISOString(), reason: user.ban_reason }
         : null,
       invitesMade: this.store.invitesBy(user.id).map((i) => ({
-        kind: i.kind,
         usesLeft: i.uses,
         expires: i.expires ? new Date(i.expires).toISOString() : null,
         created: new Date(i.created).toISOString(),

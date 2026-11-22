@@ -196,16 +196,6 @@ function parseJoinLink(text: string, kind: 'invite' | 'recover'): { server: stri
   return null;
 }
 
-/** Where a browser sign-in's secret waits for the code (see signInWithBrowser). */
-const LOGIN_KEY = 'soundwave.login';
-/** How long a browser sign-in may take, from opening the page to the code coming back. */
-const LOGIN_WAIT_MS = 30 * 60_000;
-const base64url = (bytes: Uint8Array) =>
-  btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-
 class OnlineClient {
   private state: OnlineState = {
     status: 'off',
@@ -417,67 +407,6 @@ class OnlineClient {
     return info;
   }
 
-  /**
-   * Signs in to an account made with a password on the server's own page, in the player's browser,
-   * where their password manager works (server/src/browserLogin.ts). The desktop app opens the
-   * browser and waits for the page to hand it back a code (soundwave://auth); the web game goes to
-   * the page and comes back to itself with the code. Either way the code is traded with the secret
-   * kept here (`finishBrowserSignIn`), and the account takes the identity.
-   */
-  async signInWithBrowser() {
-    const server = this.state.server;
-    if (!server) throw new Error('Connect to a server first.');
-    const random = (n: number) => base64url(crypto.getRandomValues(new Uint8Array(n)));
-    const verifier = random(32);
-    const state = random(16);
-    const challenge = base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
-    const desktop = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-    const redirect = desktop ? 'soundwave://auth' : location.origin + location.pathname;
-    try {
-      localStorage.setItem(LOGIN_KEY, JSON.stringify({ server, verifier, state, at: Date.now() }));
-    } catch {
-      throw new Error('This browser does not let the game keep the sign-in while it is away. Sign in here instead.');
-    }
-    const url = `${server}/login?${new URLSearchParams({ redirect, challenge, state })}`;
-    if (desktop) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('open_in_browser', { url });
-    } else location.assign(url);
-  }
-
-  /**
-   * The code a browser sign-in handed back (`soundwave://auth?code=…` or the web game's address):
-   * traded for the session, if it answers the sign-in this game started. False when the address is
-   * not one.
-   */
-  async finishBrowserSignIn(address: string): Promise<boolean> {
-    let url: URL;
-    try {
-      url = new URL(address);
-    } catch {
-      return false;
-    }
-    const code = url.searchParams.get('code');
-    const state = url.searchParams.get('state');
-    if (!code || !state) return false;
-    let pending: { server: string; verifier: string; state: string; at: number } | null = null;
-    try {
-      pending = JSON.parse(localStorage.getItem(LOGIN_KEY) ?? 'null');
-    } catch {
-      pending = null;
-    }
-    if (!pending || pending.state !== state) return false;
-    localStorage.removeItem(LOGIN_KEY);
-    if (Date.now() - pending.at > LOGIN_WAIT_MS) throw new Error('That sign-in took too long. Sign in again.');
-    if (this.state.server !== pending.server) await this.choose(pending.server);
-    this.signedIn(await this.request<Session>('/auth/exchange', { body: { code, verifier: pending.verifier } }));
-    // Signed in with a password for the last time: the account takes the identity from now on.
-    await this.linkIdentity();
-    this.set({ invite: null });
-    this.connect();
-    return true;
-  }
-
   /** An invite link opened or pasted: its server is chosen, and its code waits for the sign-up. */
   async useInvite(invite: { server: string; invite: string }) {
     await this.choose(invite.server);
@@ -487,7 +416,7 @@ class OnlineClient {
   /** This game's proof for the server chosen: its identity's key for the server, signing a fresh challenge. */
   private async proof() {
     const id = this.state.info?.id;
-    if (!id) throw new Error('This server is older than your game. Its owner needs to update it.');
+    if (!id) throw new Error('Connect to a server first.');
     const { nonce } = await this.request<{ nonce: string }>('/auth/challenge', { body: {} });
     return identity.prove(id, nonce);
   }
@@ -518,31 +447,6 @@ class OnlineClient {
     this.signedIn(await this.request<Session>('/auth/signup', { body: { ...req, ...(await this.proof()) } }));
     this.set({ invite: null });
     this.connect();
-  }
-
-  /**
-   * Signs in to an account made with a password before identities: it takes the identity at once,
-   * and the server deletes the password.
-   */
-  async signIn(name: string, password: string) {
-    this.signedIn(await this.request<Session>('/auth/signin', { body: { name, password } }));
-    await this.linkIdentity();
-    this.connect();
-  }
-
-  /**
-   * Gives the account just signed in with a password this game's identity. When the server refuses
-   * (the identity has another account there), the password's sign-in is dropped again: an account
-   * the identity cannot sign in to would be lost the next time it runs out.
-   */
-  private async linkIdentity() {
-    try {
-      await identity.ensure(this.state.account?.name ?? '');
-      await this.request('/me/key', { body: await this.proof(), auth: true });
-    } catch (e) {
-      this.signOut();
-      throw e;
-    }
   }
 
   /**

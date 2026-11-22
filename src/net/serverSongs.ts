@@ -239,7 +239,7 @@ class ServerSongs {
     const server = this.server;
     const todo = this.state.list.filter(
       (x) =>
-        x.qualities !== undefined &&
+        x.audio &&
         (x.by === me.name || me.curator) &&
         (!x.qualities.includes('medium') || !x.qualities.includes('low')) &&
         !this.copied.has(x.id),
@@ -254,7 +254,7 @@ class ServerSongs {
         try {
           const file = (await local(song.id)) ?? (me.curator ? (await online.downloadSong(song.id, 'high')).blob : null);
           if (!file) continue;
-          const missing = (['medium', 'low'] as const).filter((q) => !song.qualities!.includes(q));
+          const missing = (['medium', 'low'] as const).filter((q) => !song.qualities.includes(q));
           const copies = await makeCopies(file, song.id, [...missing]);
           for (const [q, blob] of Object.entries(copies)) await online.sendSongCopy(song.id, q as 'medium' | 'low', blob);
         } catch {

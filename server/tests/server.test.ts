@@ -1,4 +1,3 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import {
@@ -13,7 +12,6 @@ import {
 } from '../../src/net/protocol.ts';
 import { Accounts, Refusal } from '../src/accounts.ts';
 import { startServer, type RunningServer } from '../src/app.ts';
-import { hashPassword } from '../src/auth.ts';
 import { DEFAULTS, type Config } from '../src/config.ts';
 import { Store } from '../src/db.ts';
 import { Parties } from '../src/parties.ts';
@@ -58,11 +56,6 @@ async function start(over: Partial<Config> = {}) {
   store = new Store(':memory:');
   server = await startServer({ ...DEFAULTS, port: 0, host: '127.0.0.1', mode: 'public', dataDir: ':memory:', ...over }, store, quiet);
   who = players(server.url);
-}
-
-/** An account made with a password before identities: no key yet. */
-async function oldAccount(name: string, password = 'correct horse') {
-  store.addUser({ id: randomUUID(), name, hash: await hashPassword(password), pubkey: null, role: 'player', created: Date.now() });
 }
 
 async function api<T>(method: string, path: string, body?: unknown, token?: string): Promise<{ status: number; body: T }> {
@@ -136,8 +129,9 @@ describe('accounts', () => {
     expect((await api<{ name: string }>('GET', '/me', undefined, r.body.access)).body.name).toBe('Robin');
     // A key with no account here is told so (the game offers to join then).
     expect((await api('POST', '/auth/key', await proof(server.url, newKey()))).status).toBe(404);
-    // A joined player has no password to sign in with.
-    expect((await api('POST', '/auth/signin', { name: 'Robin', password: '' })).status).toBe(401);
+    // There is no other way in: no passwords, no sign-in page.
+    expect((await api('POST', '/auth/signin', { name: 'Robin', password: 'x' })).status).toBe(404);
+    expect((await fetch(`${server.url}/login`)).status).toBe(404);
   });
 
   it('refuse a challenge used twice, one it never gave, a signature not made with the key, and one for another server', async () => {
@@ -218,95 +212,6 @@ describe('accounts', () => {
     expect(html).toContain('Our &lt;server&gt;');
     const spent = await (await fetch(`${server.url}/join?invite=nope`)).text();
     expect(spent).toContain('has run out or was used up');
-  });
-
-  it('moves an account made with a password to the player’s identity, and deletes the password', async () => {
-    await start();
-    await oldAccount('Old');
-    await signUp('Taken');
-    expect((await api('POST', '/auth/signin', { name: 'Old', password: 'wrong password' })).status).toBe(401);
-    const s = await api<Session>('POST', '/auth/signin', { name: 'OLD', password: 'correct horse' });
-    expect(s.status).toBe(200);
-    // A key that has an account already cannot be given to another.
-    expect((await api('POST', '/me/key', await proof(server.url, who.keyOf('Taken')), s.body.access)).status).toBe(409);
-    expect((await who.link('Old', s.body.access)).status).toBe(200);
-    expect(store.userByName('Old')!.hash).toBe('');
-    expect((await api('POST', '/auth/signin', { name: 'Old', password: 'correct horse' })).status).toBe(401);
-    const back = await who.signIn('Old');
-    expect(back.status).toBe(200);
-    expect(back.body.user.name).toBe('Old');
-  });
-
-  it('signs in through the browser: its own form, a one-time code to the game, traded with the game’s secret', async () => {
-    await start();
-    await oldAccount('Ana');
-    const verifier = randomBytes(32).toString('base64url');
-    const challenge = createHash('sha256').update(verifier).digest('base64url');
-    const ask = { redirect: 'http://localhost:5173/', challenge, state: 'state-123' };
-    // The page is a plain form a password manager knows.
-    const page = await fetch(`${server.url}/login?${new URLSearchParams(ask)}`);
-    expect(page.status).toBe(200);
-    const html = await page.text();
-    expect(html).toContain('autocomplete="current-password"');
-    expect(page.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
-    // A page that would send the code elsewhere is refused.
-    expect((await fetch(`${server.url}/login?${new URLSearchParams({ ...ask, redirect: 'https://evil.example/' })}`)).status).toBe(400);
-    const form = (fields: Record<string, string>) =>
-      fetch(`${server.url}/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ ...ask, mode: 'signin', ...fields }),
-        redirect: 'manual',
-      });
-    // A wrong password comes back to the form, with why.
-    const wrong = await form({ name: 'Ana', password: 'nope nope' });
-    expect(wrong.status).toBe(401);
-    expect(await wrong.text()).toContain('role="alert"');
-    const ok = await form({ name: 'Ana', password: 'correct horse' });
-    expect(ok.status).toBe(303);
-    const back = new URL(ok.headers.get('location')!);
-    expect(back.origin).toBe('http://localhost:5173');
-    expect(back.searchParams.get('state')).toBe('state-123');
-    const code = back.searchParams.get('code')!;
-    // Without the secret the code is worth nothing; with it, once.
-    expect((await api('POST', '/auth/exchange', { code, verifier: 'x'.repeat(43) })).status).toBe(400);
-    const ok2 = await form({ name: 'Ana', password: 'correct horse' });
-    const code2 = new URL(ok2.headers.get('location')!).searchParams.get('code')!;
-    const session = await api<Session>('POST', '/auth/exchange', { code: code2, verifier });
-    expect(session.status).toBe(200);
-    expect(session.body.user.name).toBe('Ana');
-    expect((await api('POST', '/auth/exchange', { code: code2, verifier })).status).toBe(400);
-    // The desktop app gets a page that opens it by its link.
-    const app = await fetch(`${server.url}/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ ...ask, redirect: 'soundwave://auth', mode: 'signin', name: 'Ana', password: 'correct horse' }),
-    });
-    expect(app.status).toBe(200);
-    expect(await app.text()).toMatch(/soundwave:\/\/auth\?code=/);
-  });
-
-  it('only signs in on the browser’s page: no account is made there, and a joined player has no password for it', async () => {
-    await start({ mode: 'invite' });
-    await signUp('Owner', { invite: server.accounts.ownerCode });
-    const verifier = randomBytes(32).toString('base64url');
-    const ask = {
-      redirect: 'http://localhost:5173/',
-      challenge: createHash('sha256').update(verifier).digest('base64url'),
-      state: 'state-123',
-    };
-    // An older game asking for the sign-up page gets the sign-in form.
-    const page = await (await fetch(`${server.url}/login?${new URLSearchParams({ ...ask, mode: 'signup', invite: 'abc' })}`)).text();
-    expect(page).toContain('autocomplete="current-password"');
-    expect(page).not.toContain('new-password');
-    expect(page).not.toContain('name="invite"');
-    const tried = await fetch(`${server.url}/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ ...ask, mode: 'signup', name: 'Owner', password: '' }),
-      redirect: 'manual',
-    });
-    expect(tried.status).toBe(401);
   });
 
   it('asks for the server password in password mode', async () => {

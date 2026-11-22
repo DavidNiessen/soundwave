@@ -215,7 +215,7 @@ to want:
 | `SOUNDWAVE_PUBLIC_URL`   | Coolify's domain                | The address players use (`https://…`). Invite and recovery links carry it. Set it outside Coolify. |
 | `SOUNDWAVE_SONG_SHARING` | `off`                           | `songs` lets players share whole songs, `charts` everything but the audio. See below.              |
 | `SOUNDWAVE_PARTY_SONGS`  | `true`                          | Pass a party's songs on to players who don't have them.                                            |
-| `SOUNDWAVE_WEB_GAME`     | `https://soundwave.niessen.dev` | The web game invite links offer, and the only website sign-in sends players back to.               |
+| `SOUNDWAVE_WEB_GAME`     | `https://soundwave.niessen.dev` | The web game that invite and recovery links offer.                                                 |
 
 The rest (song size limits, the party song cache, public covers for Discord) is in
 [server/README.md](../server/README.md#settings). Restart the server after changing a setting;
@@ -294,15 +294,12 @@ Forgot your exact name? `node server/src/cli.ts admins` lists the server's admin
 | "Servers outside your own network need HTTPS"                               | You typed `http://` for an internet address. Put HTTPS in front of the server (Coolify or Caddy), and connect with `https://` or just the domain.                                  |
 | The game cannot reach the server                                            | Open `https://<your-server>/info` in a browser. Nothing: check DNS, the proxy, and the firewall (80 and 443 open). JSON: the server works, so check the address typed in the game. |
 | "This server needs a newer version of Soundwave" or "runs an older version" | The game and the server differ. Update whichever the sentence names.                                                                                                               |
-| "This server is older than your game"                                       | The server is from before identities. Update it.                                                                                                                                   |
-| A player made an account with a password, before identities                 | They choose **I have an account here with a password** and sign in once more (in the game or the browser). The account takes their identity, and the password is deleted.          |
-| Signing in in the browser works, but the game never picks it up             | Desktop: the browser has to be allowed to open Soundwave (it asks the first time). Web game: `SOUNDWAVE_WEB_GAME` must be the address you play on.                                 |
+| An invite or recovery link's page does not open the game                    | Desktop: the browser has to be allowed to open Soundwave (it asks the first time). Web game: `SOUNDWAVE_WEB_GAME` must be the address you play on. Or paste the link in the game.  |
 | A player lost their identity                                                | An admin makes them a recovery link (Admin → Players). For yourself as an admin, see [step 7](#7-lost-your-admin-identity).                                                        |
 | Invite links point at `localhost`                                           | `SOUNDWAVE_PUBLIC_URL` is not set. Set it to the address players use, and restart.                                                                                                 |
 | Parties never connect, but signing in works                                 | The proxy does not pass WebSockets on (`/ws`). Caddy does by default; for nginx see [step 2B](#b-docker-compose-on-a-vps).                                                         |
 | "Too many tries. Wait a minute"                                             | The sign-in rate limit. Behind a proxy, make sure `SOUNDWAVE_TRUST_PROXY=true`, or every player counts as the proxy.                                                               |
 | The set-up code is gone, and nobody is the admin                            | It is printed again on every start until the server has an admin: restart and read the logs.                                                                                       |
-| A Players section on the Admin page says the server is too old              | Update the server.                                                                                                                                                                 |
 
 Still stuck? [Open an issue](https://github.com/DavidNiessen/soundwave/issues) with what the server
 printed and what the game said.

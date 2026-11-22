@@ -66,7 +66,5 @@ export function players(url: string) {
     },
     /** Signs in as `name` with their key: the server's answer. */
     signIn: async (name: string) => post<Session>(url, '/auth/key', await proof(url, keyOf(name))),
-    /** Gives the account signed in with `token` the key of `name` (an old password account moving over). */
-    link: async (name: string, token: string) => post<{ ok: boolean }>(url, '/me/key', await proof(url, keyOf(name)), token),
   };
 }

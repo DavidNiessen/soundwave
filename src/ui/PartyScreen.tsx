@@ -20,8 +20,6 @@ import {
   Scissors,
   Crown,
   Download,
-  ExternalLink,
-  KeyRound,
   Link as LinkIcon,
   LoaderCircle,
   Pencil,
@@ -252,7 +250,6 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
   const me = useSyncExternalStore(identity.subscribe, identity.snapshot);
   const [address, setAddress] = useState(s.server?.replace(/^https?:\/\//, '') ?? '');
   const [name, setName] = useState(me?.name ?? '');
-  const [password, setPassword] = useState('');
   const [serverPassword, setServerPassword] = useState('');
   /** The invite field: filled in from an invite link the game was opened with, or typed. */
   const [code, setCode] = useState(s.invite ?? '');
@@ -262,14 +259,9 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
   const [changing, setChanging] = useState(false);
   /**
    * Where signing in is at: the identity being tried on the server, waiting for a player who signed
-   * out to sign in again, making an account for the identity, or moving over an account made with a
-   * password before identities.
+   * out to sign in again, or making an account for the identity.
    */
-  const [step, setStep] = useState<'checking' | 'out' | 'join' | 'old'>('checking');
-  /** Signing in with a password here, in the game, rather than on the server's page in the browser. */
-  const [inGame, setInGame] = useState(false);
-  /** The browser was opened to sign in with a password (desktop): the game waits for it to come back. */
-  const [waiting, setWaiting] = useState(false);
+  const [step, setStep] = useState<'checking' | 'out' | 'join'>('checking');
   /** This browser cannot sign with Ed25519 (from before 2023): no signing in at all. */
   const [unsupported, setUnsupported] = useState(false);
   const info = changing ? null : s.info;
@@ -341,16 +333,10 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
   const invite = (code.trim() && (parseInvite(code)?.invite ?? code.trim())) || s.invite || undefined;
   const join = () =>
     run('account', () => online.join({ name: name.trim(), ...(invite ? { invite } : mode === 'password' ? { serverPassword } : {}) }));
-  const signInOld = () => run('account', () => online.signIn(name.trim(), password));
   /** Signs in again after signing out; an identity with no account here (deleted, say) goes on to join. */
   const signInAgain = () =>
     run('account', async () => {
       if (!(await online.signInWithIdentity())) setStep('join');
-    });
-  const browser = () =>
-    run('account', async () => {
-      await online.signInWithBrowser();
-      setWaiting(true);
     });
   const needsCode = mode === 'invite' && !invite;
 
@@ -421,7 +407,7 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
             className="connect-form"
             onSubmit={(e) => {
               e.preventDefault();
-              void (step === 'old' ? signInOld() : step === 'out' ? signInAgain() : join());
+              void (step === 'out' ? signInAgain() : join());
             }}
           >
             <div className="party-server">
@@ -455,11 +441,8 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
                   )}
                   {busy === 'account' ? 'Signing in…' : 'Sign in'}
                 </button>
-                <button type="button" className="btn quiet wide" onClick={() => (setStep('old'), setProblem(null))}>
-                  <KeyRound strokeWidth={ICON_STROKE} aria-hidden />I have an account here with a password
-                </button>
               </>
-            ) : step === 'join' ? (
+            ) : (
               <>
                 <h2 className="connect-title">Join {info.name}</h2>
                 <p className="hint connect-note">
@@ -510,88 +493,6 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
                     <LogIn strokeWidth={ICON_STROKE} aria-hidden />
                   )}
                   {busy === 'account' ? 'One moment…' : 'Join'}
-                </button>
-                <button type="button" className="btn quiet wide" onClick={() => (setStep('old'), setProblem(null))}>
-                  <KeyRound strokeWidth={ICON_STROKE} aria-hidden />I have an account here with a password
-                </button>
-              </>
-            ) : (
-              <>
-                <h2 className="connect-title">Move your account over</h2>
-                <p className="hint connect-note">
-                  Sign in with your password one last time. Your account then uses this game’s identity, and the password is deleted.
-                </p>
-                {info.browserLogin && !inGame ? (
-                  waiting ? (
-                    <>
-                      <p className="connect-wait">
-                        <LoaderCircle className="spin" strokeWidth={ICON_STROKE} aria-hidden />
-                        Sign in in your browser. The game picks it up by itself.
-                      </p>
-                      <button type="button" className="btn wide" onClick={() => void browser()}>
-                        <ExternalLink strokeWidth={ICON_STROKE} aria-hidden />
-                        Open the page again
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      className="btn primary wide connect-go"
-                      data-autofocus
-                      disabled={!!busy}
-                      onClick={() => void browser()}
-                    >
-                      <ExternalLink strokeWidth={ICON_STROKE} aria-hidden />
-                      Sign in with your browser
-                    </button>
-                  )
-                ) : (
-                  <>
-                    <label className="meta-field">
-                      <span className="dim">Name</span>
-                      <span className="connect-input" data-ring-box>
-                        <UserRound strokeWidth={ICON_STROKE} aria-hidden />
-                        <input
-                          value={name}
-                          onChange={(e) => setName(e.target.value)}
-                          maxLength={24}
-                          autoComplete="username"
-                          spellCheck={false}
-                          data-autofocus
-                        />
-                      </span>
-                    </label>
-                    <label className="meta-field">
-                      <span className="dim">Password</span>
-                      <span className="connect-input" data-ring-box>
-                        <KeyRound strokeWidth={ICON_STROKE} aria-hidden />
-                        <input
-                          type="password"
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          maxLength={200}
-                          autoComplete="current-password"
-                        />
-                      </span>
-                    </label>
-                    <button type="submit" className="btn primary wide connect-go" disabled={!!busy || !name.trim() || !password}>
-                      {busy === 'account' ? (
-                        <LoaderCircle className="spin" strokeWidth={ICON_STROKE} aria-hidden />
-                      ) : (
-                        <LogIn strokeWidth={ICON_STROKE} aria-hidden />
-                      )}
-                      {busy === 'account' ? 'One moment…' : 'Sign in and move over'}
-                    </button>
-                  </>
-                )}
-                {info.browserLogin && (
-                  <button type="button" className="btn quiet wide" onClick={() => (setInGame(!inGame), setWaiting(false))}>
-                    {inGame ? 'Use my browser instead' : 'Sign in here in the game instead'}
-                  </button>
-                )}
-                <button type="button" className="btn quiet wide" onClick={() => (setStep('join'), setProblem(null))}>
-                  <UserPlus strokeWidth={ICON_STROKE} aria-hidden />
-                  I’m new here
                 </button>
               </>
             )}

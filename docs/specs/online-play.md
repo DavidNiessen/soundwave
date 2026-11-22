@@ -370,7 +370,7 @@ what it hands out. So the server gives its owner the tools to run it responsibly
   would need a second copy of the judging code and a heavier setup.
 - **Storage:** SQLite by default (one file, easy to back up) and Postgres optionally. Shared songs and covers live
   in a folder or S3-compatible storage.
-- **Sign-in (decided, replacing passwords):** an **identity** per installation of the game, nothing external, no
+- **Sign-in (decided):** no passwords, an **identity** per installation of the game, nothing external, no
   third-party accounts, no emails.
   - The game keeps one 32-byte secret: in the system's secret store in the desktop app (Windows Credential
     Manager, the macOS keychain; a file only its user reads on Linux), in the browser's storage in the web game.
@@ -385,10 +385,8 @@ what it hands out. So the server gives its owner the tools to run it responsibly
     the identity of the game it is opened in, and ends the old one's sign-ins. An admin's own, when there are
     several admins, comes from the server's command line (`node server/src/cli.ts recover <name>`), so no admin
     can take over another.
-  - Accounts made with a password before identities sign in with it once more, then take the identity and the
-    password is deleted.
 - **Security:**
-  - **Keys:** the server keeps only public keys; old password hashes (Argon2id) go when their account moves over.
+  - **Keys:** the server keeps only public keys, never anything secret.
   - **Tokens:** short-lived access tokens plus a refresh token.
   - **Limits:** rate limits on sign-in and uploads.
   - **TLS:** HTTPS/WSS is required for anything but `localhost`. The docs show it behind Caddy, which gets certificates
@@ -610,8 +608,7 @@ host/server → client
 
 **Server HTTP (level 2):**
 
-- **Accounts:** `POST /auth/challenge | key | signup | recover | refresh`, `POST /me/name`, `DELETE /me`
-  (`/auth/signin` and `POST /me/key` only move password accounts over).
+- **Accounts:** `POST /auth/challenge | key | signup | recover | refresh`, `POST /me/name`, `DELETE /me`.
 - **Leaderboards:** `GET /boards/:songId/:chartId/:part/:difficulty`, `POST /scores`.
 - **Shared songs:** `GET /songs?query=`, `POST /songs`, `GET /songs/:id`.
 - **Covers:** `GET /covers/:songId.jpg`.

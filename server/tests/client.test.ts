@@ -1,13 +1,11 @@
 /**
  * The game's own connection (src/net/client.ts) against a real server: joining with the game's
  * identity (src/net/identity.ts, WebCrypto as in a browser), the socket, the clock, a party and a
- * song started together, signing out and in, and an old password account moving to the identity.
+ * song started together, signing out and in, and a recovery link on a new installation.
  */
-import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { WireChart } from '../../src/net/protocol.ts';
 import { startServer, type RunningServer } from '../src/app.ts';
-import { hashPassword } from '../src/auth.ts';
 import { DEFAULTS } from '../src/config.ts';
 import { Store } from '../src/db.ts';
 
@@ -165,29 +163,21 @@ describe('the game’s connection', () => {
     await until((s) => s.party?.phase === 'results');
   });
 
-  it('moves an account made with a password over to the identity, unless the identity has an account here', async () => {
-    store.addUser({
-      id: randomUUID(),
-      name: 'Old Timer',
-      hash: await hashPassword('correct horse'),
-      pubkey: null,
-      role: 'player',
-      created: Date.now(),
-    });
+  it('gets its account back on a new installation with a recovery link', async () => {
+    const before = store.userByName('Player One')!.pubkey;
     online.signOut();
-    // This game's identity is Player One here: it cannot be Old Timer too.
-    await expect(online.signIn('old timer', 'correct horse')).rejects.toThrow(/another account here already: Player One/);
-    expect(online.snapshot()).toMatchObject({ status: 'signed-out', account: null });
-    expect(store.userByName('Old Timer')!.hash).not.toBe('');
-    // On another installation (a new identity) it works, and the password is gone.
+    // A new installation: no identity, and none of the old one's accounts.
     storage.delete('soundwave.identity');
     forgetLoadedIdentity();
-    await online.signIn('old timer', 'correct horse');
+    expect(await online.signInWithIdentity()).toBe(false);
+    const { code } = server.accounts.makeRecovery(null, 'Player One');
+    await online.recover(server.url, code);
     await until((s) => s.status === 'online');
-    expect(online.snapshot().account?.name).toBe('Old Timer');
-    expect(store.userByName('Old Timer')!.hash).toBe('');
+    expect(online.snapshot().account?.name).toBe('Player One');
+    expect(store.userByName('Player One')!.pubkey).not.toBe(before);
+    // The new identity signs in from now on, and the link is spent.
     online.signOut();
     expect(await online.signInWithIdentity()).toBe(true);
-    expect(online.snapshot().account?.name).toBe('Old Timer');
+    await expect(online.recover(server.url, code)).rejects.toThrow(/run out or was used/);
   });
 });

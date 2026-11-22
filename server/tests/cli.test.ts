@@ -36,8 +36,8 @@ describe('the server’s command line', () => {
   it('lists the admins and makes a recovery link that gives an admin their account back', async () => {
     dir = mkdtempSync(join(tmpdir(), 'soundwave-cli-'));
     const before = new Store(dir);
-    before.addUser({ id: 'a1', name: 'Boss', hash: '', pubkey: newKey().publicKey, role: 'owner', created: 1 });
-    before.addUser({ id: 'p1', name: 'Player', hash: '', pubkey: newKey().publicKey, role: 'player', created: 2 });
+    before.addUser({ id: 'a1', name: 'Boss', pubkey: newKey().publicKey, role: 'owner', created: 1 });
+    before.addUser({ id: 'p1', name: 'Player', pubkey: newKey().publicKey, role: 'player', created: 2 });
     before.close();
 
     expect(run('admins').trim()).toBe('Boss');

@@ -64,12 +64,6 @@ export interface ServerInfo {
    * the server keeps it for a while, and the player's game downloads it by itself.
    */
   partySongs: boolean;
-  /**
-   * The server has a sign-in page of its own (`GET /login`) the game opens in the browser, so the
-   * browser's password manager works; the game trades the code it hands back (`POST /auth/exchange`).
-   * Only for accounts made with a password before identities, to move them over.
-   */
-  browserLogin?: boolean;
   /** This server's own id, which a player's key for it is made from (server/src/identity.ts). */
   id: string;
 }
@@ -117,10 +111,10 @@ export interface SharedSong {
   /** The whole song can be downloaded; without it, only its charts, for a player with the same audio. */
   audio: boolean;
   /**
-   * Smaller copies the server keeps for streaming, besides the song as shared ('high'): absent on an
-   * older server, and empty until a game has made them (see src/net/streamQuality.ts).
+   * Smaller copies the server keeps for streaming, besides the song as shared ('high'): empty until
+   * a game has made them, and for a song without its audio (see src/net/streamQuality.ts).
    */
-  qualities?: StreamQuality[];
+  qualities: StreamQuality[];
   cover: boolean;
   /** Who shared it (null once their account is gone). */
   by: string | null;

@@ -1,5 +1,5 @@
-//! Opens a web page in the player's own browser (not in the game's window): a server's sign-in
-//! page, where the browser's password manager works (src/net/client.ts, `signInWithBrowser`).
+//! Opens a web page in the player's own browser (not in the game's window), such as the guide to
+//! running a server from the Online tab (src/ui/OnlinePanel.tsx, `openExternal`).
 //! Only http and https addresses are opened, handed to the system as they are, never through a
 //! shell that would read them.
 
@@ -48,8 +48,10 @@ mod tests {
 
     #[test]
     fn only_web_addresses_open() {
-        assert!(openable("https://play.example.com/login?state=abc"));
-        assert!(openable("http://localhost:7421/login"));
+        assert!(openable(
+            "https://github.com/DavidNiessen/soundwave/tree/main/server#readme"
+        ));
+        assert!(openable("http://localhost:7421/join?invite=abc"));
         assert!(!openable("file:///C:/Windows/System32/calc.exe"));
         assert!(!openable("javascript:alert(1)"));
         assert!(!openable("https://a.example/ & calc"));

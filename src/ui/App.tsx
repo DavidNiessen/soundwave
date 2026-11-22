@@ -564,11 +564,9 @@ export function App() {
     });
   useEffect(() => watchOpenedFiles((files) => openedRef.current(files)), []);
   // Invite links: the desktop app opens soundwave://join links, and the web game is opened with
-  // ?server=…&invite=… by a server's join page. Either lands on Play together, ready to sign up.
+  // ?server=…&invite=… by a server's join page. Either lands on Play together, ready to join.
   const inviteRef = useRef<(text: string) => void>(() => {});
   inviteRef.current = (text) => {
-    // A browser sign-in coming back (soundwave://auth?code=…): the game trades its code.
-    if (/^soundwave:\/\/auth/i.test(text)) return void finishSignInRef.current(text);
     // A recovery link: the account it is for takes this game's identity.
     const recovery = parseRecovery(text);
     if (recovery)
@@ -588,32 +586,12 @@ export function App() {
       (e: Error) => toast(e.message),
     );
   };
-  /** A browser sign-in's code, back from the server's page: signed in, the game is brought forward. */
-  const finishSignInRef = useRef<(address: string) => Promise<void>>(async () => {});
-  finishSignInRef.current = (address: string) =>
-    online.finishBrowserSignIn(address).then(
-      (done) => {
-        if (!done) return;
-        toast(`Signed in as ${online.snapshot().account?.name ?? 'you'}.`);
-        if (!['play', 'replay', 'export', 'editor'].includes(viewRef.current.name)) goOnline();
-        if (inDesktopApp())
-          void import('@tauri-apps/api/window').then(({ getCurrentWindow }) => getCurrentWindow().setFocus()).catch(() => {});
-      },
-      (e: Error) => toast(e.message),
-    );
   const invitesWatched = useRef(false);
   useEffect(() => {
     if (!booted || invitesWatched.current) return;
     invitesWatched.current = true;
     if (!inDesktopApp()) {
       const here = new URL(location.href);
-      // Back from signing in on the server's page: the code is traded, and taken out of the address.
-      if (here.searchParams.has('code') && here.searchParams.has('state')) {
-        void finishSignInRef.current(here.href);
-        for (const k of ['code', 'state', 'server']) here.searchParams.delete(k);
-        history.replaceState(history.state, '', here.pathname + here.search + here.hash);
-        return;
-      }
       if (!here.searchParams.has('invite') && !here.searchParams.has('recover')) return;
       inviteRef.current(here.href);
       // The invite is not left in the address, where a reload or a shared tab would carry it on.

@@ -47,25 +47,25 @@ your name and put the code in the invite field) and that account becomes the ser
 `soundwave-server.json` in the data folder, or environment variables (which win). Restart the server
 after a change.
 
-| Setting          | Variable                     | Default             | What it is                                                                                       |
-| ---------------- | ---------------------------- | ------------------- | ------------------------------------------------------------------------------------------------ |
-| `name`           | `SOUNDWAVE_NAME`             | `Soundwave server`  | Shown in the game.                                                                               |
-| `description`    | `SOUNDWAVE_DESCRIPTION`      |                     | One line about the server.                                                                       |
-| `port`           | `PORT`                       | `7420`              |                                                                                                  |
-| `host`           | `HOST`                       | `0.0.0.0`           |                                                                                                  |
-| `mode`           | `SOUNDWAVE_MODE`             | `invite`            | Who can make an account: `public`, `password` or `invite`.                                       |
-| `password`       | `SOUNDWAVE_PASSWORD`         |                     | The server's password, which joining needs in `password` mode.                                   |
-| `publicUrl`      | `SOUNDWAVE_PUBLIC_URL`       | `http://localhost…` | The address players use, written into invite and recovery links. Set it.                         |
-| `webGameUrl`     | `SOUNDWAVE_WEB_GAME`         | the game's website  | The web game an invite link offers, and the only website the sign-in page sends players back to. |
-| `trustProxy`     | `SOUNDWAVE_TRUST_PROXY`      | `false`             | Behind a proxy: take players' addresses (for rate limits) from the proxy.                        |
-| `songSharing`    | `SOUNDWAVE_SONG_SHARING`     | `off`               | `songs`, `charts` or `off`: see [Shared songs](#shared-songs).                                   |
-| `songMaxMb`      | `SOUNDWAVE_SONG_MAX_MB`      | `100`               | The largest song file, MB.                                                                       |
-| `quotaMb`        | `SOUNDWAVE_QUOTA_MB`         | `2000`              | What each player may share in all, MB.                                                           |
-| `publicCovers`   | `SOUNDWAVE_PUBLIC_COVERS`    | `false`             | Serve song covers without signing in (for Discord statuses).                                     |
-| `partySongs`     | `SOUNDWAVE_PARTY_SONGS`      | `true`              | Pass a party's songs on to its players: see [A party's songs](#a-partys-songs).                  |
-| `partyCacheMb`   | `SOUNDWAVE_PARTY_CACHE_MB`   | `4000`              | The most the party song cache holds, MB.                                                         |
-| `partyCacheDays` | `SOUNDWAVE_PARTY_CACHE_DAYS` | `7`                 | How long a party's song is kept after it was last used.                                          |
-| (data folder)    | `SOUNDWAVE_DATA`             | `./data`            | Where the database (with the server's signing secret) and its files live. Back this up.          |
+| Setting          | Variable                     | Default             | What it is                                                                              |
+| ---------------- | ---------------------------- | ------------------- | --------------------------------------------------------------------------------------- |
+| `name`           | `SOUNDWAVE_NAME`             | `Soundwave server`  | Shown in the game.                                                                      |
+| `description`    | `SOUNDWAVE_DESCRIPTION`      |                     | One line about the server.                                                              |
+| `port`           | `PORT`                       | `7420`              |                                                                                         |
+| `host`           | `HOST`                       | `0.0.0.0`           |                                                                                         |
+| `mode`           | `SOUNDWAVE_MODE`             | `invite`            | Who can join: `public`, `password` or `invite`.                                         |
+| `password`       | `SOUNDWAVE_PASSWORD`         |                     | The server's password, which joining needs in `password` mode.                          |
+| `publicUrl`      | `SOUNDWAVE_PUBLIC_URL`       | `http://localhost…` | The address players use, written into invite and recovery links. Set it.                |
+| `webGameUrl`     | `SOUNDWAVE_WEB_GAME`         | the game's website  | The web game that invite and recovery links offer.                                      |
+| `trustProxy`     | `SOUNDWAVE_TRUST_PROXY`      | `false`             | Behind a proxy: take players' addresses (for rate limits) from the proxy.               |
+| `songSharing`    | `SOUNDWAVE_SONG_SHARING`     | `off`               | `songs`, `charts` or `off`: see [Shared songs](#shared-songs).                          |
+| `songMaxMb`      | `SOUNDWAVE_SONG_MAX_MB`      | `100`               | The largest song file, MB.                                                              |
+| `quotaMb`        | `SOUNDWAVE_QUOTA_MB`         | `2000`              | What each player may share in all, MB.                                                  |
+| `publicCovers`   | `SOUNDWAVE_PUBLIC_COVERS`    | `false`             | Serve song covers without signing in (for Discord statuses).                            |
+| `partySongs`     | `SOUNDWAVE_PARTY_SONGS`      | `true`              | Pass a party's songs on to its players: see [A party's songs](#a-partys-songs).         |
+| `partyCacheMb`   | `SOUNDWAVE_PARTY_CACHE_MB`   | `4000`              | The most the party song cache holds, MB.                                                |
+| `partyCacheDays` | `SOUNDWAVE_PARTY_CACHE_DAYS` | `7`                 | How long a party's song is kept after it was last used.                                 |
+| (data folder)    | `SOUNDWAVE_DATA`             | `./data`            | Where the database (with the server's signing secret) and its files live. Back this up. |
 
 The modes:
 
@@ -97,14 +97,6 @@ per player and two servers cannot tell they see the same player.
   identity (`POST /auth/recover` with the code and a proof) and ends every sign-in the old one had.
   An admin's own link, when there are several admins, comes from the server's command line (see
   [Command line](#command-line)), never from another admin.
-
-Accounts made with a password before identities sign in once more with it, in the game
-(`POST /auth/signin`) or on the server's own sign-in page in the browser (`GET /login`, where a
-password manager fills it in). The game then gives the account its identity (`POST /me/key`) and the
-server deletes the password. The page hands the game a one-time code (PKCE, S256, valid two minutes),
-which the game trades with its secret for its tokens (`POST /auth/exchange`); it sends codes nowhere
-but the desktop app, the web game named by `webGameUrl`, and the player's own machine, runs no script
-and cannot be framed. No account is made there.
 
 Players rename themselves on the Online tab, under their account (`POST /me/name`); the moderation
 log keeps the old name.
@@ -254,58 +246,53 @@ comes from the [command line](#command-line)). Making one ends any earlier link 
 ## What it keeps
 
 Only what the features need: each account's name, role, when it was made, and the public key of the
-player's identity for this server (an account made with a password before identities keeps the
-password as an Argon2id hash until it moves over); sign-ins and recovery links as hashes of their
-tokens or as single-use codes; invites; bans; the moderation log; scores with
+player's identity for this server (never a password, and nothing secret); sign-ins as hashes of
+their tokens; recovery links as single-use codes; invites; bans; the moderation log; scores with
 their runs; shared songs. Parties live in memory and are gone when the server stops. There is no
 telemetry. A player can save everything the server holds about them from the game (**Save my
 data**, `GET /me/export`) and delete their account (`DELETE /me`).
 
 ## API
 
-Every request but `/health`, `/info`, the join and sign-in pages, the `/auth/…` requests, and public
+Every request but `/health`, `/info`, the join page, the `/auth/…` requests, and public
 covers needs a signed-in player's access token (`Authorization: Bearer …`). Bodies and answers are
 JSON unless said otherwise. A proof is `{ publicKey, nonce, signature }` (see
 [Signing in](#signing-in)).
 
-| Request                                             | What it does                                                                          |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `GET /health`                                       | `{ ok, players, parties, users }` while the server and its database work              |
-| `GET /info`                                         | The server's name, description, join mode, protocol version, players online, its id   |
-| `GET /join?invite=…`, `GET /join?recover=…`         | The page an invite or recovery link opens (HTML)                                      |
-| `POST /auth/challenge`                              | A challenge to sign: `{ nonce }`, good for two minutes and one try                    |
-| `POST /auth/key`                                    | Sign in with a proof (404: that key has no account here)                              |
-| `POST /auth/signup`                                 | Join: a proof and `{ name, invite?, serverPassword? }`                                |
-| `POST /auth/recover`                                | A recovery link used: a proof and `{ code }`; the account takes that key              |
-| `POST /auth/refresh`                                | Trade a refresh token (single-use) for new tokens                                     |
-| `POST /auth/signin`                                 | An account made with a password signs in with it: `{ name, password }`                |
-| `GET /login`, `POST /login`                         | The browser sign-in page for accounts made with a password (HTML, a plain form)       |
-| `POST /auth/exchange`                               | Trade the sign-in page's code and the game's secret for tokens: `{ code, verifier }`  |
-| `POST /me/key`                                      | Give an account made with a password the player's key (a proof); deletes the password |
-| `POST /me/name`                                     | Rename yourself: `{ name }`                                                           |
-| `GET /me`, `DELETE /me`                             | The signed-in account; delete it and everything with it                               |
-| `GET /me/export`                                    | Everything held about the player: a zip with a README (`application/zip`)             |
-| `GET /me/profile`, `PUT /me/profile`                | The player's avatar: `{ avatar: { top, bottom, finish } \| null }`                    |
-| `GET /presence`                                     | Who is online and what they are doing                                                 |
-| `POST /invites`                                     | Make an invite link: `{ uses?, hours? }`                                              |
-| `POST /scores`                                      | A finished run, judged again before it is taken                                       |
-| `GET /boards/top`                                   | The week's top players                                                                |
-| `GET /boards/:songId`                               | The charts of a song that have boards                                                 |
-| `GET /boards/:songId/:chartId/:part/:difficulty`    | A board (`?week=1` for this week's)                                                   |
-| `GET /scores/:id/run`                               | A run on a board, to watch it                                                         |
-| `POST /scores/:id/share`                            | Share your run to the replay list, or not: `{ shared }`                               |
-| `DELETE /scores/:id?reason=…`                       | Remove a cheated run (owner and moderators)                                           |
-| `GET /replays?song=…`                               | The replays players shared                                                            |
-| `GET /showdown/rotation`, `POST /showdown/rotation` | The Showdown rotation; set it (owner and moderators): `{ songs }`                     |
-| `GET /songs?q=…`, `POST /songs`                     | Shared songs; share one (the `.soundwave` file as the body)                           |
-| `POST /songs/:id/edit`                              | Rename a song (owner, moderators): its file and hash change, copies follow            |
-| `GET /songs/:id/file`, `GET /songs/:id/charts`      | A shared song's file (`?quality=medium\|low` for a smaller copy), or its charts       |
-| `PUT /songs/:id/copies/:quality`                    | Send a smaller copy for streaming (its sharer, the owner, moderators)                 |
-| `POST /songs/:id/report`, `DELETE /songs/:id`       | Report a song; remove it (its uploader, the owner, moderators)                        |
-| `GET /covers/:songId.jpg`                           | A shared song's cover (public with `publicCovers`)                                    |
-| `PUT /party/songs/:id`, `GET /party/songs/:id`      | Send one of your party's songs to the server; get it (party players only)             |
-| `GET /mod/…`, `POST /mod/…`                         | Moderation, see above                                                                 |
-| `/ws`                                               | The WebSocket: parties and Showdown (see Protocol)                                    |
+| Request                                             | What it does                                                                        |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `GET /health`                                       | `{ ok, players, parties, users }` while the server and its database work            |
+| `GET /info`                                         | The server's name, description, join mode, protocol version, players online, its id |
+| `GET /join?invite=…`, `GET /join?recover=…`         | The page an invite or recovery link opens (HTML)                                    |
+| `POST /auth/challenge`                              | A challenge to sign: `{ nonce }`, good for two minutes and one try                  |
+| `POST /auth/key`                                    | Sign in with a proof (404: that key has no account here)                            |
+| `POST /auth/signup`                                 | Join: a proof and `{ name, invite?, serverPassword? }`                              |
+| `POST /auth/recover`                                | A recovery link used: a proof and `{ code }`; the account takes that key            |
+| `POST /auth/refresh`                                | Trade a refresh token (single-use) for new tokens                                   |
+| `POST /me/name`                                     | Rename yourself: `{ name }`                                                         |
+| `GET /me`, `DELETE /me`                             | The signed-in account; delete it and everything with it                             |
+| `GET /me/export`                                    | Everything held about the player: a zip with a README (`application/zip`)           |
+| `GET /me/profile`, `PUT /me/profile`                | The player's avatar: `{ avatar: { top, bottom, finish } \| null }`                  |
+| `GET /presence`                                     | Who is online and what they are doing                                               |
+| `POST /invites`                                     | Make an invite link: `{ uses?, hours? }`                                            |
+| `POST /scores`                                      | A finished run, judged again before it is taken                                     |
+| `GET /boards/top`                                   | The week's top players                                                              |
+| `GET /boards/:songId`                               | The charts of a song that have boards                                               |
+| `GET /boards/:songId/:chartId/:part/:difficulty`    | A board (`?week=1` for this week's)                                                 |
+| `GET /scores/:id/run`                               | A run on a board, to watch it                                                       |
+| `POST /scores/:id/share`                            | Share your run to the replay list, or not: `{ shared }`                             |
+| `DELETE /scores/:id?reason=…`                       | Remove a cheated run (owner and moderators)                                         |
+| `GET /replays?song=…`                               | The replays players shared                                                          |
+| `GET /showdown/rotation`, `POST /showdown/rotation` | The Showdown rotation; set it (owner and moderators): `{ songs }`                   |
+| `GET /songs?q=…`, `POST /songs`                     | Shared songs; share one (the `.soundwave` file as the body)                         |
+| `POST /songs/:id/edit`                              | Rename a song (owner, moderators): its file and hash change, copies follow          |
+| `GET /songs/:id/file`, `GET /songs/:id/charts`      | A shared song's file (`?quality=medium\|low` for a smaller copy), or its charts     |
+| `PUT /songs/:id/copies/:quality`                    | Send a smaller copy for streaming (its sharer, the owner, moderators)               |
+| `POST /songs/:id/report`, `DELETE /songs/:id`       | Report a song; remove it (its uploader, the owner, moderators)                      |
+| `GET /covers/:songId.jpg`                           | A shared song's cover (public with `publicCovers`)                                  |
+| `PUT /party/songs/:id`, `GET /party/songs/:id`      | Send one of your party's songs to the server; get it (party players only)           |
+| `GET /mod/…`, `POST /mod/…`                         | Moderation, see above                                                               |
+| `/ws`                                               | The WebSocket: parties and Showdown (see Protocol)                                  |
 
 ## Protocol
 

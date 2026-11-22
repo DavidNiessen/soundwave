@@ -18,7 +18,6 @@ import { zip } from './zip.ts';
 import { Rotation } from './rotation.ts';
 import { Scores } from './scores.ts';
 import { joinPage } from './joinPage.ts';
-import { donePage, LoginCodes, loginPage, readRequest, stopPage, validRequest } from './browserLogin.ts';
 import { Songs } from './songs.ts';
 import { PartySongs } from './partySongs.ts';
 import { clientMessage } from './validate.ts';
@@ -46,8 +45,9 @@ const EXPORT_README = (server: string) => `Your data on ${server}, a Soundwave s
 Everything this server holds about your account, as it was when you saved it.
 
 account.json       Your account (name, role, when it was made), a ban if there is one, the invites
-                   you made, and what moderators did about you. Your password is stored only as an
-                   Argon2id hash and sign-ins only as hashes of their tokens: neither is in here.
+                   you made, and what moderators did about you. You sign in with your identity: the
+                   server keeps only its public key for this server, and sign-ins only as hashes
+                   of their tokens.
 avatar.json        Your look on the stage: three colours, or null when you have none.
 runs.json          Every run you sent to the leaderboards: the song, chart, part and difficulty, the
                    score, and the inputs it was judged from (base64; see src/game/replay.ts in the
@@ -126,8 +126,6 @@ export async function startServer(config: Config, store: Store, log: (line: stri
   // A challenge costs the server nothing to hand out, and every sign-in starts with one: a party of
   // players behind one home address all signing in at once must not run out.
   const challengeLimit = new RateLimit(60, 60);
-  /** Sign-ins done in the browser, waiting for the game to trade their code (browserLogin.ts). */
-  const loginCodes = new LoginCodes();
   const writeLimit = new RateLimit(30, 30);
 
   /** Closes a player's connection, telling them why. */
@@ -191,7 +189,6 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       sharing: config.songSharing,
       publicCovers: config.publicCovers,
       partySongs: config.partySongs,
-      browserLogin: true,
       id: accounts.identities.serverId,
     }),
     'POST /songs': async (req, _body, ip, _p, raw) => {
@@ -222,10 +219,6 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       notify(['users']);
       return session;
     },
-    'POST /auth/signin': (_req, body, ip) => {
-      if (!authLimit.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
-      return accounts.signIn(body.name, body.password);
-    },
     'POST /auth/refresh': (_req, body) => accounts.refresh(body.refresh),
     // Signing in with an identity: a challenge, then the challenge signed (identity.ts).
     'POST /auth/challenge': (_req, _body, ip) => {
@@ -237,20 +230,10 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       if (!authLimit.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
       return accounts.recover(body.code, body);
     },
-    // An account made with a password takes the player's identity (and loses the password).
-    'POST /me/key': (req, body) => {
-      accounts.linkKey(me(req), body);
-      return { ok: true };
-    },
     'POST /me/name': (req, body) => {
       const you = accounts.rename(me(req), body.name);
       notify(['users', 'presence', 'boards', 'replays', 'log']);
       return you;
-    },
-    // The game trades the code a browser sign-in handed it, with the secret it started with.
-    'POST /auth/exchange': (_req, body, ip) => {
-      if (!authLimit.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
-      return loginCodes.exchange(body.code, body.verifier);
     },
     'GET /me': (req) => {
       const u = me(req);
@@ -492,8 +475,6 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       if (recover) return void res.end(joinPage(config, recover.slice(0, 64), true, 'recover'));
       return void res.end(joinPage(config, code, code.length <= 64 && accounts.inviteValid(code)));
     }
-    // Signing in through the browser: the server's own page, a plain form (browserLogin.ts).
-    if (path === '/login' && (req.method === 'GET' || req.method === 'POST')) return void browserSignIn(req, res);
     let params: string[] = [];
     let route = routes[`${req.method} ${path}`];
     if (!route)
@@ -549,65 +530,6 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       reply(res, 500, { error: 'Something went wrong on the server.' });
     }
   });
-
-  /** The sign-in page, and the form sent from it: signed in, the game gets its code. */
-  const browserSignIn = async (req: IncomingMessage, res: ServerResponse) => {
-    // Where a form may send the player on to: this server, and the web game (the desktop app's
-    // soundwave:// link is opened from the page itself).
-    let game = '';
-    try {
-      game = new URL(config.webGameUrl).origin;
-    } catch {
-      /* none */
-    }
-    const html = (status: number, body: string, extra: Record<string, string> = {}) => {
-      res.writeHead(status, {
-        'Content-Type': 'text/html; charset=utf-8',
-        'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${game} http://localhost:* http://127.0.0.1:*; frame-ancestors 'none'`,
-        'Cache-Control': 'no-store',
-        'X-Frame-Options': 'DENY',
-        ...extra,
-      });
-      res.end(body);
-    };
-    let params: URLSearchParams;
-    if (req.method === 'GET') params = new URL(req.url ?? '/', 'http://x').searchParams;
-    else {
-      const chunks: Buffer[] = [];
-      let size = 0;
-      for await (const c of req) {
-        size += (c as Buffer).length;
-        if (size > BODY_MAX) return html(413, stopPage('That is too much to send.'));
-        chunks.push(c as Buffer);
-      }
-      params = new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
-    }
-    const r = readRequest(params);
-    const wrong = validRequest(r, config);
-    if (wrong) return html(400, stopPage(wrong));
-    if (req.method === 'GET') return html(200, loginPage(config, r));
-
-    const name = params.get('name') ?? '';
-    const password = params.get('password') ?? '';
-    try {
-      if (!authLimit.take(addressOf(req))) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
-      // Only accounts made with a password before identities sign in here, to move them over.
-      const session = await accounts.signIn(name, password);
-      const code = loginCodes.issue(session, r.challenge);
-      const to = `${r.redirect}${r.redirect.includes('?') ? '&' : '?'}${new URLSearchParams({ code, state: r.state, server: config.publicUrl })}`;
-      // The desktop app is opened by its own link from a page that says what happened; the web
-      // game is simply gone back to.
-      if (to.startsWith('soundwave:')) return html(200, donePage(config, session.user.name, to));
-      res.writeHead(303, { Location: to, 'Cache-Control': 'no-store' });
-      return void res.end();
-    } catch (e) {
-      if (!(e instanceof Refusal)) {
-        log(`Error on POST /login: ${(e as Error).stack ?? e}`);
-        return html(500, loginPage(config, r, 'Something went wrong on the server. Try again.', name));
-      }
-      return html(e.status, loginPage(config, r, e.message, name));
-    }
-  };
 
   /* Parties, over WebSocket ----------------------------------------------------------------- */
 

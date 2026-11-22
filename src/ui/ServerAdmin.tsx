@@ -1,7 +1,7 @@
 /**
  * What the owner and moderators of a server do from the game (docs/specs/online-play.md, 3.2), on
- * the admin page: keep the server's library, remove and ban players, name moderators, reset a
- * forgotten password, make invites, set the Showdown rotation, read the log of every moderation
+ * the admin page: keep the server's library, remove and ban players, name moderators, make
+ * recovery links for players who lost their identity, make invites, set the Showdown rotation, read the log of every moderation
  * action and deal with reported songs. And, for everyone, invite links.
  */
 import {
@@ -211,12 +211,7 @@ export function AdminScreen({
   /** Each section's fetch, by the topic that says it changed. */
   const fetchers = useMemo((): Partial<Record<Topic, () => void>> => {
     if (!mod) return {};
-    // A server older than the game may not answer some of these: the section says so.
-    const fail = (e: unknown) => ({
-      failed: /not found|404/i.test((e as Error).message)
-        ? 'This server is older than your game and cannot show this. Its owner needs to update it.'
-        : (e as Error).message,
-    });
+    const fail = (e: unknown) => ({ failed: (e as Error).message });
     return {
       songs: () => {
         void online.songs('').then(setSongs, (e) => setSongs(fail(e)));
@@ -567,8 +562,8 @@ const BAN_LENGTHS: [number | null, string][] = [
 
 /**
  * The server's players: a list to search, and for the one picked, what an admin or a moderator
- * may do to them (remove, ban, lift a ban; an admin also names admins and moderators and resets
- * passwords). An admin is changed only by themselves: they can step down, unless they are the last.
+ * may do to them (remove, ban, lift a ban; an admin also names admins and moderators and makes
+ * recovery links). An admin is changed only by themselves: they can step down, unless they are the last.
  * What cannot be undone is asked first.
  */
 function Players({ users, owner, me, onChange }: { users: UserEntry[] | null; owner: boolean; me: string; onChange(): void }) {

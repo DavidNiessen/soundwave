@@ -11,10 +11,8 @@ export interface UserRow {
   name: string;
   /** The name in lower case: names are unique whatever their case. */
   name_key: string;
-  /** The password's hash, for an account made before identities and not moved over yet; '' otherwise. */
-  hash: string;
-  /** The public key of the player's identity for this server (base64url), once they have one. */
-  pubkey: string | null;
+  /** The public key of the player's identity for this server (base64url, server/src/identity.ts). */
+  pubkey: string;
   role: Role;
   created: number;
   /** Banned until this time (ms), or null; Infinity is stored as a very large number. */
@@ -30,8 +28,6 @@ export interface InviteRow {
   expires: number | null;
   /** The role an account made with it gets: 'owner' for the set-up code, otherwise 'player'. */
   role: Role;
-  /** Always 'invite' (key files, the other kind once planned, were dropped for invite links). */
-  kind: 'invite' | 'key';
   created: number;
 }
 
@@ -59,7 +55,7 @@ export class Store {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         name_key TEXT NOT NULL UNIQUE,
-        hash TEXT NOT NULL,
+        pubkey TEXT NOT NULL UNIQUE,
         role TEXT NOT NULL,
         created INTEGER NOT NULL,
         banned_until INTEGER,
@@ -76,7 +72,6 @@ export class Store {
         uses INTEGER,
         expires INTEGER,
         role TEXT NOT NULL,
-        kind TEXT NOT NULL,
         created INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS audit (
@@ -94,10 +89,6 @@ export class Store {
         expires INTEGER NOT NULL
       );
     `);
-    // Identities came after passwords: a server from before gets the column for keys.
-    const cols = (this.db.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name);
-    if (!cols.includes('pubkey')) this.db.exec('ALTER TABLE users ADD COLUMN pubkey TEXT');
-    this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_pubkey ON users(pubkey)');
   }
 
   close() {
@@ -125,17 +116,17 @@ export class Store {
 
   addUser(u: Omit<UserRow, 'name_key' | 'banned_until' | 'ban_reason'>) {
     this.db
-      .prepare('INSERT INTO users (id, name, name_key, hash, pubkey, role, created) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(u.id, u.name, u.name.toLowerCase(), u.hash, u.pubkey, u.role, u.created);
+      .prepare('INSERT INTO users (id, name, name_key, pubkey, role, created) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(u.id, u.name, u.name.toLowerCase(), u.pubkey, u.role, u.created);
   }
 
   userByKey(pubkey: string): UserRow | undefined {
     return this.db.prepare('SELECT * FROM users WHERE pubkey = ?').get(pubkey) as UserRow | undefined;
   }
 
-  /** Gives an account an identity's key: from then on it signs in with it, and its password (if any) is gone. */
+  /** Gives an account another identity's key (a recovery link): from then on it signs in with that one. */
   setKey(id: string, pubkey: string) {
-    this.db.prepare("UPDATE users SET pubkey = ?, hash = '' WHERE id = ?").run(pubkey, id);
+    this.db.prepare('UPDATE users SET pubkey = ? WHERE id = ?').run(pubkey, id);
   }
 
   rename(id: string, name: string) {
@@ -165,10 +156,6 @@ export class Store {
 
   setRole(id: string, role: Role) {
     this.db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, id);
-  }
-
-  setHash(id: string, hash: string) {
-    this.db.prepare('UPDATE users SET hash = ? WHERE id = ?').run(hash, id);
   }
 
   setBan(id: string, until: number | null, reason: string | null) {
@@ -201,7 +188,7 @@ export class Store {
     return row && row.expires > now ? row.user : undefined;
   }
 
-  /** Signs a user out everywhere (a ban, a password reset). */
+  /** Signs a user out everywhere (a ban, a recovery link used). */
   dropRefreshes(user: string) {
     this.db.prepare('DELETE FROM refresh_tokens WHERE user = ?').run(user);
   }
@@ -210,8 +197,8 @@ export class Store {
 
   addInvite(i: InviteRow) {
     this.db
-      .prepare('INSERT INTO invites (code, by, uses, expires, role, kind, created) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(i.code, i.by, i.uses, i.expires, i.role, i.kind, i.created);
+      .prepare('INSERT INTO invites (code, by, uses, expires, role, created) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(i.code, i.by, i.uses, i.expires, i.role, i.created);
   }
 
   invite(code: string): InviteRow | undefined {
@@ -219,9 +206,9 @@ export class Store {
   }
 
   /** Uses an invite once: false when it is spent or out of date. */
-  useInvite(code: string, kind: InviteRow['kind'], now: number): InviteRow | undefined {
+  useInvite(code: string, now: number): InviteRow | undefined {
     const i = this.invite(code);
-    if (!i || i.kind !== kind || (i.expires !== null && i.expires <= now) || (i.uses !== null && i.uses <= 0)) return undefined;
+    if (!i || (i.expires !== null && i.expires <= now) || (i.uses !== null && i.uses <= 0)) return undefined;
     if (i.uses !== null) this.db.prepare('UPDATE invites SET uses = uses - 1 WHERE code = ?').run(code);
     return i;
   }
