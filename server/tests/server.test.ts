@@ -1,18 +1,23 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import {
   PROTOCOL_VERSION,
   RECONNECT_GRACE_MS,
+  type Account,
+  type Recovery,
   type ServerMessage,
   type Session,
   type UserEntry,
   type WireChart,
 } from '../../src/net/protocol.ts';
+import { Accounts, Refusal } from '../src/accounts.ts';
 import { startServer, type RunningServer } from '../src/app.ts';
+import { hashPassword } from '../src/auth.ts';
 import { DEFAULTS, type Config } from '../src/config.ts';
 import { Store } from '../src/db.ts';
 import { Parties } from '../src/parties.ts';
+import { challenge, newKey, players, proof, serverId, signed } from './identity.ts';
 
 /** The files of a data export (a zip whose files are stored as they are), by name. */
 async function exported(token: string): Promise<Record<string, string>> {
@@ -45,11 +50,19 @@ const chart = (duration = 30): WireChart => ({
 
 let server: RunningServer;
 let store: Store;
+/** The players of the server started, each with their own identity. */
+let who: ReturnType<typeof players>;
 const quiet = () => {};
 
 async function start(over: Partial<Config> = {}) {
   store = new Store(':memory:');
   server = await startServer({ ...DEFAULTS, port: 0, host: '127.0.0.1', mode: 'public', dataDir: ':memory:', ...over }, store, quiet);
+  who = players(server.url);
+}
+
+/** An account made with a password before identities: no key yet. */
+async function oldAccount(name: string, password = 'correct horse') {
+  store.addUser({ id: randomUUID(), name, hash: await hashPassword(password), pubkey: null, role: 'player', created: Date.now() });
 }
 
 async function api<T>(method: string, path: string, body?: unknown, token?: string): Promise<{ status: number; body: T }> {
@@ -61,11 +74,7 @@ async function api<T>(method: string, path: string, body?: unknown, token?: stri
   return { status: res.status, body: (await res.json()) as T };
 }
 
-const signUp = async (name: string, extra: Record<string, unknown> = {}) => {
-  const r = await api<Session>('POST', '/auth/signup', { name, password: 'correct horse', ...extra });
-  expect(r.status).toBe(200);
-  return r.body;
-};
+const signUp = (name: string, extra: Record<string, unknown> = {}) => who.signUp(name, extra);
 
 /** A player's connection: every message it gets, and a way to wait for the next of a kind. */
 async function connect(session: Session) {
@@ -111,30 +120,78 @@ describe('accounts', () => {
     expect(await res.json()).toMatchObject({ ok: true, users: 0 });
   });
 
-  it('sign up, sign in, refresh once, and refuse a wrong password', async () => {
+  it('join with an identity, sign in with it again, and refresh once', async () => {
     await start();
     const s = await signUp('Robin');
     expect(s.user).toMatchObject({ name: 'Robin', role: 'player' });
-    expect((await api('POST', '/auth/signup', { name: 'robin', password: 'another one' })).status).toBe(409);
-    expect((await api('POST', '/auth/signin', { name: 'Robin', password: 'wrong password' })).status).toBe(401);
-    const again = await api<Session>('POST', '/auth/signin', { name: 'ROBIN', password: 'correct horse' });
+    // The name is taken in any case, by anyone else.
+    expect((await api('POST', '/auth/signup', { name: 'robin', ...(await proof(server.url, newKey())) })).status).toBe(409);
+    const again = await who.signIn('Robin');
     expect(again.status).toBe(200);
+    expect(again.body.user).toEqual(s.user);
     const r = await api<Session>('POST', '/auth/refresh', { refresh: again.body.refresh });
     expect(r.status).toBe(200);
     // A refresh token works once.
     expect((await api('POST', '/auth/refresh', { refresh: again.body.refresh })).status).toBe(401);
     expect((await api<{ name: string }>('GET', '/me', undefined, r.body.access)).body.name).toBe('Robin');
+    // A key with no account here is told so (the game offers to join then).
+    expect((await api('POST', '/auth/key', await proof(server.url, newKey()))).status).toBe(404);
+    // A joined player has no password to sign in with.
+    expect((await api('POST', '/auth/signin', { name: 'Robin', password: '' })).status).toBe(401);
+  });
+
+  it('refuse a challenge used twice, one it never gave, a signature not made with the key, and one for another server', async () => {
+    await start();
+    await signUp('Robin');
+    const key = who.keyOf('Robin');
+    const id = await serverId(server.url);
+    const good = signed(id, await challenge(server.url), key);
+    expect((await api('POST', '/auth/key', good)).status).toBe(200);
+    expect((await api('POST', '/auth/key', good)).status).toBe(401);
+    expect((await api('POST', '/auth/key', signed(id, 'x'.repeat(32), key))).status).toBe(401);
+    const forged = { ...signed(id, await challenge(server.url), newKey()), publicKey: key.publicKey };
+    expect((await api('POST', '/auth/key', forged)).status).toBe(401);
+    expect((await api('POST', '/auth/key', signed('another-server', await challenge(server.url), key))).status).toBe(401);
+    // A refused signature spends its challenge too.
+    const nonce = await challenge(server.url);
+    expect((await api('POST', '/auth/key', { ...signed(id, nonce, newKey()), publicKey: key.publicKey })).status).toBe(401);
+    expect((await api('POST', '/auth/key', signed(id, nonce, key))).status).toBe(401);
+    // Not a key or signature at all.
+    expect((await api('POST', '/auth/key', { publicKey: 'short', nonce, signature: 'short' })).status).toBe(400);
+  });
+
+  it('let a key join once: a second account for it is refused', async () => {
+    await start();
+    await signUp('Robin');
+    const second = await api('POST', '/auth/signup', { name: 'Robin again', ...(await proof(server.url, who.keyOf('Robin'))) });
+    expect(second.status).toBe(409);
+    expect(store.countUsers()).toBe(1);
+  });
+
+  it('refuse a challenge or a recovery link that ran out', async () => {
+    await start();
+    // The server's accounts again, on a clock the test moves.
+    let now = 1_000_000;
+    const accounts = new Accounts(store, { ...DEFAULTS, mode: 'public', dataDir: ':memory:' }, () => now);
+    const key = newKey();
+    const mine = () => signed(accounts.identities.serverId, accounts.identities.challenge(), key);
+    await accounts.signUp({ name: 'Robin', ...mine() });
+    const late = mine();
+    now += 2 * 60_000 + 1;
+    expect(() => accounts.keySignIn(late)).toThrow(Refusal);
+    expect(accounts.keySignIn(mine()).user.name).toBe('Robin');
+    const link = accounts.makeRecovery(null, 'Robin');
+    now += 7 * 24 * 60 * 60_000 + 1;
+    expect(() => accounts.recover(link.code, mine())).toThrow(/run out or was used/);
   });
 
   it('makes the owner with the set-up code, and lets the owner hand out invite links', async () => {
     await start({ mode: 'invite', publicUrl: 'https://play.example.com' });
-    expect((await api('POST', '/auth/signup', { name: 'Stranger', password: 'correct horse' })).status).toBe(403);
+    expect((await who.join('Stranger')).status).toBe(403);
     const owner = await signUp('Owner', { invite: server.accounts.ownerCode });
     expect(owner.user.role).toBe('owner');
     // It works once.
-    expect(
-      (await api('POST', '/auth/signup', { name: 'Second', password: 'correct horse', invite: server.accounts.ownerCode })).status,
-    ).toBe(403);
+    expect((await who.join('Second', { invite: server.accounts.ownerCode })).status).toBe(403);
     // An invite for two, with no end date; the link is the server's own join page.
     const inv = await api<{ code: string; link: string; uses: number; expires: number | null }>(
       'POST',
@@ -145,7 +202,7 @@ describe('accounts', () => {
     expect(inv.body).toMatchObject({ uses: 2, expires: null, link: `https://play.example.com/join?invite=${inv.body.code}` });
     await signUp('First', { invite: inv.body.code });
     await signUp('Second', { invite: inv.body.code });
-    expect((await api('POST', '/auth/signup', { name: 'Third', password: 'correct horse', invite: inv.body.code })).status).toBe(403);
+    expect((await who.join('Third', { invite: inv.body.code })).status).toBe(403);
   });
 
   it('serve the join page an invite link opens, which opens the game', async () => {
@@ -163,9 +220,26 @@ describe('accounts', () => {
     expect(spent).toContain('has run out or was used up');
   });
 
+  it('moves an account made with a password to the player’s identity, and deletes the password', async () => {
+    await start();
+    await oldAccount('Old');
+    await signUp('Taken');
+    expect((await api('POST', '/auth/signin', { name: 'Old', password: 'wrong password' })).status).toBe(401);
+    const s = await api<Session>('POST', '/auth/signin', { name: 'OLD', password: 'correct horse' });
+    expect(s.status).toBe(200);
+    // A key that has an account already cannot be given to another.
+    expect((await api('POST', '/me/key', await proof(server.url, who.keyOf('Taken')), s.body.access)).status).toBe(409);
+    expect((await who.link('Old', s.body.access)).status).toBe(200);
+    expect(store.userByName('Old')!.hash).toBe('');
+    expect((await api('POST', '/auth/signin', { name: 'Old', password: 'correct horse' })).status).toBe(401);
+    const back = await who.signIn('Old');
+    expect(back.status).toBe(200);
+    expect(back.body.user.name).toBe('Old');
+  });
+
   it('signs in through the browser: its own form, a one-time code to the game, traded with the game’s secret', async () => {
     await start();
-    await signUp('Ana');
+    await oldAccount('Ana');
     const verifier = randomBytes(32).toString('base64url');
     const challenge = createHash('sha256').update(verifier).digest('base64url');
     const ask = { redirect: 'http://localhost:5173/', challenge, state: 'state-123' };
@@ -212,30 +286,33 @@ describe('accounts', () => {
     expect(await app.text()).toMatch(/soundwave:\/\/auth\?code=/);
   });
 
-  it('fills in the invite the game brought on the browser’s sign-up page, and takes a whole invite link', async () => {
+  it('only signs in on the browser’s page: no account is made there, and a joined player has no password for it', async () => {
     await start({ mode: 'invite' });
+    await signUp('Owner', { invite: server.accounts.ownerCode });
     const verifier = randomBytes(32).toString('base64url');
-    const challenge = createHash('sha256').update(verifier).digest('base64url');
-    const ask = { redirect: 'http://localhost:5173/', challenge, state: 'state-123' };
-    const code = server.accounts.ownerCode!;
-    const link = `${server.url}/join?invite=${code}`;
-    // Sign-in mode carries the invite along, so making an account after has it still.
-    const signin = await (await fetch(`${server.url}/login?${new URLSearchParams({ ...ask, invite: link })}`)).text();
-    expect(signin).toContain(`name="invite" value="${code}"`);
-    const signup = await (await fetch(`${server.url}/login?${new URLSearchParams({ ...ask, mode: 'signup', invite: link })}`)).text();
-    expect(signup).toMatch(new RegExp(`<input name="invite" value="${code}"`));
-    const made = await fetch(`${server.url}/login`, {
+    const ask = {
+      redirect: 'http://localhost:5173/',
+      challenge: createHash('sha256').update(verifier).digest('base64url'),
+      state: 'state-123',
+    };
+    // An older game asking for the sign-up page gets the sign-in form.
+    const page = await (await fetch(`${server.url}/login?${new URLSearchParams({ ...ask, mode: 'signup', invite: 'abc' })}`)).text();
+    expect(page).toContain('autocomplete="current-password"');
+    expect(page).not.toContain('new-password');
+    expect(page).not.toContain('name="invite"');
+    const tried = await fetch(`${server.url}/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ ...ask, mode: 'signup', name: 'Owner', password: 'correct horse', invite: link }),
+      body: new URLSearchParams({ ...ask, mode: 'signup', name: 'Owner', password: '' }),
       redirect: 'manual',
     });
-    expect(made.status).toBe(303);
+    expect(tried.status).toBe(401);
   });
 
   it('asks for the server password in password mode', async () => {
     await start({ mode: 'password', password: 'letmein' });
-    expect((await api('POST', '/auth/signup', { name: 'Robin', password: 'correct horse', serverPassword: 'nope' })).status).toBe(403);
+    expect((await who.join('Robin', { serverPassword: 'nope' })).status).toBe(403);
+    expect((await who.join('Robin')).status).toBe(403);
     await signUp('Robin', { serverPassword: 'letmein' });
     // An invite lets its holder in without the password.
     const owner = await signUp('Owner', { invite: server.accounts.ownerCode });
@@ -251,7 +328,10 @@ describe('accounts', () => {
     const theirs = await api<{ code: string }>('POST', '/invites', {}, friend.access);
     expect(theirs.status).toBe(200);
     await signUp('Friend of friend', { invite: theirs.body.code });
-    expect((await api('POST', '/auth/signup', { name: 'Late', password: 'correct horse', invite: inv.body.code })).status).toBe(403);
+    expect((await who.join('Late', { invite: inv.body.code })).status).toBe(403);
+    expect((await who.join('Late')).status).toBe(403);
+    // The server's password means nothing on an invite-only server.
+    expect((await who.join('Late', { serverPassword: '' })).status).toBe(403);
   });
 
   it('lets an admin name admins, who only step down themselves, and keeps one admin always', async () => {
@@ -286,12 +366,12 @@ describe('accounts', () => {
     const player = await signUp('Player');
     expect((await api('POST', '/mod/ban', { name: 'Player' }, mod.access)).status).toBe(403);
     expect((await api('POST', '/mod/role', { name: 'Mod', role: 'moderator' }, owner.access)).status).toBe(200);
-    const modAgain = (await api<Session>('POST', '/auth/signin', { name: 'Mod', password: 'correct horse' })).body;
+    const modAgain = (await who.signIn('Mod')).body;
     const c = await connect(player);
     const bye = c.next('bye');
     expect((await api('POST', '/mod/ban', { name: 'Player', hours: 2, reason: 'Cheating' }, modAgain.access)).status).toBe(200);
     expect((await bye).reason).toContain('Cheating');
-    expect((await api('POST', '/auth/signin', { name: 'Player', password: 'correct horse' })).status).toBe(403);
+    expect((await who.signIn('Player')).status).toBe(403);
     // A moderator cannot touch the owner.
     expect((await api('POST', '/mod/ban', { name: 'Owner' }, modAgain.access)).status).toBe(403);
     const log = await api<{ action: string; target: string; reason: string }[]>('GET', '/mod/audit', undefined, owner.access);
@@ -308,6 +388,72 @@ describe('accounts', () => {
     expect(Object.keys(exp).sort()).toEqual(['README.txt', 'account.json', 'avatar.json', 'runs.json', 'songs-shared.json']);
     expect(JSON.parse(exp['account.json']).account.name).toBe('Owner');
     expect(Object.values(exp).join('\n')).not.toContain('argon2id$');
+  });
+
+  it('let a player rename themselves to a free name, and log it', async () => {
+    await start();
+    const owner = await signUp('Owner', { invite: server.accounts.ownerCode });
+    const ana = await signUp('Ana');
+    await signUp('Bo');
+    expect((await api('POST', '/me/name', { name: 'bo' }, ana.access)).status).toBe(409);
+    expect((await api('POST', '/me/name', { name: 'x' }, ana.access)).status).toBe(400);
+    const r = await api<Account>('POST', '/me/name', { name: 'Anabel' }, ana.access);
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ id: ana.user.id, name: 'Anabel' });
+    // The same key signs in, as the new name; the old name is free for someone else.
+    expect((await who.signIn('Ana')).body.user.name).toBe('Anabel');
+    expect((await api('POST', '/auth/signup', { name: 'Ana', ...(await proof(server.url, newKey())) })).status).toBe(200);
+    const log = await api<{ actor: string; action: string; target: string; reason: string }[]>(
+      'GET',
+      '/mod/audit',
+      undefined,
+      owner.access,
+    );
+    expect(log.body[0]).toMatchObject({ actor: 'Anabel', action: 'rename', target: 'Anabel', reason: 'was Ana' });
+  });
+
+  it('give a player who lost their identity their account back, with a one-time link an admin makes', async () => {
+    await start({ publicUrl: 'https://play.example.com' });
+    const owner = await signUp('Owner', { invite: server.accounts.ownerCode });
+    const ana = await signUp('Ana');
+    expect((await api('POST', '/mod/recovery', { name: 'Ana' }, ana.access)).status).toBe(403);
+    expect((await api('POST', '/mod/recovery', { name: 'Nobody' }, owner.access)).status).toBe(404);
+    const rec = await api<Recovery>('POST', '/mod/recovery', { name: 'Ana' }, owner.access);
+    expect(rec.status).toBe(200);
+    expect(rec.body.link).toBe(`https://play.example.com/join?recover=${rec.body.code}`);
+    // The link's page opens the game with it.
+    const page = await (await fetch(`${server.url}/join?recover=${rec.body.code}`)).text();
+    expect(page).toContain(`soundwave://join?server=${encodeURIComponent('https://play.example.com')}&amp;recover=${rec.body.code}`);
+
+    const lost = newKey();
+    const back = await api<Session>('POST', '/auth/recover', { code: rec.body.code, ...(await proof(server.url, lost)) });
+    expect(back.status).toBe(200);
+    expect(back.body.user).toEqual(ana.user);
+    // Once only.
+    expect((await api('POST', '/auth/recover', { code: rec.body.code, ...(await proof(server.url, newKey())) })).status).toBe(403);
+    // The new key signs in; the old one has no account any more, and the old sign-ins ended.
+    expect((await api<Session>('POST', '/auth/key', await proof(server.url, lost))).body.user.name).toBe('Ana');
+    expect((await who.signIn('Ana')).status).toBe(404);
+    expect((await api('POST', '/auth/refresh', { refresh: ana.refresh })).status).toBe(401);
+    const log = await api<{ action: string; target: string }[]>('GET', '/mod/audit', undefined, owner.access);
+    expect(log.body[0]).toMatchObject({ action: 'recovery link', target: 'Ana' });
+  });
+
+  it('make admins’ recovery links on the server’s command line, not from another admin', async () => {
+    await start();
+    const first = await signUp('First', { invite: server.accounts.ownerCode });
+    await signUp('Second');
+    expect((await api('POST', '/mod/role', { name: 'Second', role: 'owner' }, first.access)).status).toBe(200);
+    expect((await api('POST', '/mod/recovery', { name: 'Second' }, first.access)).status).toBe(403);
+    // An admin's own is fine (a second computer, say).
+    expect((await api('POST', '/mod/recovery', { name: 'First' }, first.access)).status).toBe(200);
+    // What `node server/src/cli.ts recover Second` does.
+    const cli = server.accounts.makeRecovery(null, 'Second');
+    const back = await api<Session>('POST', '/auth/recover', { code: cli.code, ...(await proof(server.url, newKey())) });
+    expect(back.status).toBe(200);
+    expect(back.body.user).toMatchObject({ name: 'Second', role: 'owner' });
+    const log = await api<{ action: string; target: string; reason: string }[]>('GET', '/mod/audit', undefined, first.access);
+    expect(log.body[0]).toMatchObject({ action: 'recovery link', target: 'Second', reason: 'from the command line' });
   });
 });
 

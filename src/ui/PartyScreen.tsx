@@ -56,7 +56,7 @@ import { formatTime, type Pick } from '../game/setlist';
 import { keysOf } from '../input/bindings';
 import { PadGlyph } from '../input/glyphs';
 import { confirmInput } from '../input/pads';
-import { online, parseInvite, type OnlineState } from '../net/client';
+import { online, parseInvite, parseRecovery, type OnlineState } from '../net/client';
 import { identity, identitySupported } from '../net/identity';
 import { partySongs, type Transfer } from '../net/partySongs';
 import {
@@ -261,10 +261,11 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
   /** The player chose to type another address while one is known. */
   const [changing, setChanging] = useState(false);
   /**
-   * Where signing in is at: the identity being tried on the server, making an account for it, or
-   * moving over an account made with a password before identities.
+   * Where signing in is at: the identity being tried on the server, waiting for a player who signed
+   * out to sign in again, making an account for the identity, or moving over an account made with a
+   * password before identities.
    */
-  const [step, setStep] = useState<'checking' | 'join' | 'old'>('checking');
+  const [step, setStep] = useState<'checking' | 'out' | 'join' | 'old'>('checking');
   /** Signing in with a password here, in the game, rather than on the server's page in the browser. */
   const [inGame, setInGame] = useState(false);
   /** The browser was opened to sign in with a password (desktop): the game waits for it to come back. */
@@ -301,7 +302,8 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
     setChanging(false);
     if (s.server) setAddress(s.server.replace(/^https?:\/\//, ''));
   }, [s.invite, s.server]);
-  // With the server known, the identity is tried there first: an account it has signs in at once.
+  // With the server known, the identity is tried there first: an account it has signs in at once,
+  // unless the player signed out, who signs in again with a press.
   const tried = useRef<string | null>(null);
   useEffect(() => {
     if (!info || unsupported || tried.current === s.server) return;
@@ -309,23 +311,28 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
     setStep('checking');
     void (async () => {
       try {
-        if (!(await identity.load()) || !(await online.signInWithIdentity())) setStep('join');
+        if (!(await identity.load())) setStep('join');
+        else if (s.signedOut) setStep('out');
+        else if (!(await online.signInWithIdentity())) setStep('join');
       } catch (e) {
         setProblem((e as Error).message);
         setStep('join');
       }
     })();
-  }, [info, s.server, unsupported]);
+  }, [info, s.server, s.signedOut, unsupported]);
 
-  /** The server field takes an address or a whole invite link. */
+  /** The server field takes an address, a whole invite link, or a recovery link an admin sent. */
   const connect = () =>
     run('connect', async () => {
+      const recovery = parseRecovery(address);
       const invite = parseInvite(address);
-      if (!invite) await online.choose(address);
-      else {
+      if (recovery) {
+        await online.recover(recovery.server, recovery.code);
+        setAddress(recovery.server.replace(/^https?:\/\//, ''));
+      } else if (invite) {
         await online.useInvite(invite);
         setAddress(invite.server.replace(/^https?:\/\//, ''));
-      }
+      } else await online.choose(address);
       setChanging(false);
     });
 
@@ -335,9 +342,14 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
   const join = () =>
     run('account', () => online.join({ name: name.trim(), ...(invite ? { invite } : mode === 'password' ? { serverPassword } : {}) }));
   const signInOld = () => run('account', () => online.signIn(name.trim(), password));
+  /** Signs in again after signing out; an identity with no account here (deleted, say) goes on to join. */
+  const signInAgain = () =>
+    run('account', async () => {
+      if (!(await online.signInWithIdentity())) setStep('join');
+    });
   const browser = () =>
     run('account', async () => {
-      await online.signInWithBrowser('signin');
+      await online.signInWithBrowser();
       setWaiting(true);
     });
   const needsCode = mode === 'invite' && !invite;
@@ -409,7 +421,7 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
             className="connect-form"
             onSubmit={(e) => {
               e.preventDefault();
-              void (step === 'old' ? signInOld() : join());
+              void (step === 'old' ? signInOld() : step === 'out' ? signInAgain() : join());
             }}
           >
             <div className="party-server">
@@ -431,6 +443,22 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
                 <LoaderCircle className="spin" strokeWidth={ICON_STROKE} aria-hidden />
                 Signing in with your identity…
               </p>
+            ) : step === 'out' ? (
+              <>
+                <h2 className="connect-title">You signed out</h2>
+                <p className="hint connect-note">Sign in again with this game’s identity: no password needed.</p>
+                <button type="submit" className="btn primary wide connect-go" data-autofocus disabled={!!busy}>
+                  {busy === 'account' ? (
+                    <LoaderCircle className="spin" strokeWidth={ICON_STROKE} aria-hidden />
+                  ) : (
+                    <LogIn strokeWidth={ICON_STROKE} aria-hidden />
+                  )}
+                  {busy === 'account' ? 'Signing in…' : 'Sign in'}
+                </button>
+                <button type="button" className="btn quiet wide" onClick={() => (setStep('old'), setProblem(null))}>
+                  <KeyRound strokeWidth={ICON_STROKE} aria-hidden />I have an account here with a password
+                </button>
+              </>
             ) : step === 'join' ? (
               <>
                 <h2 className="connect-title">Join {info.name}</h2>

@@ -164,11 +164,13 @@ export const identity = {
     } catch {
       throw new Error('That is not a Soundwave identity file.');
     }
-    if (f.format !== FILE_FORMAT || f.v !== 1 || !f.kdf?.salt || !f.cipher?.iv || !f.data)
+    // A file asking for far more rounds than any backup has would hold the game up for minutes.
+    const rounds = f.kdf?.iterations ?? ROUNDS;
+    if (f.format !== FILE_FORMAT || f.v !== 1 || !f.kdf?.salt || !f.cipher?.iv || !f.data || !(rounds >= 1 && rounds <= 10 * ROUNDS))
       throw new Error('That is not a Soundwave identity file.');
     let plain: { secret?: string; name?: string; created?: number };
     try {
-      const key = await lockKey(passphrase, fromB64url(f.kdf.salt), f.kdf.iterations ?? ROUNDS);
+      const key = await lockKey(passphrase, fromB64url(f.kdf.salt), rounds);
       const data = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64url(f.cipher.iv) }, key, fromB64url(f.data));
       plain = JSON.parse(new TextDecoder().decode(data));
     } catch {

@@ -7,6 +7,7 @@ import { startServer, type RunningServer } from '../src/app.ts';
 import { DEFAULTS } from '../src/config.ts';
 import { Store } from '../src/db.ts';
 import { chartIdOf } from '../src/scores.ts';
+import { players } from './identity.ts';
 
 const SONG = 'd'.repeat(64);
 const chart: Chart = {
@@ -61,12 +62,12 @@ const api = async <T>(method: string, path: string, body?: unknown, token?: stri
   });
   return { status: res.status, body: (await res.json()) as T };
 };
-const signUp = async (name: string, extra = {}) =>
-  (await api<Session>('POST', '/auth/signup', { name, password: 'correct horse', ...extra })).body;
+let signUp: (name: string, extra?: Record<string, unknown>) => Promise<Session>;
 
 beforeAll(async () => {
   store = new Store(':memory:');
   server = await startServer({ ...DEFAULTS, port: 0, host: '127.0.0.1', mode: 'public', dataDir: ':memory:' }, store, () => {});
+  signUp = players(server.url).signUp;
 });
 afterAll(async () => {
   await server.close();

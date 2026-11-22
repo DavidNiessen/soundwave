@@ -14,8 +14,8 @@ console.log(`${config.name} is running on port ${server.port} (${config.mode} mo
 console.log(`Players connect to ${config.publicUrl}`);
 if (server.accounts.ownerCode) {
   console.log('');
-  console.log('This server has no owner yet. Make the owner account in the game: connect to the server,');
-  console.log('choose "Make an account", and enter this set-up code as the invite. It works once.');
+  console.log('This server has no admin yet. Become it in the game: connect to the server, type your name,');
+  console.log('and enter this set-up code as the invite before you press Join. It works once.');
   console.log(`  Set-up code: ${server.accounts.ownerCode}`);
 }
 if (!process.env.SOUNDWAVE_PUBLIC_URL && config.publicUrl.includes('localhost'))

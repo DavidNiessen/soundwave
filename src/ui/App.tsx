@@ -2070,8 +2070,11 @@ export function App() {
           onClose={() => setExportAsk(null)}
         />
       )}
-      {/* Once per server that takes songs: whether to share the player's own (Settings → Online changes it). */}
+      {/* Once per server that takes songs: whether to share the player's own (Settings → Online changes it).
+          It waits for the identity's backup question, so one question is asked at a time. */}
       {serverSharing &&
+        !askBackup &&
+        !backingUp &&
         !settings.shareLibrary &&
         onlineState.server &&
         !settings.shareAsked.includes(onlineState.server) &&

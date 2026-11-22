@@ -1,7 +1,8 @@
 /**
- * Signing in through the browser (docs/specs/online-play.md): the game opens the server's own
- * sign-in page (`GET /login`) in the player's browser, where a plain form takes their name and
- * password, so the browser's password manager fills them in and saves new ones. Signed in, the page
+ * Signing in through the browser (docs/specs/online-play.md), for accounts made with a password
+ * before identities: the game opens the server's own sign-in page (`GET /login`) in the player's
+ * browser, where a plain form takes their name and password, so the browser's password manager fills
+ * them in. Accounts are made in the game, with an identity, never here. Signed in, the page
  * hands the game a one-time code at the address it asked for (`soundwave://auth` for the desktop
  * app, the web game's own page for the web game), and the game trades the code for its session
  * (`POST /auth/exchange`).
@@ -28,10 +29,6 @@ export interface LoginRequest {
   challenge: string;
   /** The game's own token, handed back so it knows the answer is to its question. */
   state: string;
-  /** Sign in, or make an account. */
-  mode: 'signin' | 'signup';
-  /** An invite the game already had. */
-  invite: string;
 }
 
 /**
@@ -55,26 +52,9 @@ export function redirectAllowed(redirect: string, config: Config): boolean {
   }
 }
 
-/** An invite as it is typed: a code, or a whole invite link (`…/join?invite=…`), which holds one. */
-export function inviteCode(typed: string): string {
-  const t = typed.trim();
-  try {
-    return new URL(t).searchParams.get('invite')?.trim() || t;
-  } catch {
-    return t;
-  }
-}
-
 /** Reads the game's question from a query string or a form. */
 export function readRequest(p: URLSearchParams): LoginRequest {
-  return {
-    redirect: p.get('redirect') ?? '',
-    challenge: p.get('challenge') ?? '',
-    state: p.get('state') ?? '',
-    // Accounts are made in the game, with an identity: this page only signs in old password accounts.
-    mode: 'signin',
-    invite: inviteCode(p.get('invite') ?? ''),
-  };
+  return { redirect: p.get('redirect') ?? '', challenge: p.get('challenge') ?? '', state: p.get('state') ?? '' };
 }
 
 export function validRequest(r: LoginRequest, config: Config): string | null {
@@ -128,9 +108,6 @@ const STYLE = `
   .brand { margin: 0; font-size: 0.9rem; font-weight: 900; letter-spacing: 0.12em; text-transform: uppercase; color: #ff7ab8; }
   h1 { margin: 0; font-size: 1.9rem; line-height: 1.1; font-style: italic; font-weight: 900; text-transform: uppercase; }
   .server { margin: -0.4rem 0 0; color: #aba1e6; }
-  .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 0.3rem; padding: 0.3rem; border-radius: 0.9rem; background: rgb(0 0 0 / 0.32); }
-  .tabs a { padding: 0.55rem; border-radius: 0.65rem; color: #d2c9fa; text-align: center; font-weight: 800; text-decoration: none; }
-  .tabs a[aria-current] { background: #f6f3ff; color: #1a0f4c; }
   form { display: flex; flex-direction: column; gap: 0.8rem; padding: 1.2rem; border-radius: 1.1rem; background: rgb(8 6 18 / 0.6);
     box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.11); }
   label { display: flex; flex-direction: column; gap: 0.3rem; color: #aba1e6; font-size: 0.92rem; font-weight: 700; }
@@ -141,7 +118,7 @@ const STYLE = `
   button, .btn { display: block; width: 100%; padding: 0.85rem 1rem; border: 0; border-radius: 0.8rem; background: #ff4d9d; color: #2c0421;
     font: inherit; font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: 0.02em; text-align: center;
     text-decoration: none; cursor: pointer; }
-  button:focus-visible, .btn:focus-visible, .tabs a:focus-visible { outline: 3px solid #5df2d6; outline-offset: 2px; }
+  button:focus-visible, .btn:focus-visible { outline: 3px solid #5df2d6; outline-offset: 2px; }
   .error { margin: 0; padding: 0.7rem 0.9rem; border-radius: 0.7rem; background: rgb(255 90 114 / 0.18); color: #ff8597; font-weight: 700; }
   .small { margin: 0; color: #aba1e6; font-size: 0.88rem; text-align: center; }
 `;
@@ -167,45 +144,21 @@ ${body}
 
 /** The sign-in page: a form the browser's password manager knows, for an account made with a password (moved to an identity once in). */
 export function loginPage(config: Config, r: LoginRequest, error: string | null = null, name = ''): string {
-  const signup = r.mode === 'signup';
-  const hidden = (['redirect', 'challenge', 'state', 'mode'] as const)
+  const hidden = (['redirect', 'challenge', 'state'] as const)
     .map((k) => `<input type="hidden" name="${k}" value="${esc(r[k])}">`)
     .join('');
-  // Signing in keeps the invite the game brought, so it is still there on the way to making an account.
-  const keepInvite = !signup && r.invite ? `<input type="hidden" name="invite" value="${esc(r.invite)}">` : '';
-  const modeNote = {
-    public: 'Anyone can make an account here.',
-    password: 'Making an account here needs the server’s password, or an invite.',
-    invite: 'Making an account here needs an invite from someone on it.',
-  }[config.mode];
-  const extra = signup
-    ? `${
-        config.mode === 'password' && !r.invite
-          ? `<label>The server’s password<input type="password" name="serverPassword" autocomplete="off"></label>`
-          : ''
-      }
-      <label>${config.mode === 'invite' ? 'Your invite link or code' : 'An invite link or code (if you have one)'}<input name="invite" value="${esc(r.invite)}" autocomplete="off" spellcheck="false"${config.mode === 'invite' ? ' required' : ''}></label>
-      <p class="note">${
-        r.invite
-          ? 'Filled in from your invite link: it lets you in.'
-          : 'Setting up this server? Enter the set-up code it printed when it first started: it makes you its owner.'
-      }</p>`
-    : '';
   const body = `
-<h1>${signup ? 'Make an account' : 'Sign in'}</h1>
+<h1>Sign in</h1>
 <p class="server">on <strong>${esc(config.name)}</strong></p>
 <form method="post" action="/login">
-  ${hidden}${keepInvite}
+  ${hidden}
   ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
-  ${signup ? `<p class="note">${modeNote}</p>` : ''}
   <label>Name<input name="name" value="${esc(name)}" autocomplete="username" maxlength="24" required autofocus spellcheck="false" autocapitalize="off"></label>
-  <label>Password<input type="password" name="password" autocomplete="${signup ? 'new-password' : 'current-password'}" maxlength="200"${signup ? ' minlength="8"' : ''} required></label>
-  ${signup ? '<p class="note">At least 8 characters.</p>' : ''}
-  ${extra}
-  <button type="submit">${signup ? 'Make my account' : 'Sign in'}</button>
+  <label>Password<input type="password" name="password" autocomplete="current-password" maxlength="200" required></label>
+  <button type="submit">Sign in</button>
 </form>
 <p class="small">For an account made with a password: once you are in, Soundwave gives it your identity and the password is deleted. New here? Make your account in the game.</p>`;
-  return page(`${signup ? 'Make an account' : 'Sign in'} · ${config.name}`, body);
+  return page(`Sign in · ${config.name}`, body);
 }
 
 /** Signed in: the code goes to the game. The desktop app is opened by its link (the browser may ask first). */

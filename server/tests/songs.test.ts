@@ -1,18 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { WebSocket } from 'ws';
-import {
-  PROTOCOL_VERSION,
-  type DuplicatePair,
-  type ServerInfo,
-  type ServerMessage,
-  type Session,
-  type SharedSong,
-} from '../../src/net/protocol.ts';
+import { PROTOCOL_VERSION, type DuplicatePair, type ServerInfo, type ServerMessage, type SharedSong } from '../../src/net/protocol.ts';
 import { readSoundwave, writeSoundwave } from '../../src/storage/soundwaveFile.ts';
 import { startServer, type RunningServer } from '../src/app.ts';
 import { DEFAULTS, type Config } from '../src/config.ts';
 import { Store } from '../src/db.ts';
+import { players } from './identity.ts';
 
 let server: RunningServer;
 let store: Store;
@@ -35,8 +29,7 @@ const api = async <T>(method: string, path: string, body?: unknown, token?: stri
   const type = res.headers.get('content-type') ?? '';
   return { status: res.status, type, body: (type.includes('json') ? await res.json() : new Uint8Array(await res.arrayBuffer())) as T };
 };
-const signUp = async (name: string, extra = {}) =>
-  (await api<Session>('POST', '/auth/signup', { name, password: 'correct horse', ...extra })).body;
+const signUp = (name: string, extra = {}) => players(server.url).signUp(name, extra);
 
 /** A made-up song: a few bytes of "audio", a cover and an analysis. */
 async function songFile(seed = 1) {

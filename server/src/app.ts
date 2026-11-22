@@ -123,6 +123,9 @@ export async function startServer(config: Config, store: Store, log: (line: stri
   /** What each player online says they are doing. */
   const activity = new Map<string, string>();
   const authLimit = new RateLimit(10, 10);
+  // A challenge costs the server nothing to hand out, and every sign-in starts with one: a party of
+  // players behind one home address all signing in at once must not run out.
+  const challengeLimit = new RateLimit(60, 60);
   /** Sign-ins done in the browser, waiting for the game to trade their code (browserLogin.ts). */
   const loginCodes = new LoginCodes();
   const writeLimit = new RateLimit(30, 30);
@@ -226,7 +229,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     'POST /auth/refresh': (_req, body) => accounts.refresh(body.refresh),
     // Signing in with an identity: a challenge, then the challenge signed (identity.ts).
     'POST /auth/challenge': (_req, _body, ip) => {
-      if (!authLimit.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
+      if (!challengeLimit.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
       return { nonce: accounts.identities.challenge() };
     },
     'POST /auth/key': (_req, body) => accounts.keySignIn(body),

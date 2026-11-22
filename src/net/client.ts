@@ -81,6 +81,8 @@ export interface OnlineState {
   invite: string | null;
   /** The signed-in player's look on the stage, once loaded (null: they have none). */
   avatar: Avatar | null;
+  /** The player signed out: the identity waits for them to sign in again, rather than signing in by itself. */
+  signedOut: boolean;
 }
 
 /**
@@ -214,6 +216,7 @@ class OnlineClient {
     error: null,
     invite: null,
     avatar: null,
+    signedOut: false,
   };
   private readonly listeners = new Set<() => void>();
   /**
@@ -247,7 +250,7 @@ class OnlineClient {
       const raw = localStorage.getItem(STORE_KEY);
       const s = raw ? (JSON.parse(raw) as Stored) : null;
       if (s?.server) {
-        this.state = { ...this.state, server: s.server, status: s.refresh ? 'reconnecting' : 'signed-out' };
+        this.state = { ...this.state, server: s.server, status: s.refresh ? 'reconnecting' : 'signed-out', signedOut: !!s.out };
         this.refreshToken = s.refresh ?? null;
         this.out = !!s.out;
       }
@@ -394,7 +397,7 @@ class OnlineClient {
     this.access = s.access;
     this.refreshToken = s.refresh;
     this.save();
-    this.set({ account: s.user, error: null });
+    this.set({ account: s.user, error: null, signedOut: false });
   }
 
   /** Picks a server and asks it what it is. Throws a sentence for the player. */
@@ -415,13 +418,13 @@ class OnlineClient {
   }
 
   /**
-   * Signs in (or makes an account) on the server's own page, in the player's browser, where their
-   * password manager works (server/src/browserLogin.ts). The desktop app opens the browser and waits
-   * for the page to hand it back a code (soundwave://auth); the web game goes to the page and comes
-   * back to itself with the code. Either way the code is traded with the secret kept here
-   * (`finishBrowserSignIn`).
+   * Signs in to an account made with a password on the server's own page, in the player's browser,
+   * where their password manager works (server/src/browserLogin.ts). The desktop app opens the
+   * browser and waits for the page to hand it back a code (soundwave://auth); the web game goes to
+   * the page and comes back to itself with the code. Either way the code is traded with the secret
+   * kept here (`finishBrowserSignIn`), and the account takes the identity.
    */
-  async signInWithBrowser(mode: 'signin' | 'signup', invite = this.state.invite ?? undefined) {
+  async signInWithBrowser() {
     const server = this.state.server;
     if (!server) throw new Error('Connect to a server first.');
     const random = (n: number) => base64url(crypto.getRandomValues(new Uint8Array(n)));
@@ -435,13 +438,7 @@ class OnlineClient {
     } catch {
       throw new Error('This browser does not let the game keep the sign-in while it is away. Sign in here instead.');
     }
-    const url = `${server}/login?${new URLSearchParams({
-      redirect,
-      challenge,
-      state,
-      mode,
-      ...(invite ? { invite } : {}),
-    })}`;
+    const url = `${server}/login?${new URLSearchParams({ redirect, challenge, state })}`;
     if (desktop) {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('open_in_browser', { url });
@@ -533,9 +530,19 @@ class OnlineClient {
     this.connect();
   }
 
+  /**
+   * Gives the account just signed in with a password this game's identity. When the server refuses
+   * (the identity has another account there), the password's sign-in is dropped again: an account
+   * the identity cannot sign in to would be lost the next time it runs out.
+   */
   private async linkIdentity() {
-    await identity.ensure(this.state.account?.name ?? '');
-    await this.request('/me/key', { body: await this.proof(), auth: true });
+    try {
+      await identity.ensure(this.state.account?.name ?? '');
+      await this.request('/me/key', { body: await this.proof(), auth: true });
+    } catch (e) {
+      this.signOut();
+      throw e;
+    }
   }
 
   /**
@@ -568,14 +575,23 @@ class OnlineClient {
     this.pending = [];
     clearTimeout(this.retryTimer);
     clearInterval(this.syncTimer);
-    this.set({ status: this.state.server ? 'signed-out' : 'off', account: null, party: null, avatar: null });
+    this.set({ status: this.state.server ? 'signed-out' : 'off', account: null, party: null, avatar: null, signedOut: true });
     this.setBoard(null);
   }
 
-  /** Signs out and forgets the server. */
+  /** The player asked to sign in after signing out: the identity signs them in again (Connect tries it). */
+  letIdentitySignIn() {
+    if (!this.out) return;
+    this.out = false;
+    this.save();
+    this.set({ signedOut: false });
+  }
+
+  /** Signs out and forgets the server: another one is signed in to as usual. */
   forget() {
     this.signOut();
-    this.set({ server: null, info: null, status: 'off', error: null });
+    this.out = false;
+    this.set({ server: null, info: null, status: 'off', error: null, signedOut: false });
     this.save();
   }
 

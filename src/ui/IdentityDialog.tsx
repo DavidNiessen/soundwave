@@ -38,6 +38,7 @@ export function IdentityDialog({ kind, onClose, onDone }: { kind: 'export' | 'im
         const me = await identity.import(file!, pass);
         // Signed in on a server now with another identity: sign in again with this one.
         online.signOut();
+        online.letIdentitySignIn();
         online.resume();
         close();
         onDone(`Welcome back${me.name ? `, ${me.name}` : ''}. Your accounts sign in with this identity now.`);

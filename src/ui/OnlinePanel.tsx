@@ -26,7 +26,7 @@ import {
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { Settings } from '../game/settings';
 import { keysOf } from '../input/bindings';
-import { online, parseInvite } from '../net/client';
+import { online, parseInvite, parseRecovery } from '../net/client';
 import { REPOSITORY_URL } from '../app/release';
 import { PARTY_MAX, type Role } from '../net/protocol';
 import { Hint, useActions, useHints, type Action } from './actions';
@@ -95,14 +95,22 @@ function SignedOut({ settings, onParty, base }: OnlinePanelProps) {
   const field = useRef<HTMLInputElement>(null);
   const known = !other && s.server ? s.server.replace(/^https?:\/\//, '') : null;
   const waiting = s.status === 'connecting' || s.status === 'reconnecting';
+  /** Back to the server known: a player who signed out asked to sign in, so the identity may again. */
+  const signIn = () => {
+    online.letIdentitySignIn();
+    onParty();
+  };
 
   const connect = async () => {
     if (!address.trim()) return field.current?.focus();
     setBusy(true);
     setProblem(null);
     try {
+      // A recovery link an admin sent is pasted here too (its page says to): it signs in at once.
+      const recovery = parseRecovery(address);
       const invite = parseInvite(address);
-      if (invite) await online.useInvite(invite);
+      if (recovery) await online.recover(recovery.server, recovery.code);
+      else if (invite) await online.useInvite(invite);
       else await online.choose(address);
       onParty();
     } catch (e) {
@@ -119,7 +127,7 @@ function SignedOut({ settings, onParty, base }: OnlinePanelProps) {
       icon: LogIn,
       ...keysOf('party.create'),
       bar: false,
-      run: () => (known ? onParty() : void connect()),
+      run: () => (known ? signIn() : void connect()),
     },
   ]);
 
@@ -141,7 +149,7 @@ function SignedOut({ settings, onParty, base }: OnlinePanelProps) {
                   <span className="dim">{waiting ? 'Connecting…' : known}</span>
                 </span>
               </div>
-              <button type="button" className="btn primary landing-go" data-action="online-connect" data-autofocus onClick={onParty}>
+              <button type="button" className="btn primary landing-go" data-action="online-connect" data-autofocus onClick={signIn}>
                 <LogIn strokeWidth={ICON_STROKE} aria-hidden />
                 Sign in
                 <Hint {...keysOf('party.create')} {...hints} />

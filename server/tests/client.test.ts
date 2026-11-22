@@ -1,10 +1,13 @@
 /**
- * The game's own connection (src/net/client.ts) against a real server: signing up, the socket,
- * the clock, a party and a song started together, and the final score after a dropped connection.
+ * The game's own connection (src/net/client.ts) against a real server: joining with the game's
+ * identity (src/net/identity.ts, WebCrypto as in a browser), the socket, the clock, a party and a
+ * song started together, signing out and in, and an old password account moving to the identity.
  */
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { WireChart } from '../../src/net/protocol.ts';
 import { startServer, type RunningServer } from '../src/app.ts';
+import { hashPassword } from '../src/auth.ts';
 import { DEFAULTS } from '../src/config.ts';
 import { Store } from '../src/db.ts';
 
@@ -18,7 +21,8 @@ Object.assign(globalThis, {
     removeItem: (k: string) => void storage.delete(k),
   },
 });
-const { joinSecret, online, parseInvite, parseJoinSecret, partyId, serverAddress } = await import('../../src/net/client.ts');
+const { joinSecret, online, parseInvite, parseJoinSecret, parseRecovery, partyId, serverAddress } = await import('../../src/net/client.ts');
+const { forgetLoadedIdentity } = await import('../../src/net/identity.ts');
 
 const SONG = 'c'.repeat(64);
 const chart: WireChart = {
@@ -76,6 +80,11 @@ describe('server addresses', () => {
     // A plain address, or a link to a server outside the network over plain HTTP, is no invite.
     expect(parseInvite('play.example.com')).toBeNull();
     expect(parseInvite('http://play.example.com/join?invite=AbC123')).toBeNull();
+    // A recovery link comes in the same shapes, and is no invite.
+    const recovery = { server: 'https://play.example.com', code: 'XyZ789' };
+    expect(parseRecovery('https://play.example.com/join?recover=XyZ789')).toEqual(recovery);
+    expect(parseRecovery('soundwave://join?server=https%3A%2F%2Fplay.example.com&recover=XyZ789')).toEqual(recovery);
+    expect(parseInvite('https://play.example.com/join?recover=XyZ789')).toBeNull();
   });
 
   it('carry a party on Discord as its code and server, and read nothing else as one', () => {
@@ -95,14 +104,18 @@ describe('server addresses', () => {
 });
 
 describe('the game’s connection', () => {
-  it('signs up, joins the socket, syncs its clock and plays a song with a party', async () => {
+  it('joins with its identity, joins the socket, syncs its clock and plays a song with a party', async () => {
     const info = await online.choose(server.url);
     expect(info.mode).toBe('public');
-    await online.signUp({ name: 'Player One', password: 'correct horse' });
+    // A new installation has no account here yet.
+    expect(await online.signInWithIdentity()).toBe(false);
+    await online.join({ name: 'Player One' });
     await until((s) => s.status === 'online');
     expect(online.snapshot().account?.name).toBe('Player One');
-    // The sign-in is kept, apart from the settings.
+    // The sign-in is kept, apart from the settings, and so is the identity, apart from both.
     expect(JSON.parse(storage.get('soundwave.online')!)).toMatchObject({ server: server.url });
+    expect(JSON.parse(storage.get('soundwave.identity')!)).toMatchObject({ v: 1, name: 'Player One', backedUp: false });
+    expect(store.userByName('Player One')!.pubkey).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
     online.createParty();
     await until((s) => !!s.party);
@@ -137,12 +150,44 @@ describe('the game’s connection', () => {
     expect(online.snapshot().party!.results[0].lines[0]).toMatchObject({ name: 'Player One', result: { score: 900 } });
   });
 
-  it('signs out and in again with the same account', async () => {
+  it('signs out, stays out, and signs in again with its identity', async () => {
     online.signOut();
     expect(online.snapshot().status).toBe('signed-out');
-    await online.signIn('player one', 'correct horse');
+    expect(JSON.parse(storage.get('soundwave.online')!)).toMatchObject({ out: true });
+    // The game starting again does not sign the player straight back in.
+    online.resume();
+    expect(online.snapshot().status).toBe('signed-out');
+    expect(await online.signInWithIdentity()).toBe(true);
     await until((s) => s.status === 'online');
+    expect(online.snapshot().account?.name).toBe('Player One');
+    expect(JSON.parse(storage.get('soundwave.online')!).out).toBeUndefined();
     // The party waited for its host to come back.
     await until((s) => s.party?.phase === 'results');
+  });
+
+  it('moves an account made with a password over to the identity, unless the identity has an account here', async () => {
+    store.addUser({
+      id: randomUUID(),
+      name: 'Old Timer',
+      hash: await hashPassword('correct horse'),
+      pubkey: null,
+      role: 'player',
+      created: Date.now(),
+    });
+    online.signOut();
+    // This game's identity is Player One here: it cannot be Old Timer too.
+    await expect(online.signIn('old timer', 'correct horse')).rejects.toThrow(/another account here already: Player One/);
+    expect(online.snapshot()).toMatchObject({ status: 'signed-out', account: null });
+    expect(store.userByName('Old Timer')!.hash).not.toBe('');
+    // On another installation (a new identity) it works, and the password is gone.
+    storage.delete('soundwave.identity');
+    forgetLoadedIdentity();
+    await online.signIn('old timer', 'correct horse');
+    await until((s) => s.status === 'online');
+    expect(online.snapshot().account?.name).toBe('Old Timer');
+    expect(store.userByName('Old Timer')!.hash).toBe('');
+    online.signOut();
+    expect(await online.signInWithIdentity()).toBe(true);
+    expect(online.snapshot().account?.name).toBe('Old Timer');
   });
 });
