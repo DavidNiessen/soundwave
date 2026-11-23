@@ -4,8 +4,8 @@ import { addInversePair, BINS, FRAMES, SEGMENT, spectrogram } from './stft';
 export const MODEL_STEMS = ['drums', 'bass', 'other', 'vocals'] as const;
 export const MODEL_RATE = 44100;
 
-/** Neighbouring segments share a quarter of their length. */
-const STRIDE = Math.floor(0.75 * SEGMENT);
+/** How much of its length a segment shares with the next: a quarter, as in Demucs. */
+export const OVERLAP = 0.25;
 const PLANE = BINS * FRAMES;
 
 /**
@@ -51,9 +51,10 @@ export interface SegmentInfo {
  * the end of the song: Demucs itself goes on while a segment starts inside the song, which for about
  * one song in three runs the network once more on a segment of mostly silence.
  */
-export function segmentOffsets(length: number): number[] {
+export function segmentOffsets(length: number, overlap = OVERLAP): number[] {
+  const stride = Math.floor((1 - overlap) * SEGMENT);
   const offsets: number[] = [];
-  for (let offset = 0; offset < length; offset += STRIDE) {
+  for (let offset = 0; offset < length; offset += stride) {
     offsets.push(offset);
     if (offset + SEGMENT >= length) break;
   }
@@ -179,8 +180,8 @@ export interface StemPart {
 }
 
 /** Where a run of `count` segments from segment `first` starts and ends, and their offsets. */
-export function partSpan(length: number, first: number, count: number): { offsets: number[]; from: number; to: number } {
-  const offsets = segmentOffsets(length).slice(first, first + count);
+export function partSpan(length: number, first: number, count: number, overlap = OVERLAP): { offsets: number[]; from: number; to: number } {
+  const offsets = segmentOffsets(length, overlap).slice(first, first + count);
   const from = offsets[0] ?? 0;
   const to = offsets.length ? Math.min(length, offsets[offsets.length - 1] + SEGMENT) : from;
   return { offsets, from, to };
@@ -204,10 +205,11 @@ export async function separatePart(
   count: number,
   onProgress: (p: number) => void = () => {},
   aborted: () => boolean = () => false,
+  overlap = OVERLAP,
 ): Promise<StemPart> {
   const length = left.length;
   const level = songLevel(left, right);
-  const { offsets, from, to } = partSpan(length, first, count);
+  const { offsets, from, to } = partSpan(length, first, count, overlap);
   const pairs = [new PairSums(from, to, true), new PairSums(from, to, false)];
   const part = (): StemPart => ({ from, sums: pairs.flatMap((p) => p.sums), weights: pairs[0].weights! });
   // Two sets of input buffers: one is with the network while the other is filled.

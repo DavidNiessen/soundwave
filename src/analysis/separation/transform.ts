@@ -118,10 +118,11 @@ export async function separateWithHelpers(
   count: number,
   ports: MessagePort[],
   onProgress: (p: number) => void = () => {},
+  overlap?: number,
 ): Promise<StemPart> {
   const length = left.length;
   const level = songLevel(left, right);
-  const { offsets, from, to } = partSpan(length, first, count);
+  const { offsets, from, to } = partSpan(length, first, count, overlap);
   const [preparer, ...finishers] = ports.map((p) => new Helper(p));
   try {
     preparer.tell({ type: 'song', left, right, level, offsets }, [left.buffer, right.buffer]);

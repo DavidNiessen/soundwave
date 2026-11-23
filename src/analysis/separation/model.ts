@@ -45,13 +45,20 @@ export const REPO_MODEL: ModelSource = {
   ],
 };
 
-function chosenSource(): ModelSource {
+function chosenSource(): ModelSource & { dev?: boolean } {
   // Development only: `localStorage['soundwave.dev.stem-model'] = 'local'` loads the file in the
   // working copy from the dev server instead (to try a newly exported model before it is pushed).
+  // `local:<file>` loads models/htdemucs/<file> straight from the dev server, unchecked and not
+  // stored, to compare a variant of the model with the one in use.
   if (import.meta.env.DEV) {
     try {
-      if (localStorage.getItem('soundwave.dev.stem-model') === 'local') {
+      const chosen = localStorage.getItem('soundwave.dev.stem-model');
+      if (chosen === 'local') {
         return { ...REPO_MODEL, files: REPO_MODEL.files.map((f) => ({ ...f, url: `/models/htdemucs/${f.name}` })) };
+      }
+      if (chosen?.startsWith('local:')) {
+        const name = chosen.slice('local:'.length);
+        return { id: `dev-${name}`, entry: name, files: [{ name, url: `/models/htdemucs/${name}`, bytes: 0, sha256: '' }], dev: true };
       }
     } catch {
       /* storage unavailable */
@@ -107,6 +114,7 @@ class StemModel {
 
   /** Looks at what is stored, without downloading anything. */
   async check(): Promise<ModelStatus['state']> {
+    if (this.source.dev) this.set({ state: 'ready' });
     if (this.status.state === 'downloading' || this.status.state === 'ready') return this.status.state;
     try {
       const have = await Promise.all(this.source.files.map((f) => this.stored(f)));
@@ -120,7 +128,7 @@ class StemModel {
 
   /** Resolves once the model is on this device, downloading what is missing. One download at a time. */
   ensure(): Promise<void> {
-    if (this.status.state === 'ready') return Promise.resolve();
+    if (this.status.state === 'ready' || this.source.dev) return Promise.resolve();
     this.pending ??= this.download().finally(() => (this.pending = null));
     return this.pending;
   }
@@ -165,6 +173,12 @@ class StemModel {
 
   /** The model's files, read from storage. */
   async load(): Promise<LoadedModel> {
+    if (this.source.dev) {
+      const files = await Promise.all(
+        this.source.files.map(async (f) => ({ name: f.name, data: await (await fetch(f.url)).arrayBuffer() })),
+      );
+      return { entry: this.source.entry, files };
+    }
     const files = await Promise.all(
       this.source.files.map(async (f) => {
         const blob = await this.stored(f);

@@ -95,13 +95,23 @@ export const stemAnalyzer: StemAnalyzer = async (songId, onProgress, signal) => 
 
   // In WebKit the browser's graphics card path cannot keep going in the background (see work).
   const pausable = device === 'gpu' && onWebKit();
-  const count = segmentOffsets(left.length).length;
+  const overlap = devOverlap();
+  const count = segmentOffsets(left.length, overlap).length;
   const separated = await work(
     () => {
-      if (!model) return { req: { type: 'separate', left, right, native, device, first: 0, count }, transfer: [] };
+      if (!model) return { req: { type: 'separate', left, right, native, device, first: 0, count, overlap }, transfer: [] };
       // Each try gets its own copy of the model, so it can be run again (see work).
       const files = model.files.map((f) => ({ name: f.name, data: f.data.slice(0) }));
-      const req: SeparationRequest = { type: 'separate', left, right, model: { entry: model.entry, files }, device, first: 0, count };
+      const req: SeparationRequest = {
+        type: 'separate',
+        left,
+        right,
+        model: { entry: model.entry, files },
+        device,
+        first: 0,
+        count,
+        overlap,
+      };
       return { req, transfer: files.map((f) => f.data) };
     },
     pausable,
@@ -212,14 +222,34 @@ function whenVisible(signal: AbortSignal): Promise<void> {
   });
 }
 
-/** Development only: `localStorage['soundwave.dev.stem-helpers'] = 'off'` separates without helpers, to compare. */
-function helpersWanted(): boolean {
-  if (!import.meta.env.DEV) return true;
+/** Development only: `localStorage['soundwave.dev.stem-overlap'] = '0.1'` separates with another overlap, to compare. */
+function devOverlap(): number | undefined {
+  if (!import.meta.env.DEV) return undefined;
   try {
-    return localStorage.getItem('soundwave.dev.stem-helpers') !== 'off';
+    const set = Number(localStorage.getItem('soundwave.dev.stem-overlap') ?? NaN);
+    return set >= 0 && set < 1 ? set : undefined;
   } catch {
-    return true;
+    return undefined;
   }
+}
+
+/**
+ * Whether a separation on `device` gets helpers (see transform.ts). They keep about 0.5 GB more in
+ * the page while a song separates. On a graphics card they make separating about twice as fast; on
+ * a processor about 4%, which is not worth the memory on the phones that take that path, nor in
+ * WebKit, which closes a page for its memory first. Development only:
+ * `localStorage['soundwave.dev.stem-helpers'] = 'off'` (or `'on'`) to compare.
+ */
+function helpersWanted(device: ModelDevice): boolean {
+  if (import.meta.env.DEV) {
+    try {
+      const set = localStorage.getItem('soundwave.dev.stem-helpers');
+      if (set === 'off' || set === 'on') return set === 'on';
+    } catch {
+      /* storage unavailable */
+    }
+  }
+  return device === 'gpu' && !onWebKit();
 }
 
 /** Starts the helpers of one separation and gives back a port to each; none where workers cannot be started. */
@@ -253,7 +283,7 @@ function inWorker(
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
     // Separating: the work around the model goes to helpers of its own (see transform.ts).
-    const helpers = req.type === 'separate' && helpersWanted() ? startHelpers() : null;
+    const helpers = req.type === 'separate' && helpersWanted(req.device) ? startHelpers() : null;
     if (helpers && req.type === 'separate') {
       req = { ...req, helpers: helpers.ports };
       transfer = [...transfer, ...helpers.ports];
