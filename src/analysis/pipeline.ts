@@ -9,6 +9,7 @@ import { hzToBin, stft, type Spectrogram } from './dsp/stft';
 import { BASS_SPLIT, separateParts } from './pitch/lines';
 import { bassLineFromStem, leadLineFromStem, loudness, vocalLineFromStem } from './pitch/stemLines';
 import { salienceLine } from './pitch/salience';
+import { Stopwatch } from './timing';
 import {
   ANALYSIS_SAMPLE_RATE,
   ANALYSIS_VERSION,
@@ -75,16 +76,19 @@ export async function analyzeSignal(signal: Float32Array, opts: PipelineOptions 
     opts.onProgress?.({ step, progress: a + (b - a) * Math.min(1, Math.max(0, p)) });
   };
   const yieldNow = () => new Promise((r) => setTimeout(r, 0));
+  const clock = new Stopwatch();
 
   // 1. Spectrum
   report('spectrum');
   const spec = stft(signal, sr, NFFT, HOP, (p) => report('spectrum', p));
   const fps = sr / HOP;
+  clock.lap('spectrum');
   await yieldNow();
 
   // 2. Harmonic / percussive separation
   report('separating');
   const { harmonic, percussive } = hpss(spec, 17, 17, (p) => report('separating', p));
+  clock.lap('hpss');
   await yieldNow();
 
   // 3. Rhythm: onset envelope, tempo, beats, drum hits
@@ -92,6 +96,7 @@ export async function analyzeSignal(signal: Float32Array, opts: PipelineOptions 
   const rms = rmsCurve(signal, HOP);
   // Band-balanced onset envelope so kicks count as much as broadband noise.
   const env = onsetEnvelope(spec);
+  clock.lap('onsets');
   // The beat model's beats when there are enough of them to be a grid; else the tracker here.
   let modelled: Beats | undefined;
   if (opts.beatTracker) {
@@ -102,6 +107,7 @@ export async function analyzeSignal(signal: Float32Array, opts: PipelineOptions 
     } catch (err) {
       opts.onLog?.(`the beat model failed (${(err as Error).message || String(err)}); using the beat tracker`);
     }
+    clock.lap('beat model');
   }
   let tempo: number;
   let beats: number[];
@@ -120,6 +126,7 @@ export async function analyzeSignal(signal: Float32Array, opts: PipelineOptions 
     beats = refineBeats(beatFrames, env, fps);
     // Drop beats the tracker invented in silence.
     beats = beats.filter((t) => (rms[Math.min(rms.length - 1, Math.round(t * fps))] ?? 0) > 0.06);
+    clock.lap('beat tracker');
   }
   report('rhythm', 0.6);
   let drums: DrumHit[];
@@ -132,6 +139,7 @@ export async function analyzeSignal(signal: Float32Array, opts: PipelineOptions 
   }
   // Align the grid with the actual attacks, then extend it at constant tempo to cover the song.
   beats = extendGrid(calibrateBeats(beats, drums), duration);
+  clock.lap('drums');
   report('rhythm', 1);
   await yieldNow();
 
@@ -151,6 +159,7 @@ export async function analyzeSignal(signal: Float32Array, opts: PipelineOptions 
   // Where the model heard no bar at all, the accents decide as before.
   const modelBars = modelled ? barsOnGrid(beats, modelled.downbeats) : [];
   const downbeats = modelBars.length ? modelBars : findDownbeats(accent);
+  clock.lap('harmony');
   report('harmony', 1);
   await yieldNow();
 
@@ -176,15 +185,19 @@ export async function analyzeSignal(signal: Float32Array, opts: PipelineOptions 
           .map((k) => `${k} ${st[k] ? (loudness(st[k]) / (mixLoudness || 1)).toFixed(3) : '-'}`)
           .join(', ')}`,
       );
+      clock.lap('stem levels');
       if (st.vocals && silent(st.vocals)) vocals = [];
       else if (st.vocals && sn.vocals.length) vocals = vocalLineFromStem({ signal: st.vocals, sr, notes: sn.vocals, mixLoudness });
+      clock.lap('vocal line');
       report('melody', 0.4);
       // Lead follows the instrument only: where no instrument plays, the part rests (like a real chart).
       if (st.other && silent(st.other)) lead = [];
       else if (st.other && sn.other.length) lead = leadLineFromStem({ signal: st.other, sr, notes: sn.other, beats, mixLoudness });
+      clock.lap('lead line');
       report('melody', 0.8);
       if (st.bass && silent(st.bass)) bass = [];
       else if (st.bass && sn.bass.length) bass = bassLineFromStem({ signal: st.bass, sr, notes: sn.bass, mixLoudness });
+      clock.lap('bass line');
       opts.onLog?.(`stem lines: ${bass.length} bass, ${lead.length} lead, ${vocals.length} vocals`);
     }
   } else if (opts.transcriber) {
@@ -252,6 +265,8 @@ export async function analyzeSignal(signal: Float32Array, opts: PipelineOptions 
     key,
     pitchSource,
   };
+  clock.lap('sections');
+  opts.onLog?.(`analysis took ${clock}`);
   report('finishing', 1);
   return result;
 }

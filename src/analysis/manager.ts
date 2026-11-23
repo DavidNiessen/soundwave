@@ -19,6 +19,7 @@ import { serveWorkerFetch } from '../app/workerFetch';
 import { stemAnalyzer, type StemAnalyzer } from './separation/analyzer';
 import { BEAT_MODEL, storeBundledModel } from './native';
 import { analysisDevice } from './separation/support';
+import { Stopwatch } from './timing';
 import {
   ANALYSIS_SAMPLE_RATE,
   ANALYSIS_VERSION,
@@ -281,7 +282,7 @@ export class AnalysisManager {
       // Noted while it runs: should the page close before it ends, the next one knows (see `died`).
       this.env.running?.write(id);
       try {
-        const { result, stems } = await this.analyze(id, abort.signal);
+        const { result, stems, clock } = await this.analyze(id, abort.signal);
         if (stale()) continue;
         this.results.set(id, result);
         if (stems && Object.keys(stems).length) {
@@ -305,6 +306,8 @@ export class AnalysisManager {
         } catch (e) {
           console.warn('could not write the analysis into the song file', e);
         }
+        clock.lap('saving');
+        console.info('[analysis]', `song analyzed: ${clock}`);
         if (stale()) continue;
         this.set(id, { state: 'ready' });
       } catch (e) {
@@ -319,7 +322,8 @@ export class AnalysisManager {
     this.running = false;
   }
 
-  private async analyze(id: string, signal: AbortSignal): Promise<{ result: AnalysisResult; stems?: Assist['stems'] }> {
+  private async analyze(id: string, signal: AbortSignal): Promise<{ result: AnalysisResult; stems?: Assist['stems']; clock: Stopwatch }> {
+    const clock = new Stopwatch();
     const progress = (s: AnalysisStatus) => {
       if (!signal.aborted) this.set(id, s);
     };
@@ -345,6 +349,7 @@ export class AnalysisManager {
         stems: r.stems,
         stemNotes: r.notes,
       };
+      clock.lap('stems');
     }
     if (signal.aborted) throw abortError();
     const base = assist ? start + SEPARATION_SHARE * (1 - start) : 0;
@@ -355,7 +360,8 @@ export class AnalysisManager {
       signal,
       assist,
     );
-    return { result, stems: assist?.stems };
+    clock.lap('analysis');
+    return { result, stems: assist?.stems, clock };
   }
 
   async analysis(id: string): Promise<AnalysisResult | undefined> {
@@ -484,10 +490,12 @@ const defaultEnv: ManagerEnv = {
 };
 
 const localAnalyzer: LocalAnalyzer = async (id, onProgress, signal, assist) => {
+  const clock = new Stopwatch();
   const buffer = await loadSongBuffer(id);
   if (signal.aborted) throw abortError();
   const audio = await toAnalysisSignal(buffer);
   if (signal.aborted) throw abortError();
+  clock.lap('mix');
   // Decoding into a 22.05 kHz context resamples each stem to the analysis rate.
   const decodeStem = async (data: ArrayBuffer | undefined) => {
     if (!data) return undefined;
@@ -509,6 +517,7 @@ const localAnalyzer: LocalAnalyzer = async (id, onProgress, signal, assist) => {
       if (s) stems[name] = s;
     }
   }
+  clock.lap('decoding stems');
   // The beat model is small enough for any device: without a graphics card it runs on the processor.
   const beatModel = {
     url: new URL(`${import.meta.env.BASE_URL}models/beat-this/small0.onnx`, location.href).href,
@@ -523,6 +532,7 @@ const localAnalyzer: LocalAnalyzer = async (id, onProgress, signal, assist) => {
       beatModel.device = 'cpu';
     }
   }
+  console.info('[analysis]', `preparing the analysis took ${clock}`);
   return runWorker(audio, onProgress, signal, assist?.lines, drumSignal, stems, assist?.stemNotes, beatModel);
 };
 

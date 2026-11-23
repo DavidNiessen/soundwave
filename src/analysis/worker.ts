@@ -5,6 +5,7 @@ import { appBeatModel, openBeatModel } from './beat/model';
 import { beatsAndBars } from './beat/track';
 import { analyzeSignal, type BeatTracker } from './pipeline';
 import { loadRuntime } from './runtime';
+import { Stopwatch } from './timing';
 import type { AnalysisProgress, AnalysisResult, PartLines, StemName, StemNotes } from './types';
 
 export type WorkerRequest = {
@@ -30,7 +31,7 @@ const post = (m: WorkerResponse) => (self as DedicatedWorkerGlobalScope).postMes
 const beatTracker =
   (at: NonNullable<WorkerRequest['beatModel']>): BeatTracker =>
   async (audio, onProgress) => {
-    const started = performance.now();
+    const clock = new Stopwatch();
     const device = at.device;
     let model;
     if (device === 'native') model = appBeatModel(ort);
@@ -38,11 +39,12 @@ const beatTracker =
       await loadRuntime(ort, device);
       model = await openBeatModel(ort, at.url, device, (message) => post({ type: 'log', message }));
     }
+    clock.lap('opening');
     try {
-      const found = await beatsAndBars(audio, model, onProgress);
+      const found = await beatsAndBars(audio, model, onProgress, clock);
       post({
         type: 'log',
-        message: `beat model on ${model.device}: ${found.beats.length} beats, ${found.downbeats.length} bars in ${Math.round(performance.now() - started)} ms`,
+        message: `beat model on ${model.device}: ${found.beats.length} beats, ${found.downbeats.length} bars, ${clock}`,
       });
       return found;
     } finally {

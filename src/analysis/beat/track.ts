@@ -1,3 +1,4 @@
+import type { Stopwatch } from '../timing';
 import { FPS, logMel, MELS } from './spectrogram';
 
 /** Frames the model takes at once: thirty seconds. */
@@ -65,8 +66,14 @@ function peaks(logits: Float32Array): number[] {
  * The model always takes a full window, so a signal shorter than thirty seconds is followed by
  * silence (Beat This itself would hand the model a shorter window).
  */
-export async function beatsAndBars(signal: Float32Array, model: BeatModel, onProgress: (p: number) => void = () => {}): Promise<Beats> {
+export async function beatsAndBars(
+  signal: Float32Array,
+  model: BeatModel,
+  onProgress: (p: number) => void = () => {},
+  clock?: Stopwatch,
+): Promise<Beats> {
   const spect = logMel(signal);
+  clock?.lap('spectrogram');
   const frames = spect.frames;
   const beat = new Float32Array(frames).fill(SILENT);
   const downbeat = new Float32Array(frames).fill(SILENT);
@@ -93,6 +100,7 @@ export async function beatsAndBars(signal: Float32Array, model: BeatModel, onPro
     onProgress((starts.length - i) / starts.length);
   }
 
+  clock?.lap('model');
   const beats = peaks(beat).map((f) => f / FPS);
   const bars = new Set<number>();
   if (beats.length) {
