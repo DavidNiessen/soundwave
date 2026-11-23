@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { MODEL_STEMS, separate, type SegmentModel } from '../src/analysis/separation/separate';
+import {
+  joinParts,
+  MODEL_STEMS,
+  segmentOffsets,
+  separate,
+  separatePart,
+  type SegmentModel,
+  type StemPart,
+} from '../src/analysis/separation/separate';
 import { addInverse, addInversePair, BINS, FRAMES, SEGMENT, spectrogram } from '../src/analysis/separation/stft';
 
 const PLANE = BINS * FRAMES;
@@ -108,6 +116,20 @@ describe('separating a song', () => {
       worst = Math.max(worst, Math.abs(sum - (l[i] + r[i]) / 2));
     }
     expect(worst).toBeLessThan(0.02);
+  }, 120_000);
+
+  it('gives the same stems when the song is separated in runs of a few segments', async () => {
+    const length = Math.round(SEGMENT * 4.3);
+    const l = Float32Array.from({ length }, (_, i) => 0.3 * tone(i));
+    const r = Float32Array.from({ length }, (_, i) => 0.2 * tone(i * 3));
+    const whole = await separate(l, r, quarter);
+    const count = segmentOffsets(length).length;
+    const parts: StemPart[] = [];
+    for (let first = 0; first < count; first += 2) parts.push(await separatePart(l, r, quarter, first, Math.min(2, count - first)));
+    const joined = joinParts(l, r, parts);
+    let worst = 0;
+    for (let s = 0; s < 4; s++) for (let i = 0; i < length; i += 31) worst = Math.max(worst, Math.abs(joined[s][i] - whole[s][i]));
+    expect(worst).toBeLessThan(1e-6);
   }, 120_000);
 
   it('stops when the analysis is cancelled', async () => {

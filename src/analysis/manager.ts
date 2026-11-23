@@ -17,6 +17,7 @@ import {
 import { writeAnalysisToFile } from '../storage/songFile';
 import { serveWorkerFetch } from '../app/workerFetch';
 import { stemAnalyzer, type StemAnalyzer } from './separation/analyzer';
+import { BEAT_MODEL, storeBundledModel } from './native';
 import { analysisDevice } from './separation/support';
 import {
   ANALYSIS_SAMPLE_RATE,
@@ -511,10 +512,25 @@ const localAnalyzer: LocalAnalyzer = async (id, onProgress, signal, assist) => {
   // The beat model is small enough for any device: without a graphics card it runs on the processor.
   const beatModel = {
     url: new URL(`${import.meta.env.BASE_URL}models/beat-this/small0.onnx`, location.href).href,
-    device: (await analysisDevice()) === 'gpu' ? ('gpu' as const) : ('cpu' as const),
+    device: await beatDevice(),
   };
+  // The app runs it itself when it runs the others: it is handed the model once (see analysis/native.ts).
+  if (beatModel.device === 'native') {
+    try {
+      await storeBundledModel(BEAT_MODEL, beatModel.url);
+    } catch (err) {
+      console.warn('The app could not take the beat model; it runs in the page', err);
+      beatModel.device = 'cpu';
+    }
+  }
   return runWorker(audio, onProgress, signal, assist?.lines, drumSignal, stems, assist?.stemNotes, beatModel);
 };
+
+/** Where the beat model runs: where the other models do, and on the processor without a graphics card. */
+async function beatDevice(): Promise<'gpu' | 'cpu' | 'native'> {
+  const device = await analysisDevice();
+  return device === 'native' || device === 'gpu' ? device : 'cpu';
+}
 
 /** Mono, 22.05 kHz copy of the song for analysis. */
 export async function toAnalysisSignal(buffer: AudioBuffer): Promise<Float32Array> {

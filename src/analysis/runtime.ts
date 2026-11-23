@@ -101,3 +101,80 @@ export async function openOnDevice<T>(
     }
   }
 }
+
+/**
+ * Lets the worker's garbage collector see how much it may free, after a model run.
+ *
+ * The runtime makes GPU buffers, bind groups and read-backs for every run and lets go of them, but
+ * a browser frees what they hold only when the JavaScript objects standing for them are collected.
+ * A worker's own JavaScript heap stays small, so its collector barely runs: in WebKit (Safari, the
+ * macOS app) a song's separation piled up 15 GB and more that way, until the system closed the
+ * game. Allocating a few large arrays and dropping them at once makes the collector run, and the
+ * GPU memory and WebKit's bookkeeping for it are freed as the work goes. At most once a second.
+ */
+let nudged = 0;
+export function nudgeCollector() {
+  const now = performance.now();
+  if (now - nudged < 1000) return;
+  nudged = now;
+  for (let i = 0; i < 8; i++) new Uint8Array(32 << 20)[0] = 1;
+}
+
+/** WebGPU, as far as reading a tensor back needs it. */
+interface Gpu {
+  createBuffer(d: { size: number; usage: number }): GpuBuffer;
+  createCommandEncoder(): {
+    copyBufferToBuffer(from: unknown, fromOffset: number, to: GpuBuffer, toOffset: number, size: number): void;
+    finish(): unknown;
+  };
+  queue: { submit(buffers: unknown[]): void };
+}
+interface GpuBuffer {
+  size: number;
+  mapAsync(mode: number): Promise<void>;
+  getMappedRange(): ArrayBuffer;
+  unmap(): void;
+  destroy(): void;
+}
+/** GPUBufferUsage.MAP_READ | COPY_DST, and GPUMapMode.READ. */
+const MAP_READ = 0x0001;
+const COPY_DST = 0x0008;
+const READ = 0x0001;
+
+/**
+ * Reads tensors the runtime left on the graphics card (`preferredOutputLocation: 'gpu-buffer'`)
+ * into arrays of its own, through one staging buffer per output kept for every run. The runtime's
+ * own read-back makes a new staging buffer and a new array each time: for the stem model 55 MB a
+ * segment, which WebKit holds until it collects them. The arrays returned are reused by the next
+ * read of the same output, so they must be done with by then.
+ */
+export class GpuReader {
+  private staging = new Map<string, GpuBuffer>();
+  private arrays = new Map<string, Float32Array>();
+  constructor(private readonly device: Gpu) {}
+
+  async read(name: string, tensor: Ort.Tensor): Promise<Float32Array> {
+    const bytes = tensor.size * 4;
+    let staging = this.staging.get(name);
+    if (!staging || staging.size !== bytes) {
+      staging?.destroy();
+      staging = this.device.createBuffer({ size: bytes, usage: MAP_READ | COPY_DST });
+      this.staging.set(name, staging);
+      this.arrays.set(name, new Float32Array(tensor.size));
+    }
+    const encoder = this.device.createCommandEncoder();
+    encoder.copyBufferToBuffer(tensor.gpuBuffer, 0, staging, 0, bytes);
+    this.device.queue.submit([encoder.finish()]);
+    await staging.mapAsync(READ);
+    const array = this.arrays.get(name)!;
+    array.set(new Float32Array(staging.getMappedRange()));
+    staging.unmap();
+    return array;
+  }
+
+  release() {
+    for (const b of this.staging.values()) b.destroy();
+    this.staging.clear();
+    this.arrays.clear();
+  }
+}

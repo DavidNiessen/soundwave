@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import * as ort from 'onnxruntime-web/webgpu';
 import { proxyWorkerFetch } from '../app/workerFetch';
-import { openBeatModel } from './beat/model';
+import { appBeatModel, openBeatModel } from './beat/model';
 import { beatsAndBars } from './beat/track';
 import { analyzeSignal, type BeatTracker } from './pipeline';
 import { loadRuntime } from './runtime';
@@ -15,7 +15,7 @@ export type WorkerRequest = {
   stems?: Partial<Record<StemName, Float32Array>>;
   stemNotes?: StemNotes;
   /** Where the beat model is and what to run it on; without it the beat tracker finds the grid. */
-  beatModel?: { url: string; device: 'gpu' | 'cpu' };
+  beatModel?: { url: string; device: 'gpu' | 'cpu' | 'native' };
 };
 
 export type WorkerResponse =
@@ -31,8 +31,13 @@ const beatTracker =
   (at: NonNullable<WorkerRequest['beatModel']>): BeatTracker =>
   async (audio, onProgress) => {
     const started = performance.now();
-    await loadRuntime(ort, at.device);
-    const model = await openBeatModel(ort, at.url, at.device, (message) => post({ type: 'log', message }));
+    const device = at.device;
+    let model;
+    if (device === 'native') model = appBeatModel(ort);
+    else {
+      await loadRuntime(ort, device);
+      model = await openBeatModel(ort, at.url, device, (message) => post({ type: 'log', message }));
+    }
     try {
       const found = await beatsAndBars(audio, model, onProgress);
       post({
@@ -46,7 +51,7 @@ const beatTracker =
   };
 
 // Where a worker cannot fetch the game's files itself (the macOS app), the page fetches them.
-const fetched = proxyWorkerFetch((m) => (self as unknown as DedicatedWorkerGlobalScope).postMessage(m));
+const fetched = proxyWorkerFetch((m, transfer) => (self as unknown as DedicatedWorkerGlobalScope).postMessage(m, transfer));
 
 self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
   if (fetched(e.data)) return;

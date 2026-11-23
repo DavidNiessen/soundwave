@@ -30,4 +30,18 @@ describe('fetching for a worker through its page', () => {
     // Messages that are not answers go on to the stage.
     expect(worker({ type: 'input' })).toBe(false);
   });
+
+  it('sends a request body along (the app’s model runs are POSTs with tensors)', async () => {
+    vi.stubGlobal('location', { protocol: 'tauri:', href: 'tauri://localhost/assets/worker.js' });
+    const seen: { method?: string; body?: number[] }[] = [];
+    const pageFetch = vi.fn<typeof fetch>(async (_url, init) => {
+      seen.push({ method: init?.method, body: [...new Uint8Array(init?.body as ArrayBuffer)] });
+      return new Response(new Uint8Array([9, 8]), { status: 200 });
+    });
+    const page = { postMessage: (m: unknown) => void worker(m) };
+    const worker = proxyWorkerFetch((ask) => serveWorkerFetch(page, ask, pageFetch));
+    const r = await fetch('swmodel://localhost/run?model=m&entry=m.onnx', { method: 'POST', body: new Uint8Array([1, 2, 3]) });
+    expect(seen).toEqual([{ method: 'POST', body: [1, 2, 3] }]);
+    expect([...new Uint8Array(await r.arrayBuffer())]).toEqual([9, 8]);
+  });
 });

@@ -1,4 +1,5 @@
 import type * as Ort from 'onnxruntime-web';
+import { nudgeCollector } from '../runtime';
 import type { PitchedNote } from '../types';
 import { addPitchBends, bendActivity, CONTOUR_BINS, decodeNotes, notesToTime, PITCHES } from './noteEvents';
 
@@ -89,6 +90,7 @@ export async function transcribeOnnx(
     const o = (await out[ONSETS].getData()) as Float32Array;
     const c = (await out[CONTOURS].getData()) as Float32Array;
     for (const name of [NOTES, ONSETS, CONTOURS]) out[name].dispose();
+    nudgeCollector();
     // Each window keeps its middle: half the overlap is dropped at both ends.
     for (let w = 0; w < batch.length && filled < total; w++) {
       const keep = Math.min(KEPT_PER_WINDOW, total - filled);

@@ -1,11 +1,12 @@
 import type * as Ort from 'onnxruntime-web/webgpu';
-import { openOnDevice } from '../runtime';
+import { BEAT_MODEL, nativeSession } from '../native';
+import { nudgeCollector, openOnDevice } from '../runtime';
 import { MELS } from './spectrogram';
 import { WINDOW, type BeatModel } from './track';
 
 export interface OpenBeatModel extends BeatModel {
   /** What it ended up running on. */
-  device: 'gpu' | 'cpu';
+  device: 'gpu' | 'cpu' | 'native';
   release(): Promise<void>;
 }
 
@@ -28,14 +29,23 @@ export async function openBeatModel(
     (provider) => ort.InferenceSession.create(bytes, { executionProviders: [provider], logSeverityLevel: 3 }),
     (err) => log(`the graphics card could not load the beat model (${err.message}); using the processor`),
   );
-  const session = opened.value;
+  return beatModel(ort, opened.value, opened.device);
+}
+
+/** The beat model the desktop app runs (see analysis/native.ts); the app must have been handed it. */
+export function appBeatModel(ort: typeof Ort): OpenBeatModel {
+  return beatModel(ort, nativeSession(BEAT_MODEL.key, BEAT_MODEL.entry).session, 'native');
+}
+
+function beatModel(ort: typeof Ort, session: Ort.InferenceSession, device: OpenBeatModel['device']): OpenBeatModel {
   return {
-    device: opened.device,
+    device,
     async run(spect) {
       const out = await session.run({ spect: new ort.Tensor('float32', spect, [1, WINDOW, MELS]) });
       const result = { beat: (await out.beat.getData()) as Float32Array, downbeat: (await out.downbeat.getData()) as Float32Array };
       out.beat.dispose();
       out.downbeat.dispose();
+      nudgeCollector();
       return result;
     },
     release: () => session.release(),

@@ -49,32 +49,59 @@ interface Segment {
   tDev: number;
 }
 
-/**
- * Splits a stereo song at 44.1 kHz into its four stems, each mixed to mono, the way Demucs applies
- * its model: overlapping 7.8 s segments, each weighted by a triangle and summed. Unlike Demucs'
- * default there is no random time shift, so the same song always gives the same stems.
- *
- * The network and the work around it overlap: while the network runs on one segment, the next one
- * is prepared and the previous one's output turned into sound.
- */
-export async function separate(
-  left: Float32Array,
-  right: Float32Array,
-  model: SegmentModel,
-  onProgress: (p: number) => void = () => {},
-  aborted: () => boolean = () => false,
-): Promise<Float32Array[]> {
+/** Where each segment starts in a song of `length` samples. */
+export function segmentOffsets(length: number): number[] {
+  const offsets: number[] = [];
+  for (let offset = 0; offset < length; offset += STRIDE) offsets.push(offset);
+  return offsets;
+}
+
+/** The whole song is levelled by its mono mix: its mean, and its deviation as the scale. */
+function songLevel(left: Float32Array, right: Float32Array): { mean: number; scale: number } {
   const length = left.length;
-  // The whole song is levelled first, by its mono mix.
   let sum = 0;
   for (let i = 0; i < length; i++) sum += (left[i] + right[i]) / 2;
   const mean = sum / length;
   let sq = 0;
   for (let i = 0; i < length; i++) sq += ((left[i] + right[i]) / 2 - mean) ** 2;
-  const scale = Math.sqrt(sq / Math.max(1, length - 1)) + 1e-8;
+  return { mean, scale: Math.sqrt(sq / Math.max(1, length - 1)) + 1e-8 };
+}
 
-  const stems = MODEL_STEMS.map(() => new Float32Array(length));
-  const weights = new Float32Array(length);
+/**
+ * What a run of segments adds to the stems: from sample `from` on, each stem's weighted sum (still
+ * levelled) and the weights summed there. Parts of a song are put together with joinParts.
+ */
+export interface StemPart {
+  from: number;
+  sums: Float32Array[];
+  weights: Float32Array;
+}
+
+/**
+ * Runs the model on `count` segments from segment `first` (see segmentOffsets), the way Demucs
+ * applies it: overlapping 7.8 s segments, each weighted by a triangle. Unlike Demucs' default there
+ * is no random time shift, so the same song always gives the same stems.
+ *
+ * The network and the work around it overlap: while the network runs on one segment, the next one
+ * is prepared and the previous one's output turned into sound.
+ */
+export async function separatePart(
+  left: Float32Array,
+  right: Float32Array,
+  model: SegmentModel,
+  first: number,
+  count: number,
+  onProgress: (p: number) => void = () => {},
+  aborted: () => boolean = () => false,
+): Promise<StemPart> {
+  const length = left.length;
+  const { mean, scale } = songLevel(left, right);
+  const offsets = segmentOffsets(length).slice(first, first + count);
+  const from = offsets[0] ?? 0;
+  const to = offsets.length ? Math.min(length, offsets[offsets.length - 1] + SEGMENT) : from;
+
+  const sums = MODEL_STEMS.map(() => new Float32Array(to - from));
+  const weights = new Float32Array(to - from);
   const monos = [new Float32Array(SEGMENT), new Float32Array(SEGMENT)];
   const half = SEGMENT / 2;
   const weight = (i: number) => (i < half ? i + 1 : SEGMENT - i) / half;
@@ -100,6 +127,7 @@ export async function separate(
   };
 
   const finish = (seg: Segment, out: { x: Float32Array; xt: Float32Array }) => {
+    const at0 = seg.offset - from;
     for (let s = 0; s < SOURCES; s += 2) {
       const [m1, m2] = monos;
       m1.fill(0);
@@ -108,18 +136,17 @@ export async function separate(
       for (const [j, mono] of [m1, m2].entries()) {
         const l = (s + j) * 2 * SEGMENT;
         const r = l + SEGMENT;
-        const stem = stems[s + j];
+        const sum = sums[s + j];
         for (let i = 0; i < seg.span; i++) {
           const at = seg.lead + i;
-          stem[seg.offset + i] += weight(i) * (mono[at] + ((out.xt[l + at] + out.xt[r + at]) / 2) * seg.tDev + seg.tMean);
+          sum[at0 + i] += weight(i) * (mono[at] + ((out.xt[l + at] + out.xt[r + at]) / 2) * seg.tDev + seg.tMean);
         }
       }
     }
-    for (let i = 0; i < seg.span; i++) weights[seg.offset + i] += weight(i);
+    for (let i = 0; i < seg.span; i++) weights[at0 + i] += weight(i);
   };
 
-  const offsets: number[] = [];
-  for (let offset = 0; offset < length; offset += STRIDE) offsets.push(offset);
+  if (!offsets.length) return { from, sums, weights };
   let current = prepare(offsets[0], buffers[0]);
   let pending = model.run(current.x, current.xt);
   for (let k = 0; k < offsets.length; k++) {
@@ -131,6 +158,34 @@ export async function separate(
     onProgress(Math.min(1, (current.offset + current.span) / length));
     if (next) current = next;
   }
-  for (const stem of stems) for (let i = 0; i < length; i++) stem[i] = (stem[i] / weights[i]) * scale + mean;
+  return { from, sums, weights };
+}
+
+/** Puts the parts of a song separated in runs (separatePart) together into its four stems. */
+export function joinParts(left: Float32Array, right: Float32Array, parts: readonly StemPart[]): Float32Array[] {
+  const length = left.length;
+  const { mean, scale } = songLevel(left, right);
+  const stems = MODEL_STEMS.map(() => new Float32Array(length));
+  const weights = new Float32Array(length);
+  for (const part of parts) {
+    part.sums.forEach((sum, s) => {
+      const stem = stems[s];
+      for (let i = 0; i < sum.length; i++) stem[part.from + i] += sum[i];
+    });
+    for (let i = 0; i < part.weights.length; i++) weights[part.from + i] += part.weights[i];
+  }
+  for (const stem of stems) for (let i = 0; i < length; i++) stem[i] = weights[i] > 0 ? (stem[i] / weights[i]) * scale + mean : mean;
   return stems;
+}
+
+/** Splits a stereo song at 44.1 kHz into its four stems, each mixed to mono, in one run. */
+export async function separate(
+  left: Float32Array,
+  right: Float32Array,
+  model: SegmentModel,
+  onProgress: (p: number) => void = () => {},
+  aborted: () => boolean = () => false,
+): Promise<Float32Array[]> {
+  const count = segmentOffsets(left.length).length;
+  return joinParts(left, right, [await separatePart(left, right, model, 0, count, onProgress, aborted)]);
 }
