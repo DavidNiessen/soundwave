@@ -111,7 +111,7 @@ export const stemAnalyzer: StemAnalyzer = async (songId, onProgress, signal) => 
       const req: SeparationRequest = {
         type: 'separate',
         ...song,
-        ...(files ? { model: { entry: model!.entry, files } } : { native }),
+        ...(files ? { model: { entry: model!.entry, files, prepared: model!.prepared } } : { native }),
         device,
         first: 0,
         count,

@@ -71,6 +71,13 @@ async function openPitchSession(url: string, device: 'gpu' | 'cpu'): Promise<ort
   return opened.value;
 }
 
+/**
+ * A graph optimized when it was made is opened as it is on a graphics card. Optimizing it here would
+ * fold its float16 weights to float32 copies in the runtime's own memory, which only grows: 700 MB
+ * held for the whole song instead of 285. (On a processor the runtime's own layout work pays.)
+ */
+const asPrepared = (model: LoadedModel) => (model.prepared ? { graphOptimizationLevel: 'disabled' as const } : {});
+
 async function openSession(model: LoadedModel, provider: 'webgpu' | 'wasm'): Promise<ort.InferenceSession> {
   const entry = model.files.find((f) => f.name === model.entry)!;
   return ort.InferenceSession.create(new Uint8Array(entry.data), {
@@ -80,7 +87,7 @@ async function openSession(model: LoadedModel, provider: 'webgpu' | 'wasm'): Pro
     // collector, about 700 MB a segment, which WebKit charges to the page until it collects them.
     // The outputs stay there too and are read back by the runner (see GpuReader).
     executionProviders: [provider === 'webgpu' ? { name: 'webgpu', storageBufferCacheMode: 'simple' } : provider],
-    ...(provider === 'webgpu' ? { preferredOutputLocation: 'gpu-buffer' as const } : {}),
+    ...(provider === 'webgpu' ? { preferredOutputLocation: 'gpu-buffer' as const, ...asPrepared(model) } : {}),
     externalData: model.files.filter((f) => f !== entry).map((f) => ({ path: f.name, data: new Uint8Array(f.data) })),
   });
 }
@@ -142,6 +149,7 @@ async function capturedNetwork(model: LoadedModel): Promise<Network> {
   const session = await ort.InferenceSession.create(new Uint8Array(entry.data), {
     executionProviders: [{ name: 'webgpu', storageBufferCacheMode: 'simple' }],
     enableGraphCapture: true,
+    ...asPrepared(model),
     externalData: model.files.filter((f) => f !== entry).map((f) => ({ path: f.name, data: new Uint8Array(f.data) })),
   });
   const card = (await ort.env.webgpu.device) as unknown as Card;
