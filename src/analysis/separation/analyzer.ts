@@ -7,6 +7,7 @@ import { joinParts, MODEL_RATE, MODEL_STEMS, segmentOffsets } from './separate';
 import { storeBundledModel, storeModel, PITCH_MODEL } from '../native';
 import { Stopwatch } from '../timing';
 import { analysisDevice, onWebKit } from './support';
+import { HELPERS, type HelperPort } from './transform';
 import type { ModelDevice, SeparationRequest, SeparationResponse } from './worker';
 
 /** What separating a song gives the rest of the analysis. */
@@ -211,6 +212,36 @@ function whenVisible(signal: AbortSignal): Promise<void> {
   });
 }
 
+/** Development only: `localStorage['soundwave.dev.stem-helpers'] = 'off'` separates without helpers, to compare. */
+function helpersWanted(): boolean {
+  if (!import.meta.env.DEV) return true;
+  try {
+    return localStorage.getItem('soundwave.dev.stem-helpers') !== 'off';
+  } catch {
+    return true;
+  }
+}
+
+/** Starts the helpers of one separation and gives back a port to each; none where workers cannot be started. */
+function startHelpers(): { ports: MessagePort[]; stop(): void } | null {
+  const workers: Worker[] = [];
+  try {
+    const ports: MessagePort[] = [];
+    for (let i = 0; i < HELPERS; i++) {
+      const helper = new Worker(new URL('./transform.worker.ts', import.meta.url), { type: 'module' });
+      workers.push(helper);
+      const channel = new MessageChannel();
+      helper.postMessage({ type: 'port', port: channel.port1 } satisfies HelperPort, [channel.port1]);
+      ports.push(channel.port2);
+    }
+    return { ports, stop: () => workers.forEach((w) => w.terminate()) };
+  } catch (err) {
+    workers.forEach((w) => w.terminate());
+    console.warn('the stem separation helpers could not be started; the separation does their work itself', err);
+    return null;
+  }
+}
+
 /** Runs one piece of the work in a worker of its own, which ends with it. */
 function inWorker(
   req: SeparationRequest,
@@ -221,6 +252,12 @@ function inWorker(
   if (signals.some((s) => s.aborted)) return Promise.reject(abortError());
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
+    // Separating: the work around the model goes to helpers of its own (see transform.ts).
+    const helpers = req.type === 'separate' && helpersWanted() ? startHelpers() : null;
+    if (helpers && req.type === 'separate') {
+      req = { ...req, helpers: helpers.ports };
+      transfer = [...transfer, ...helpers.ports];
+    }
     const stop = () => {
       end();
       reject(abortError());
@@ -229,6 +266,7 @@ function inWorker(
     const end = () => {
       for (const s of signals) s.removeEventListener('abort', stop);
       worker.terminate();
+      helpers?.stop();
     };
     worker.onmessage = (e: MessageEvent<SeparationResponse>) => {
       // The worker's fetches, where it cannot make them itself (see app/workerFetch).

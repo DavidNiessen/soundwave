@@ -6,8 +6,9 @@ import { nativeSession, PITCH_MODEL } from '../native';
 import { GpuReader, loadRuntime, nudgeCollector, openOnDevice } from '../runtime';
 import type { StemNotes } from '../types';
 import type { LoadedModel } from './model';
-import { separatePart, type SegmentModel, type StemPart } from './separate';
+import { PAIR_CHANNELS, PAIR_PLANES, pairOutput, separatePart, type SegmentModel, type StemPart } from './separate';
 import { BINS, FRAMES, SEGMENT } from './stft';
+import { HELPERS, separateWithHelpers, type PairModel } from './transform';
 
 /**
  * Two kinds of work, each in a worker of its own. Separating: the stem model is run on a run of the
@@ -32,6 +33,8 @@ export type SeparationRequest =
       /** The segments to run (see segmentOffsets). */
       first: number;
       count: number;
+      /** Ports to the helpers that do the work around the model (see transform.ts), when there are. */
+      helpers?: MessagePort[];
     }
   | {
       type: 'transcribe';
@@ -97,6 +100,54 @@ function runner(session: ort.InferenceSession, reader: GpuReader | null): Segmen
   };
 }
 
+/**
+ * The same as runner, writing each pair of stems' share of the output where the helpers want it.
+ * On a graphics card the share is only queued for reading when it resolves (see PairModel).
+ */
+function pairRunner(session: ort.InferenceSession, reader: GpuReader | null): PairModel {
+  let slot = 0;
+  return async (x, xt, outs) => {
+    const out = await session.run({
+      x: new ort.Tensor('float32', x, [1, 4, BINS, FRAMES]),
+      xt: new ort.Tensor('float32', xt, [1, 2, SEGMENT]),
+    });
+    let collect = async () => {};
+    if (reader) {
+      // Two sets of staging buffers: one is read while the next segment's output is copied to the other.
+      slot ^= 1;
+      collect = reader.stageParts(
+        outs.flatMap((o, p) => [
+          { key: `x${p}:${slot}`, tensor: out.x_out, from: p * PAIR_PLANES, into: o.x },
+          { key: `xt${p}:${slot}`, tensor: out.xt_out, from: p * PAIR_CHANNELS, into: o.xt },
+        ]),
+      );
+    } else {
+      const whole = { x: (await out.x_out.getData()) as Float32Array, xt: (await out.xt_out.getData()) as Float32Array };
+      outs.forEach((o, p) => {
+        const share = pairOutput(whole, p);
+        o.x.set(share.x);
+        o.xt.set(share.xt);
+      });
+    }
+    out.x_out.dispose();
+    out.xt_out.dispose();
+    nudgeCollector();
+    return collect;
+  };
+}
+
+/** The request's segments, with the helpers when the page started them, else all on this thread. */
+function separateSegments(
+  req: Extract<SeparationRequest, { type: 'separate' }>,
+  session: ort.InferenceSession,
+  reader: GpuReader | null,
+  onProgress: (p: number) => void,
+): Promise<StemPart> {
+  if (req.helpers?.length === HELPERS)
+    return separateWithHelpers(req.left, req.right, pairRunner(session, reader), req.first, req.count, req.helpers, onProgress);
+  return separatePart(req.left, req.right, runner(session, reader), req.first, req.count, onProgress);
+}
+
 // Where a worker cannot fetch the game's files itself (the macOS app), the page fetches them.
 const fetched = proxyWorkerFetch((m, transfer) => (self as unknown as DedicatedWorkerGlobalScope).postMessage(m, transfer));
 
@@ -117,14 +168,15 @@ self.onmessage = async (e: MessageEvent<SeparationRequest>) => {
     post({ type: 'log', message: `stem model on ${device} loaded in ${Math.round(performance.now() - opened)} ms` });
 
     const reader = device === 'gpu' ? new GpuReader(await ort.env.webgpu.device) : null;
+    const seconds = (req.left.length / 44100).toFixed(0);
     const started = performance.now();
-    const part = await separatePart(req.left, req.right, runner(session, reader), req.first, req.count, (p) =>
+    const part = await separateSegments(req, session, reader, (p) =>
       post({ type: 'progress', progress: p * share, step: 'Separating stems' }),
     );
     const took = performance.now() - started;
     post({
       type: 'log',
-      message: `separated ${(req.left.length / 44100).toFixed(0)} s on ${device} in ${Math.round(took)} ms (${req.count} segments, ${Math.round(took / req.count)} ms each)`,
+      message: `separated ${seconds} s on ${device} in ${Math.round(took)} ms (${req.count} segments, ${Math.round(took / req.count)} ms each${req.helpers ? ', with helpers' : ''})`,
     });
     reader?.release();
     await session.release();
@@ -140,9 +192,10 @@ async function separateInApp(req: Extract<SeparationRequest, { type: 'separate' 
   try {
     if (req.first === 0) post({ type: 'progress', progress: 0, step: 'Loading the stem model' });
     const { session, device } = nativeSession(req.native!.key, req.native!.entry);
+    const seconds = (req.left.length / 44100).toFixed(0);
     const started = performance.now();
     let opened = false;
-    const part = await separatePart(req.left, req.right, runner(session, null), req.first, req.count, (p) => {
+    const part = await separateSegments(req, session, null, (p) => {
       if (!opened) {
         opened = true;
         post({
@@ -155,7 +208,7 @@ async function separateInApp(req: Extract<SeparationRequest, { type: 'separate' 
     await session.release();
     post({
       type: 'log',
-      message: `separated ${(req.left.length / 44100).toFixed(0)} s in the app in ${Math.round(performance.now() - started)} ms`,
+      message: `separated ${seconds} s in the app in ${Math.round(performance.now() - started)} ms${req.helpers ? ' (with helpers)' : ''}`,
     });
     post({ type: 'part', part, device: 'native' }, [...part.sums.map((s) => s.buffer), part.weights.buffer]);
   } catch (err) {
