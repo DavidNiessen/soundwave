@@ -31,7 +31,7 @@ const beatTracker =
   (at: NonNullable<WorkerRequest['beatModel']>): BeatTracker =>
   async (audio, onProgress) => {
     const started = performance.now();
-    await loadRuntime(ort, at.device);
+    await loadRuntime(ort);
     const model = await openBeatModel(ort, at.url, at.device, (message) => post({ type: 'log', message }));
     try {
       const found = await beatsAndBars(audio, model, onProgress);

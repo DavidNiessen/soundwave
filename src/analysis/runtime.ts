@@ -52,7 +52,7 @@ export function fitMemory(script: string): { script: string; patched: boolean } 
  * fitMemory). The WebAssembly file comes gzip-compressed (scripts/copy-models.mjs) and is handed
  * over unpacked.
  */
-export async function loadRuntime(ort: typeof Ort, device: 'gpu' | 'cpu'): Promise<void> {
+export async function loadRuntime(ort: typeof Ort): Promise<void> {
   const base = new URL(`${import.meta.env.BASE_URL}ort/`, self.location.href).href;
   const [script, binary] = await Promise.all([
     fetch(`${base}ort-wasm-simd-threaded.asyncify.mjs`).then((r) => r.text()),
@@ -62,8 +62,10 @@ export async function loadRuntime(ort: typeof Ort, device: 'gpu' | 'cpu'): Promi
   if (!fitted.patched) console.warn('the analysis runtime builds its memory in a way not known here: it asks for 4 GiB as it is');
   ort.env.wasm.wasmPaths = { mjs: URL.createObjectURL(new Blob([fitted.script], { type: 'text/javascript' })) };
   ort.env.wasm.wasmBinary = binary;
-  // A graphics card does the arithmetic itself; threads are for the processor path.
-  if (device === 'gpu') ort.env.wasm.numThreads = 1;
+  // No thread count is set, so the runtime picks one (up to four) on either device. It starts its
+  // threads once, when its first model opens, and keeps them: a graphics card does not need them,
+  // but when it cannot open a model the same runtime falls back to the processor, which with the
+  // single thread the graphics card path used to be given ran up to four times slower.
   ort.env.logLevel = 'error';
 }
 

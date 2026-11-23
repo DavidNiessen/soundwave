@@ -82,7 +82,7 @@ self.onmessage = async (e: MessageEvent<SeparationRequest>) => {
   const req = e.data;
   if (req.type === 'transcribe') return transcribeStems(req.stems);
   try {
-    await loadRuntime(ort, req.device);
+    await loadRuntime(ort);
     post({ type: 'progress', progress: 0, step: 'Loading the stem model' });
     const opened = performance.now();
     const { value: session, device } = await openOnDevice(
