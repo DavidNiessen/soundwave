@@ -17,7 +17,17 @@ import { emptyEdits } from '../editor/edits';
 import type { Results } from '../game/GameSession';
 import type { ReplayInputs } from '../game/replay';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { applyDisplayMode, canExit, exitApp, inDesktopApp, isFullscreenToggle, toggledMode } from '../game/displayMode';
+import {
+  applyDisplayMode,
+  canExit,
+  exitApp,
+  followDisplayMode,
+  inDesktopApp,
+  isFullscreenToggle,
+  onFullscreenShortcut,
+  onMac,
+  toggledMode,
+} from '../game/displayMode';
 import {
   loadPick,
   loadSetlist,
@@ -281,23 +291,40 @@ export function App() {
   if (settings.displayMode !== 'windowed') lastFullMode.current = settings.displayMode;
   useEffect(() => {
     const desktop = inDesktopApp();
+    const toggle = () => {
+      const s = settingsNow.current;
+      updateSettings({ ...s, displayMode: toggledMode(s.displayMode, lastFullMode.current) });
+    };
     const key = (e: KeyboardEvent) => {
       if (!isFullscreenToggle(e, desktop)) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       if (e.repeat) return;
-      if (desktop) {
-        const s = settingsNow.current;
-        updateSettings({ ...s, displayMode: toggledMode(s.displayMode, lastFullMode.current) });
-      } else if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+      if (desktop) toggle();
+      else if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
       else void document.documentElement.requestFullscreen?.().catch(() => {});
     };
     window.addEventListener('keydown', key, true);
-    return () => window.removeEventListener('keydown', key, true);
+    // On a Mac, the menu bar's Toggle Full Screen (Control+Command+F) does the same.
+    const stopMenu = onFullscreenShortcut(toggle);
+    // The system can change the mode by itself too (the green button): the setting follows.
+    const stopFollow = followDisplayMode((mode) => {
+      const s = settingsNow.current;
+      if (s.displayMode !== mode) updateSettings({ ...s, displayMode: mode });
+    });
+    return () => {
+      window.removeEventListener('keydown', key, true);
+      stopMenu();
+      stopFollow();
+    };
   }, [updateSettings]);
   // In Window mode the menus' background moves the window (see windowDrag). Not in a song or the
   // editor, where the mouse plays and edits.
   const windowed = inDesktopApp() && settings.displayMode === 'windowed';
+  // A Mac window shows its title bar buttons over the game (see .mac-titlebar).
+  useEffect(() => {
+    document.documentElement.classList.toggle('mac-titlebar', windowed && onMac());
+  }, [windowed]);
   useEffect(() => {
     if (!windowed) return;
     const press = (e: MouseEvent) => {

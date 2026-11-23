@@ -17,7 +17,7 @@ import { stemModel, type ModelStatus } from '../analysis/separation/model';
 import type { AnalysisDevice } from '../analysis/separation/support';
 import { allowOutputList, canPickOutput, listOutputs, type OutputList } from '../audio/output';
 import { playSfx } from '../audio/sfx';
-import { inDesktopApp } from '../game/displayMode';
+import { fullscreenShortcut, inDesktopApp, onMac } from '../game/displayMode';
 import { applyPreset, autoTier, resolveGraphics, type GraphicsPreset, type GraphicsSettings, type Level } from '../game/graphics';
 import {
   clampReplayLimit,
@@ -652,21 +652,39 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
                 kind: 'choice',
                 id: 'displayMode',
                 label: 'Window mode',
-                help: 'How the game fills the screen. Alt+Enter or F11 switches between a window and the fullscreen mode you used last.',
+                help: `How the game fills the screen. ${fullscreenShortcut()} switches between a window and the fullscreen mode you used last.`,
                 value: s.displayMode,
-                options: [
-                  { value: 'fullscreen', label: 'Fullscreen', help: 'The game takes over the whole screen.' },
-                  {
-                    value: 'borderless',
-                    label: 'Windowed fullscreen',
-                    help: 'A borderless window that fills the screen. Switching to other apps stays instant.',
-                  },
-                  {
-                    value: 'windowed',
-                    label: 'Window',
-                    help: 'A window without a title bar. Drag its top edge to move it and its sides to resize it.',
-                  },
-                ],
+                options: onMac()
+                  ? [
+                      {
+                        value: 'fullscreen',
+                        label: 'Fullscreen',
+                        help: 'The game gets a space of its own, like any Mac app in full screen. Switching apps slides between spaces.',
+                      },
+                      {
+                        value: 'borderless',
+                        label: 'Windowed fullscreen',
+                        help: 'The game covers the whole screen and hides the menu bar and Dock, without a space of its own. Switching apps is instant.',
+                      },
+                      {
+                        value: 'windowed',
+                        label: 'Window',
+                        help: 'A window with the usual close, minimize and full-screen buttons. Drag its top edge to move it.',
+                      },
+                    ]
+                  : [
+                      { value: 'fullscreen', label: 'Fullscreen', help: 'The game takes over the whole screen.' },
+                      {
+                        value: 'borderless',
+                        label: 'Windowed fullscreen',
+                        help: 'A borderless window that fills the screen. Switching to other apps stays instant.',
+                      },
+                      {
+                        value: 'windowed',
+                        label: 'Window',
+                        help: 'A window without a title bar. Drag its top edge to move it and its sides to resize it.',
+                      },
+                    ],
                 set: (v) => set({ displayMode: v as DisplayMode }),
               },
             ],
@@ -1372,11 +1390,13 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
           body:
             c.device === 'gpu'
               ? 'Graphics card'
-              : c.device === 'cpu'
-                ? 'Processor (slower)'
-                : c.device === 'none'
-                  ? 'Not available on this device'
-                  : 'Checking…',
+              : c.device === 'native'
+                ? 'The app itself (graphics card and processor)'
+                : c.device === 'cpu'
+                  ? 'Processor (slower)'
+                  : c.device === 'none'
+                    ? 'Not available on this device'
+                    : 'Checking…',
         },
       ],
     },

@@ -12,7 +12,7 @@ import { makeReplayVideo, VideoCancelled } from './replayVideo';
 const scope = self as unknown as DedicatedWorkerGlobalScope & { fonts?: FontFaceSet };
 const post = (m: FromVideo) => scope.postMessage(m);
 // Where a worker cannot fetch the game's files itself (the macOS app), the page fetches them.
-const fetched = proxyWorkerFetch((m) => scope.postMessage(m));
+const fetched = proxyWorkerFetch((m, transfer) => scope.postMessage(m, transfer));
 
 /** The HUD's typeface, loaded here as well: a worker does not share the page's fonts. */
 let fonts: Promise<unknown> | null = null;

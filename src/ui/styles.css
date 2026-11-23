@@ -921,6 +921,14 @@ img.cover {
   z-index: 90;
   -webkit-app-region: drag;
 }
+/* A Mac window has its close, minimize and full-screen buttons over the top of the game: the pages
+   keep that band clear, and the whole band moves the window, as a title bar does. */
+:root.mac-titlebar {
+  --safe-t: max(env(safe-area-inset-top, 0px), 28px);
+}
+:root.mac-titlebar .drag-strip {
+  height: 28px;
+}
 .page-body {
   flex: 1;
   min-height: 0;
@@ -1250,6 +1258,9 @@ img.cover {
 .tile.hero .mosaic {
   flex: none;
   align-self: stretch;
+  /* A square as tall as the card. The height is spelled out: WebKit (Safari, the macOS app) does not
+     take a width from a stretched height and would draw the covers as a thin strip. */
+  height: 100%;
   aspect-ratio: 1;
   max-width: 48%;
 }

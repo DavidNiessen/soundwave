@@ -3,9 +3,10 @@ import { serveWorkerFetch } from '../../app/workerFetch';
 import { wavBytes } from '../../audio/wav';
 import { ANALYSIS_SAMPLE_RATE, STEM_NAMES, type StemName, type StemNotes } from '../types';
 import { stemModel } from './model';
-import { MODEL_RATE } from './separate';
-import { analysisDevice } from './support';
-import type { SeparationRequest, SeparationResponse } from './worker';
+import { joinParts, MODEL_RATE, MODEL_STEMS, segmentOffsets } from './separate';
+import { storeBundledModel, storeModel, PITCH_MODEL } from '../native';
+import { analysisDevice, onWebKit } from './support';
+import type { ModelDevice, SeparationRequest, SeparationResponse } from './worker';
 
 /** What separating a song gives the rest of the analysis. */
 export interface StemResult {
@@ -73,62 +74,173 @@ export const stemAnalyzer: StemAnalyzer = async (songId, onProgress, signal) => 
 
   onProgress(0, 'Decoding');
   const [left, right] = await modelInput(await loadSongBuffer(songId));
-  const model = await stemModel.load();
+  const pitchModelUrl = new URL(`${import.meta.env.BASE_URL}models/basic-pitch/nmp.onnx`, location.href).href;
+  // The app runs the models itself: it is handed them once and keeps them (see analysis/native.ts).
+  const native = device === 'native' ? { key: stemModel.source.id, entry: stemModel.source.entry } : undefined;
+  if (native) {
+    await storeModel(
+      native.key,
+      stemModel.source.files.map((f) => f.name),
+      async () => (await stemModel.load()).files,
+    );
+    await storeBundledModel(PITCH_MODEL, pitchModelUrl);
+  }
+  const model = native ? null : await stemModel.load();
   if (signal.aborted) throw abortError();
 
-  return new Promise<StemResult>((resolve, reject) => {
-    const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
-    const wavs = {} as Record<StemName, ArrayBuffer>;
-    const stop = () => {
-      worker.terminate();
+  // In WebKit the browser's graphics card path cannot keep going in the background (see work).
+  const pausable = device === 'gpu' && onWebKit();
+  const count = segmentOffsets(left.length).length;
+  const separated = await work(
+    () => {
+      if (!model) return { req: { type: 'separate', left, right, native, device, first: 0, count }, transfer: [] };
+      // Each try gets its own copy of the model, so it can be run again (see work).
+      const files = model.files.map((f) => ({ name: f.name, data: f.data.slice(0) }));
+      const req: SeparationRequest = { type: 'separate', left, right, model: { entry: model.entry, files }, device, first: 0, count };
+      return { req, transfer: files.map((f) => f.data) };
+    },
+    pausable,
+    onProgress,
+    signal,
+  );
+  if (separated.type !== 'part') throw new Error('The song could not be separated into stems (the analysis answered out of turn).');
+  // A graphics card that failed to load the stem model is not asked to transcribe.
+  const used: ModelDevice = separated.device;
+  const full = joinParts(left, right, [separated.part]);
+  const stemsByName = {} as Record<StemName, Float32Array>;
+  MODEL_STEMS.forEach((name, i) => (stemsByName[name] = full[i]));
+
+  let rated: Record<StemName, Float32Array>;
+  try {
+    rated = {} as Record<StemName, Float32Array>;
+    for (const name of STEM_NAMES) rated[name] = await toAnalysisRate(stemsByName[name]);
+  } catch (err) {
+    throw new Error(`The stems could not be prepared (${(err as Error).message}).`);
+  }
+  const stems = {} as Record<StemName, ArrayBuffer>;
+  for (const name of STEM_NAMES) stems[name] = wavBytes(rated[name], ANALYSIS_SAMPLE_RATE);
+  const done = await work(
+    () => {
+      const pitched = { bass: rated.bass.slice(), vocals: rated.vocals.slice(), other: rated.other.slice() };
+      return {
+        req: { type: 'transcribe', stems: pitched, device: used, pitchModelUrl },
+        transfer: Object.values(pitched).map((s) => s.buffer),
+      };
+    },
+    pausable,
+    onProgress,
+    signal,
+  );
+  if (done.type !== 'done') throw new Error('The stems could not be transcribed (the analysis answered out of turn).');
+  return { stems, notes: done.notes };
+};
+
+const PAUSED = 'Paused while Soundwave is in the background';
+
+/**
+ * Runs one piece of the work in a worker of its own, which ends with it. `make` gives the request
+ * (fresh copies of what it hands over, as the worker takes them), so the piece can be run again.
+ *
+ * When `pausable`, the piece waits while the page is in the background and starts over once it is
+ * back. WebKit closes a page in the background above 4 GB, and the stem model on the graphics card
+ * takes about 3.6 GB there, and WebKit's own bookkeeping for it more: a piece under way when the
+ * page goes to the background is stopped at once, its worker ended, and run again when the player
+ * comes back. (The desktop app runs the models itself there, see analysis/native.ts: this is for
+ * Safari, and Macs the app has no runtime for.)
+ */
+async function work(
+  make: () => { req: SeparationRequest; transfer: Transferable[] },
+  pausable: boolean,
+  onProgress: (p: number, label: string) => void,
+  signal: AbortSignal,
+): Promise<Extract<SeparationResponse, { type: 'part' | 'done' }>> {
+  let last = 0;
+  const progress = (p: number, label: string) => {
+    last = p;
+    onProgress(p, label);
+  };
+  for (;;) {
+    if (pausable && document.hidden) {
+      onProgress(last, PAUSED);
+      await whenVisible(signal);
+    }
+    const background = new AbortController();
+    const hidden = () => pausable && document.hidden && background.abort();
+    document.addEventListener('visibilitychange', hidden);
+    try {
+      const { req, transfer } = make();
+      return await inWorker(req, transfer, progress, signal, background.signal);
+    } catch (err) {
+      if (signal.aborted || !background.signal.aborted) throw err;
+      // Sent to the background: the round starts over when the page is back.
+    } finally {
+      document.removeEventListener('visibilitychange', hidden);
+    }
+  }
+}
+
+/** Resolves once the page is in view again (or rejects when the analysis is cancelled). */
+function whenVisible(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(abortError());
+    const check = () => {
+      if (document.hidden) return;
+      done();
+      resolve();
+    };
+    const cancel = () => {
+      done();
       reject(abortError());
     };
-    signal.addEventListener('abort', stop, { once: true });
+    const done = () => {
+      document.removeEventListener('visibilitychange', check);
+      signal.removeEventListener('abort', cancel);
+    };
+    document.addEventListener('visibilitychange', check);
+    signal.addEventListener('abort', cancel, { once: true });
+  });
+}
+
+/** Runs one piece of the work in a worker of its own, which ends with it. */
+function inWorker(
+  req: SeparationRequest,
+  transfer: Transferable[],
+  onProgress: (p: number, label: string) => void,
+  ...signals: AbortSignal[]
+): Promise<Extract<SeparationResponse, { type: 'part' | 'done' }>> {
+  if (signals.some((s) => s.aborted)) return Promise.reject(abortError());
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
+    const stop = () => {
+      end();
+      reject(abortError());
+    };
+    for (const s of signals) s.addEventListener('abort', stop, { once: true });
     const end = () => {
-      signal.removeEventListener('abort', stop);
+      for (const s of signals) s.removeEventListener('abort', stop);
       worker.terminate();
     };
     worker.onmessage = (e: MessageEvent<SeparationResponse>) => {
       // The worker's fetches, where it cannot make them itself (see app/workerFetch).
       if (serveWorkerFetch(worker, e.data)) return;
       const m = e.data;
-      if (m.type === 'progress') onProgress(m.progress, m.step);
-      else if (m.type === 'log') console.info('[analysis]', m.message);
-      else if (m.type === 'separated') {
-        void (async () => {
-          try {
-            const rated = {} as Record<StemName, Float32Array>;
-            for (const name of STEM_NAMES) rated[name] = await toAnalysisRate(m.stems[name]);
-            for (const name of STEM_NAMES) wavs[name] = wavBytes(rated[name], ANALYSIS_SAMPLE_RATE);
-            const pitched = { bass: rated.bass, vocals: rated.vocals, other: rated.other };
-            const next: SeparationRequest = { type: 'transcribe', stems: pitched };
-            worker.postMessage(
-              next,
-              Object.values(pitched).map((s) => s.buffer),
-            );
-          } catch (err) {
-            end();
-            reject(new Error(`The stems could not be prepared (${(err as Error).message}).`));
-          }
-        })();
-      } else {
-        end();
-        if (m.type === 'error') return reject(new Error(`The song could not be separated into stems (${m.message}).`));
-        resolve({ stems: wavs, notes: m.notes });
-      }
+      if (m.type === 'progress') return onProgress(m.progress, m.step);
+      if (m.type === 'log') return console.info('[analysis]', m.message);
+      end();
+      if (m.type === 'error')
+        reject(
+          new Error(
+            req.type === 'separate'
+              ? `The song could not be separated into stems (${m.message}).`
+              : `The stems could not be transcribed (${m.message}).`,
+          ),
+        );
+      else resolve(m);
     };
     worker.onerror = (e) => {
       end();
       reject(new Error(`The song could not be separated into stems (${e.message || 'the analysis stopped unexpectedly'}).`));
     };
-    const req: SeparationRequest = {
-      type: 'separate',
-      left,
-      right,
-      model,
-      device,
-      pitchModelUrl: new URL(`${import.meta.env.BASE_URL}models/basic-pitch/nmp.onnx`, location.href).href,
-    };
-    worker.postMessage(req, [left.buffer, right.buffer, ...model.files.map((f) => f.data)]);
+    worker.postMessage(req, transfer);
   });
-};
+}

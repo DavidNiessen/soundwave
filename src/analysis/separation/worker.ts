@@ -2,35 +2,50 @@
 import * as ort from 'onnxruntime-web/webgpu';
 import { proxyWorkerFetch } from '../../app/workerFetch';
 import { transcribeOnnx } from '../pitch/basicPitchOnnx';
-import { loadRuntime, openOnDevice } from '../runtime';
-import type { StemName, StemNotes } from '../types';
+import { nativeSession, PITCH_MODEL } from '../native';
+import { GpuReader, loadRuntime, nudgeCollector, openOnDevice } from '../runtime';
+import type { StemNotes } from '../types';
 import type { LoadedModel } from './model';
-import { MODEL_STEMS, separate, type SegmentModel } from './separate';
+import { separatePart, type SegmentModel, type StemPart } from './separate';
 import { BINS, FRAMES, SEGMENT } from './stft';
 
 /**
- * Two steps: the song is separated and its stems handed back at the model's rate; the page brings
- * them to the analysis rate (the browser's own resampler is far faster than any done here) and
- * hands the pitched ones back for transcription.
+ * Two kinds of work, each in a worker of its own. Separating: the stem model is run on a run of the
+ * song's segments, and what they add to the stems is handed back at the model's rate (the page puts
+ * the runs together, see analyzer.ts). Transcribing: the page brings the stems to the analysis rate
+ * (the browser's own resampler is far faster than any done here) and hands the pitched ones over.
  */
+/** Where a model runs: the graphics card or processor in the browser, or the app (analysis/native.ts). */
+export type ModelDevice = 'gpu' | 'cpu' | 'native';
+
 export type SeparationRequest =
   | {
       type: 'separate';
       /** The song in stereo at 44.1 kHz. */
       left: Float32Array;
       right: Float32Array;
-      model: LoadedModel;
-      device: 'gpu' | 'cpu';
-      pitchModelUrl: string;
+      /** The model, for the browser's runtime; the app keeps its own copy (see analysis/native.ts). */
+      model?: LoadedModel;
+      /** The key and file the app keeps the model under, when it runs it. */
+      native?: { key: string; entry: string };
+      device: ModelDevice;
+      /** The segments to run (see segmentOffsets). */
+      first: number;
+      count: number;
     }
-  | { type: 'transcribe'; stems: Record<'bass' | 'vocals' | 'other', Float32Array> };
+  | {
+      type: 'transcribe';
+      stems: Record<'bass' | 'vocals' | 'other', Float32Array>;
+      device: ModelDevice;
+      pitchModelUrl: string;
+    };
 
 export type SeparationResponse =
   | { type: 'progress'; progress: number; step: string }
   | { type: 'log'; message: string }
-  /** Each stem in mono at 44.1 kHz. */
-  | { type: 'separated'; stems: Record<StemName, Float32Array> }
-  | { type: 'done'; notes: StemNotes; device: 'gpu' | 'cpu' }
+  /** What the segments add to the stems, and where the model ran. */
+  | { type: 'part'; part: StemPart; device: ModelDevice }
+  | { type: 'done'; notes: StemNotes; device: ModelDevice }
   | { type: 'error'; message: string };
 
 const post = (m: SeparationResponse, transfer: Transferable[] = []) => (self as DedicatedWorkerGlobalScope).postMessage(m, transfer);
@@ -51,75 +66,120 @@ async function openPitchSession(url: string, device: 'gpu' | 'cpu'): Promise<ort
 async function openSession(model: LoadedModel, provider: 'webgpu' | 'wasm'): Promise<ort.InferenceSession> {
   const entry = model.files.find((f) => f.name === model.entry)!;
   return ort.InferenceSession.create(new Uint8Array(entry.data), {
-    executionProviders: [provider],
+    // On the graphics card the runtime keeps each buffer it made for reuse at exactly its size: the
+    // model's shapes never change, so a song's segments use the same buffers over and over. Its
+    // default ('bucket') makes the largest ones anew for every segment and leaves them to the garbage
+    // collector, about 700 MB a segment, which WebKit charges to the page until it collects them.
+    // The outputs stay there too and are read back by the runner (see GpuReader).
+    executionProviders: [provider === 'webgpu' ? { name: 'webgpu', storageBufferCacheMode: 'simple' } : provider],
+    ...(provider === 'webgpu' ? { preferredOutputLocation: 'gpu-buffer' as const } : {}),
     externalData: model.files.filter((f) => f !== entry).map((f) => ({ path: f.name, data: new Uint8Array(f.data) })),
   });
 }
 
-function runner(session: ort.InferenceSession): SegmentModel {
+function runner(session: ort.InferenceSession, reader: GpuReader | null): SegmentModel {
   return {
     async run(x, xt) {
       const out = await session.run({
         x: new ort.Tensor('float32', x, [1, 4, BINS, FRAMES]),
         xt: new ort.Tensor('float32', xt, [1, 2, SEGMENT]),
       });
-      const result = { x: (await out.x_out.getData()) as Float32Array, xt: (await out.xt_out.getData()) as Float32Array };
+      // The reader's arrays are reused by the next segment, which separate() starts only after it
+      // has used these (see SegmentModel).
+      const result = reader
+        ? { x: await reader.read('x', out.x_out), xt: await reader.read('xt', out.xt_out) }
+        : { x: (await out.x_out.getData()) as Float32Array, xt: (await out.xt_out.getData()) as Float32Array };
       out.x_out.dispose();
       out.xt_out.dispose();
+      nudgeCollector();
       return result;
     },
   };
 }
 
-/** Set by the separation step for the transcription step. */
-let pitch: { url: string; device: 'gpu' | 'cpu' } | null = null;
-
 // Where a worker cannot fetch the game's files itself (the macOS app), the page fetches them.
-const fetched = proxyWorkerFetch((m) => (self as unknown as DedicatedWorkerGlobalScope).postMessage(m));
+const fetched = proxyWorkerFetch((m, transfer) => (self as unknown as DedicatedWorkerGlobalScope).postMessage(m, transfer));
 
 self.onmessage = async (e: MessageEvent<SeparationRequest>) => {
   if (fetched(e.data)) return;
   const req = e.data;
-  if (req.type === 'transcribe') return transcribeStems(req.stems);
+  if (req.type === 'transcribe') return transcribeStems(req.stems, req.pitchModelUrl, req.device);
+  if (req.device === 'native') return separateInApp(req);
   try {
     await loadRuntime(ort, req.device);
-    post({ type: 'progress', progress: 0, step: 'Loading the stem model' });
+    if (req.first === 0) post({ type: 'progress', progress: 0, step: 'Loading the stem model' });
     const opened = performance.now();
     const { value: session, device } = await openOnDevice(
       req.device,
-      (provider) => openSession(req.model, provider),
+      (provider) => openSession(req.model!, provider),
       (err) => post({ type: 'log', message: `the graphics card could not load the stem model (${err.message}); using the processor` }),
     );
     post({ type: 'log', message: `stem model on ${device} loaded in ${Math.round(performance.now() - opened)} ms` });
 
-    const started = performance.now();
-    const full = await separate(req.left, req.right, runner(session), (p) =>
+    const reader = device === 'gpu' ? new GpuReader(await ort.env.webgpu.device) : null;
+    const part = await separatePart(req.left, req.right, runner(session, reader), req.first, req.count, (p) =>
       post({ type: 'progress', progress: p * share, step: 'Separating stems' }),
     );
+    reader?.release();
     await session.release();
-    post({ type: 'log', message: `separated ${(req.left.length / 44100).toFixed(0)} s in ${Math.round(performance.now() - started)} ms` });
-
-    const stems = {} as Record<StemName, Float32Array>;
-    MODEL_STEMS.forEach((name, i) => (stems[name] = full[i]));
-    pitch = { url: req.pitchModelUrl, device };
-    post(
-      { type: 'separated', stems },
-      full.map((s) => s.buffer),
-    );
+    if (device === 'gpu') await letGoOfGpu();
+    post({ type: 'part', part, device }, [...part.sums.map((s) => s.buffer), part.weights.buffer]);
   } catch (err) {
     post({ type: 'error', message: (err as Error).message || String(err) });
   }
 };
 
+/** Separating with the stem model the app runs (see analysis/native.ts). */
+async function separateInApp(req: Extract<SeparationRequest, { type: 'separate' }>) {
+  try {
+    if (req.first === 0) post({ type: 'progress', progress: 0, step: 'Loading the stem model' });
+    const { session, device } = nativeSession(req.native!.key, req.native!.entry);
+    const started = performance.now();
+    let opened = false;
+    const part = await separatePart(req.left, req.right, runner(session, null), req.first, req.count, (p) => {
+      if (!opened) {
+        opened = true;
+        post({
+          type: 'log',
+          message: `stem model in the app (${device()}), first segment in ${Math.round(performance.now() - started)} ms`,
+        });
+      }
+      post({ type: 'progress', progress: p * share, step: 'Separating stems' });
+    });
+    await session.release();
+    post({
+      type: 'log',
+      message: `separated ${(req.left.length / 44100).toFixed(0)} s in the app in ${Math.round(performance.now() - started)} ms`,
+    });
+    post({ type: 'part', part, device: 'native' }, [...part.sums.map((s) => s.buffer), part.weights.buffer]);
+  } catch (err) {
+    post({ type: 'error', message: (err as Error).message || String(err) });
+  }
+}
+
+/**
+ * Destroys the graphics card device the runtime worked on. Everything made on it is freed at once:
+ * WebKit (Safari, the macOS app) otherwise holds a finished worker's GPU memory for a good while
+ * after the worker has ended, and the next round's would come on top of it.
+ */
+async function letGoOfGpu() {
+  try {
+    (await ort.env.webgpu.device).destroy();
+  } catch {
+    /* no device was made */
+  }
+}
+
 /** Separation is nearly all of the work, on a graphics card and on a processor alike. */
 const share = 0.9;
 
-async function transcribeStems(stems: Record<'bass' | 'vocals' | 'other', Float32Array>) {
+async function transcribeStems(stems: Record<'bass' | 'vocals' | 'other', Float32Array>, url: string, device: ModelDevice) {
   try {
-    const { url, device } = pitch!;
+    if (device !== 'native') await loadRuntime(ort, device);
     const notes = {} as StemNotes;
     const pitched = ['bass', 'vocals', 'other'] as const;
-    const transcriber = await openPitchSession(url, device);
+    const transcriber =
+      device === 'native' ? nativeSession(PITCH_MODEL.key, PITCH_MODEL.entry).session : await openPitchSession(url, device);
     for (const [i, name] of pitched.entries()) {
       const at = share + ((1 - share) * i) / pitched.length;
       const label = name === 'other' ? 'Transcribing instruments' : `Transcribing ${name}`;
@@ -134,6 +194,7 @@ async function transcribeStems(stems: Record<'bass' | 'vocals' | 'other', Float3
       });
     }
     await transcriber.release();
+    if (device === 'gpu') await letGoOfGpu();
     post({ type: 'done', notes, device });
   } catch (err) {
     post({ type: 'error', message: (err as Error).message || String(err) });
