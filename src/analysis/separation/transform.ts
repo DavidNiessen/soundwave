@@ -119,6 +119,8 @@ export async function separateWithHelpers(
   ports: MessagePort[],
   onProgress: (p: number) => void = () => {},
   overlap?: number,
+  /** Awaited before each segment: the separation pauses while it waits. */
+  between: () => Promise<void> = () => Promise.resolve(),
 ): Promise<StemPart> {
   const length = left.length;
   const level = songLevel(left, right);
@@ -158,6 +160,7 @@ export async function separateWithHelpers(
       );
     };
     for (let k = 0; k < offsets.length; k++) {
+      await between();
       const input = await prepared[k];
       const outs = await Promise.all(outPools.map((p) => p.take()));
       const collect = await model(input.x, input.xt, outs);

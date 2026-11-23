@@ -3,7 +3,7 @@ import * as ort from 'onnxruntime-web/webgpu';
 import { proxyWorkerFetch } from '../../app/workerFetch';
 import { transcribeOnnx } from '../pitch/basicPitchOnnx';
 import { nativeSession, PITCH_MODEL } from '../native';
-import { GpuReader, loadRuntime, nudgeCollector, openOnDevice } from '../runtime';
+import { GpuReader, loadRuntime, nudgeCollector, openOnDevice, runtimeMemory } from '../runtime';
 import type { StemNotes } from '../types';
 import type { LoadedModel } from './model';
 import { PAIR_CHANNELS, PAIR_PLANES, pairOutput, separatePart, type SegmentModel, type StemPart } from './separate';
@@ -37,7 +37,10 @@ export type SeparationRequest =
       helpers?: MessagePort[];
       /** How much the segments overlap, when not the usual (see OVERLAP; development only). */
       overlap?: number;
+      /** Whether analyzing is held as it starts (see analysis/hold.ts); `hold` messages say when that changes. */
+      held?: boolean;
     }
+  | { type: 'hold'; on: boolean }
   | {
       type: 'transcribe';
       stems: Record<'bass' | 'vocals' | 'other', Float32Array>;
@@ -236,6 +239,11 @@ function pairRunner(network: Network, reader: GpuReader | null): PairModel {
   };
 }
 
+/** Whether analyzing is held (see analysis/hold.ts), and what lets the separation go on. */
+let held = false;
+let resume: (() => void) | null = null;
+const free = () => (held ? new Promise<void>((resolve) => (resume = resolve)) : Promise.resolve());
+
 /** The request's segments, with the helpers when the page started them, else all on this thread. */
 function separateSegments(
   req: Extract<SeparationRequest, { type: 'separate' }>,
@@ -243,6 +251,7 @@ function separateSegments(
   reader: GpuReader | null,
   onProgress: (p: number) => void,
 ): Promise<StemPart> {
+  held = !!req.held;
   if (req.helpers?.length === HELPERS)
     return separateWithHelpers(
       req.left,
@@ -253,8 +262,9 @@ function separateSegments(
       req.helpers,
       onProgress,
       req.overlap,
+      free,
     );
-  return separatePart(req.left, req.right, runner(network, reader), req.first, req.count, onProgress, undefined, req.overlap);
+  return separatePart(req.left, req.right, runner(network, reader), req.first, req.count, onProgress, undefined, req.overlap, free);
 }
 
 // Where a worker cannot fetch the game's files itself (the macOS app), the page fetches them.
@@ -263,6 +273,11 @@ const fetched = proxyWorkerFetch((m, transfer) => (self as unknown as DedicatedW
 self.onmessage = async (e: MessageEvent<SeparationRequest>) => {
   if (fetched(e.data)) return;
   const req = e.data;
+  if (req.type === 'hold') {
+    held = req.on;
+    if (!held) resume?.();
+    return;
+  }
   if (req.type === 'transcribe') return transcribeStems(req.stems, req.pitchModelUrl, req.device);
   if (req.device === 'native') return separateInApp(req);
   try {
@@ -274,7 +289,12 @@ self.onmessage = async (e: MessageEvent<SeparationRequest>) => {
       (provider) => openNetwork(req.model!, provider),
       (err) => post({ type: 'log', message: `the graphics card could not load the stem model (${err.message}); using the processor` }),
     );
-    post({ type: 'log', message: `stem model on ${device} loaded in ${Math.round(performance.now() - opened)} ms` });
+    post({
+      type: 'log',
+      message: `stem model on ${device} loaded in ${Math.round(performance.now() - opened)} ms, runtime memory ${runtimeMemory()} MB`,
+    });
+    // The runtime holds its own copy now: the file's 90 MB need not stay for the whole song.
+    req.model = undefined;
 
     const reader = device === 'gpu' ? new GpuReader(await ort.env.webgpu.device) : null;
     const seconds = (req.left.length / 44100).toFixed(0);
@@ -285,7 +305,7 @@ self.onmessage = async (e: MessageEvent<SeparationRequest>) => {
     const took = performance.now() - started;
     post({
       type: 'log',
-      message: `separated ${seconds} s on ${device} in ${Math.round(took)} ms (${req.count} segments, ${Math.round(took / req.count)} ms each${req.helpers ? ', with helpers' : ''})`,
+      message: `separated ${seconds} s on ${device} in ${Math.round(took)} ms (${req.count} segments, ${Math.round(took / req.count)} ms each${req.helpers ? ', with helpers' : ''}), runtime memory ${runtimeMemory()} MB`,
     });
     reader?.release();
     await network.release();
@@ -358,7 +378,7 @@ async function transcribeStems(stems: Record<'bass' | 'vocals' | 'other', Float3
       notes[name] = t.notes;
       post({
         type: 'log',
-        message: `transcribed ${name} on ${device} in ${Math.round(t.modelMs + t.notesMs)} ms (${Math.round(t.notesMs)} ms of it decoding notes)`,
+        message: `transcribed ${name} on ${device} in ${Math.round(t.modelMs + t.notesMs)} ms (${Math.round(t.notesMs)} ms of it decoding notes), runtime memory ${runtimeMemory()} MB`,
       });
     }
     await transcriber.release();

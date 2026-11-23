@@ -3,8 +3,8 @@ import * as ort from 'onnxruntime-web/webgpu';
 import { proxyWorkerFetch } from '../app/workerFetch';
 import { appBeatModel, openBeatModel } from './beat/model';
 import { beatsAndBars } from './beat/track';
-import { analyzeMix, analyzeParts, analyzeSignal, type BeatTracker, type MixAnalysis } from './pipeline';
-import { loadRuntime } from './runtime';
+import { analyzeMix, analyzeParts, analyzeSignal, stemsMix, type BeatTracker, type MixAnalysis } from './pipeline';
+import { loadRuntime, runtimeMemory } from './runtime';
 import { Stopwatch } from './timing';
 import type { AnalysisProgress, AnalysisResult, PartLines, StemName, StemNotes } from './types';
 
@@ -26,15 +26,17 @@ export interface StemInputs {
 export type WorkerRequest =
   | ({ type: 'analyze'; signal: Float32Array; beatModel?: BeatModelAt } & StemInputs)
   | { type: 'mix'; signal: Float32Array; beatModel?: BeatModelAt }
-  | ({ type: 'parts' } & StemInputs);
+  | ({ type: 'parts'; signal: Float32Array; mix: Omit<MixAnalysis, 'clock'> } & StemInputs);
 
 export type WorkerResponse =
   | { type: 'progress'; progress: AnalysisProgress }
   | { type: 'log'; message: string }
   | { type: 'done'; result: AnalysisResult }
+  /** The mix's half (see stemsMix), with the mix handed back. */
+  | { type: 'mixed'; mix: Omit<MixAnalysis, 'clock'>; signal: Float32Array }
   | { type: 'error'; message: string };
 
-const post = (m: WorkerResponse) => (self as DedicatedWorkerGlobalScope).postMessage(m);
+const post = (m: WorkerResponse, transfer: Transferable[] = []) => (self as DedicatedWorkerGlobalScope).postMessage(m, transfer);
 
 /** The song's beats and bar starts from the beat model, which is opened for this one song. */
 const beatTracker =
@@ -53,7 +55,7 @@ const beatTracker =
       const found = await beatsAndBars(audio, model, onProgress, clock);
       post({
         type: 'log',
-        message: `beat model on ${model.device}: ${found.beats.length} beats, ${found.downbeats.length} bars, ${clock}`,
+        message: `beat model on ${model.device}: ${found.beats.length} beats, ${found.downbeats.length} bars, ${clock}, runtime memory ${runtimeMemory()} MB`,
       });
       return found;
     } finally {
@@ -69,28 +71,21 @@ const report = {
   onLog: (message: string) => post({ type: 'log', message }),
 };
 
-/** The mix's half of the analysis, started by a `mix` request, for the `parts` request after it. */
-let mixed: Promise<{ signal: Float32Array; mix: MixAnalysis }> | null = null;
-
 self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
   if (fetched(e.data)) return;
   const req = e.data;
   try {
     if (req.type === 'mix') {
+      // The mix's half, handed back small so this worker (its beat model's runtime, the mix's
+      // spectra) can end while the stems are still being separated.
       const { signal } = req;
-      mixed = analyzeMix(signal, { ...report, withStems: true, beatTracker: req.beatModel && beatTracker(req.beatModel) }).then((mix) => {
-        post({ type: 'log', message: `the mix was analyzed before its stems were ready: ${mix.clock}` });
-        return { signal, mix };
-      });
-      // A failure is reported when the parts are asked for.
-      mixed.catch(() => {});
-      return;
+      const mix = await analyzeMix(signal, { ...report, withStems: true, beatTracker: req.beatModel && beatTracker(req.beatModel) });
+      post({ type: 'log', message: `the mix was analyzed before its stems were ready: ${mix.clock}` });
+      const small = stemsMix(mix);
+      return post({ type: 'mixed', mix: small, signal }, [signal.buffer, small.chroma.buffer, small.lowEnv.buffer, small.rms.buffer]);
     }
     if (req.type === 'parts') {
-      if (!mixed) throw new Error('the song itself was not analyzed first');
-      const { signal, mix } = await mixed;
-      // Its own clock: the time spent waiting for the stems is not the analysis'.
-      const result = await analyzeParts(signal, { ...mix, clock: new Stopwatch() }, { ...report, ...stemOptions(req) });
+      const result = await analyzeParts(req.signal, { ...req.mix, clock: new Stopwatch() }, { ...report, ...stemOptions(req) });
       return post({ type: 'done', result });
     }
     if (req.type !== 'analyze') return;

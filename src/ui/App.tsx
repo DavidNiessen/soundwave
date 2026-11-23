@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { setDiscordEnabled, showScene } from '../app/discord';
 import { findStage } from '../game/stages';
 import { setActiveStage } from '../render/stage/showStage';
+import { analysisHold } from '../analysis/hold';
 import { analysisManager, canPlay } from '../analysis/manager';
 import { stemModel } from '../analysis/separation/model';
 import { analysisDevice, isHandheld, type AnalysisDevice } from '../analysis/separation/support';
@@ -700,6 +701,16 @@ export function App() {
   // highway and the score, and come without a sound or a pulse.
   const songOnScreen = view.name === 'play' || view.name === 'replay' || view.name === 'export';
   useEffect(() => videoExports.hold(holdVideos), [holdVideos]);
+  // Analyzing waits the same way, so the stem model never shares the card with a song being played.
+  const holdAnalysis =
+    view.name === 'play'
+      ? 'Paused while you play'
+      : view.name === 'editor'
+        ? 'Paused while the editor is open'
+        : view.name === 'export'
+          ? 'Paused while the video is made'
+          : null;
+  useEffect(() => analysisHold.set(holdAnalysis), [holdAnalysis]);
   useEffect(
     () =>
       videoExports.onFinished((item) => {
