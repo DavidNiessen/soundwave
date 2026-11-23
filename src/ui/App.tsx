@@ -16,6 +16,7 @@ import { detectGrid } from '../editor/detect';
 import { emptyEdits } from '../editor/edits';
 import type { Results } from '../game/GameSession';
 import type { ReplayInputs } from '../game/replay';
+import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { applyDisplayMode, canExit, exitApp, inDesktopApp, isFullscreenToggle, toggledMode } from '../game/displayMode';
 import {
@@ -271,6 +272,19 @@ export function App() {
   useEffect(() => followOutputDevice(settings.outputDevice), [settings.outputDevice]);
   useEffect(() => setMenuRumble(settings.rumble, settings.ps5Haptics), [settings.rumble, settings.ps5Haptics]);
   useEffect(() => void applyDisplayMode(settings.displayMode), [settings.displayMode]);
+  // The macOS app opens the game again when the system closes its page (src-tauri/src/lib.rs). Said
+  // so, the game does not seem to have started over by itself.
+  useEffect(() => {
+    if (!inDesktopApp()) return;
+    void invoke<number>('take_page_restarts')
+      .then((n) => {
+        if (n > 0)
+          notify.warning(
+            'macOS closed the game for the memory it was using, so it was opened again. Your library, scores and settings are kept.',
+          );
+      })
+      .catch(() => {});
+  }, []);
   // Alt+Enter, and F11 in the desktop app, switch between a window and the way of filling the screen
   // used last (fullscreen or windowed fullscreen), as the Window mode setting (so the settings show it). In a browser tab Alt+Enter asks the browser
   // for fullscreen instead (F11 is the browser's own). Taken before anything else hears the keys, so
