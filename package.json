@@ -59,8 +59,8 @@
     "vitest": "^5.1.0"
   },
   "private": true,
-  "packageManager": "pnpm@12.10.1",
   "engines": {
-    "node": ">=22"
+    "node": ">=22",
+    "pnpm": ">=10"
   }
 }
