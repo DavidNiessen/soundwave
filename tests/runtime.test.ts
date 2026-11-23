@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { fitMemory, MEMORY_MAXIMA } from '../src/analysis/runtime';
+import { fitMemory, MEMORY_MAXIMA, processorThreads } from '../src/analysis/runtime';
 
 const runtime = readFileSync('node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.asyncify.mjs', 'utf8');
 
@@ -39,5 +39,14 @@ describe('the analysis runtime', () => {
 
   it('leaves a runtime that builds its memory some other way as it is', () => {
     expect(fitMemory('const m = makeMemory();')).toEqual({ script: 'const m = makeMemory();', patched: false });
+  });
+});
+
+describe('threads on the processor', () => {
+  it('uses every core but one, at least one and at most sixteen', () => {
+    expect(processorThreads(16)).toBe(15);
+    expect(processorThreads(8)).toBe(7);
+    expect(processorThreads(1)).toBe(1);
+    expect(processorThreads(64)).toBe(16);
   });
 });
