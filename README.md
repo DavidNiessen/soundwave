@@ -25,7 +25,7 @@ A song previews by itself: stay on its row in the music library or on the Edit t
 
 Every chart can be changed, or written from nothing, in the **track editor**: with a keyboard, a mouse, a touchscreen or a controller. See [Track editor](#track-editor).
 
-It runs in the browser and as a desktop app (Tauri). The website shows a **Get the app** button with the download for your computer, and the desktop app keeps itself up to date (see [Releases](#releases)). Phones and tablets play and analyze songs too, though analyzing may not fit in a phone's memory (see How analysis works). The desktop window has no title bar: Exit is at the top right of the home screen (or Esc, or the controller's back button, there), and in Window mode the window is moved by its top edge.
+It runs in the browser and as a desktop app (Tauri). The website shows a **Get the app** button with the download for your computer, and the desktop app keeps itself up to date (see [Releases](#releases)). Phones and tablets play and analyze songs too, though analyzing may not fit in a phone's memory (see How analysis works). On Windows and Linux the desktop window has no title bar: Exit is at the top right of the home screen (or Esc, or the controller's back button, there), and in Window mode the window is moved by its top edge. On a Mac it is a Mac window: in Window mode it keeps its traffic lights, Fullscreen is the system's full screen in a Space of its own, and Windowed fullscreen covers the screen with the menu bar and Dock out of the way, so switching apps stays instant.
 
 ## Development
 

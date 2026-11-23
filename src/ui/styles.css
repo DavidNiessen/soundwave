@@ -921,6 +921,14 @@ img.cover {
   z-index: 90;
   -webkit-app-region: drag;
 }
+/* A Mac window in Window mode keeps its title bar's height clear at the top (the traffic lights
+   stand over the page there) and is moved by that whole strip, as any Mac window is. */
+:root[data-titlebar='overlay'] {
+  --safe-t: 28px;
+}
+:root[data-titlebar='overlay'] .drag-strip {
+  height: 28px;
+}
 .page-body {
   flex: 1;
   min-height: 0;

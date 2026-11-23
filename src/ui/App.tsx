@@ -17,8 +17,18 @@ import { emptyEdits } from '../editor/edits';
 import type { Results } from '../game/GameSession';
 import type { ReplayInputs } from '../game/replay';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { applyDisplayMode, canExit, exitApp, inDesktopApp, isFullscreenToggle, toggledMode } from '../game/displayMode';
+import {
+  applyDisplayMode,
+  canExit,
+  exitApp,
+  followWindowMode,
+  inDesktopApp,
+  isFullscreenToggle,
+  onMac,
+  toggledMode,
+} from '../game/displayMode';
 import {
   loadPick,
   loadSetlist,
@@ -295,20 +305,41 @@ export function App() {
   if (settings.displayMode !== 'windowed') lastFullMode.current = settings.displayMode;
   useEffect(() => {
     const desktop = inDesktopApp();
+    const toggle = () => {
+      const s = settingsNow.current;
+      updateSettings({ ...s, displayMode: toggledMode(s.displayMode, lastFullMode.current) });
+    };
     const key = (e: KeyboardEvent) => {
       if (!isFullscreenToggle(e, desktop)) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       if (e.repeat) return;
-      if (desktop) {
-        const s = settingsNow.current;
-        updateSettings({ ...s, displayMode: toggledMode(s.displayMode, lastFullMode.current) });
-      } else if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+      if (desktop) toggle();
+      else if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
       else void document.documentElement.requestFullscreen?.().catch(() => {});
     };
     window.addEventListener('keydown', key, true);
-    return () => window.removeEventListener('keydown', key, true);
+    // On the Mac, View > Toggle Full Screen (Control-Command-F) in the app's menu does the same
+    // (src-tauri/src/lib.rs), and the window going into or out of the system's full screen by
+    // itself (its green button) changes the setting to match.
+    let unlisten: (() => void) | undefined;
+    let gone = false;
+    if (desktop && onMac()) void listen('toggle-fullscreen', toggle).then((un) => (gone ? un() : (unlisten = un)));
+    const unfollow = followWindowMode((displayMode) => updateSettings({ ...settingsNow.current, displayMode }));
+    return () => {
+      gone = true;
+      window.removeEventListener('keydown', key, true);
+      unlisten?.();
+      unfollow();
+    };
   }, [updateSettings]);
+  // A Mac window keeps its traffic lights over the top-left corner of the page in Window mode; the
+  // page leaves room for them (styles.css, data-titlebar).
+  const macWindow = inDesktopApp() && onMac() && settings.displayMode === 'windowed';
+  useEffect(() => {
+    if (macWindow) document.documentElement.dataset.titlebar = 'overlay';
+    else delete document.documentElement.dataset.titlebar;
+  }, [macWindow]);
   // In Window mode the menus' background moves the window (see windowDrag). Not in a song or the
   // editor, where the mouse plays and edits.
   const windowed = inDesktopApp() && settings.displayMode === 'windowed';
