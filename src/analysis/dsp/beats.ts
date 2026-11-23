@@ -212,3 +212,128 @@ export function extendGrid(beats: number[], duration: number): number[] {
   for (let t = beats[beats.length - 1] + tail; t <= duration; t += tail) post.push(t);
   return [...pre, ...beats, ...post];
 }
+
+const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[xs.length >> 1];
+
+/**
+ * The beat model now and then loses the pulse for a while (an intro without drums, a break, a fill):
+ * its beats bunch up, go missing or flip between half and double time, and everything counted on
+ * them (the chart's notes, the highway's beat lines, the break countdown) speeds up and slows down
+ * with them. Runs of at least `minRun` steady beats (each gap within `tolerance`, or 25 ms, of the
+ * gaps around it and of the run's own) are kept as they are; between two runs, and before the first and after
+ * the last, the beats are laid out evenly at the tempo of the runs beside them. A run at half or
+ * double the tempo of a longer one beside it is brought to that one's level. A song without any
+ * steady run is left as it is.
+ */
+export function steadyBeats(beats: number[], minRun = 8, tolerance = 0.05): number[] {
+  if (beats.length < minRun + 1) return beats;
+  const gaps = beats.slice(1).map((t, i) => t - beats[i]);
+  // The model answers in steps of 20 ms: at a fast tempo that alone is more than `tolerance`.
+  const near = (g: number, ref: number) => Math.abs(g - ref) <= Math.max(tolerance * ref, 0.025);
+  // A gap is steady when it matches the gaps just before it or just after it (at a change of
+  // tempo, each side matches its own).
+  const steady = gaps.map((g, i) => {
+    const before = i > 0 ? median(gaps.slice(Math.max(0, i - 8), i)) : 0;
+    const after = i + 1 < gaps.length ? median(gaps.slice(i + 1, i + 9)) : 0;
+    return (before > 0 && near(g, before)) || (after > 0 && near(g, after));
+  });
+  // Runs of steady gaps, split where their tempo moves: each as its first and last beat.
+  const runs: { from: number; to: number; period: number }[] = [];
+  const close = (from: number, to: number) => {
+    if (to - from >= minRun) runs.push({ from, to, period: median(gaps.slice(from, to)) });
+  };
+  for (let i = 0; i < gaps.length;) {
+    if (!steady[i]) {
+      i++;
+      continue;
+    }
+    let start = i;
+    let k = i + 1;
+    for (; k < gaps.length && steady[k]; k++) {
+      if (k - start >= 2 && !near(gaps[k], median(gaps.slice(start, k)))) {
+        close(start, k);
+        start = k;
+      }
+    }
+    close(start, k);
+    i = k;
+  }
+  if (!runs.length) return beats;
+  // Each run as its own beats, so a run can be brought to another level of the pulse.
+  const parts = runs.map((r) => ({ beats: beats.slice(r.from, r.to + 1), period: r.period }));
+  // A run at half or double the tempo of a longer run beside it is the model counting every half
+  // beat, or every other one, for a while: it is brought to its neighbour's level.
+  const length = (p: (typeof parts)[number]) => p.beats[p.beats.length - 1] - p.beats[0];
+  parts.forEach((part, i) => {
+    const ref = [parts[i - 1], parts[i + 1]].filter((n) => n && length(n) > length(part)).sort((x, y) => length(y) - length(x))[0];
+    if (!ref) return;
+    const ratio = part.period / ref.period;
+    if (ratio > 0.45 && ratio < 0.55) {
+      // Every other beat: the half that keeps to the neighbour's beats where the two meet.
+      const anchor = ref === parts[i - 1] ? ref.beats[ref.beats.length - 1] : ref.beats[0];
+      const offBy = (t: number) => Math.abs((((((t - anchor) / ref.period) % 1) + 1.5) % 1) - 0.5);
+      const even = part.beats.filter((_, k) => k % 2 === 0);
+      const odd = part.beats.filter((_, k) => k % 2 === 1);
+      part.beats = offBy(odd[0]) < offBy(even[0]) ? odd : even;
+      part.period *= 2;
+    } else if (ratio > 1.8 && ratio < 2.2) {
+      part.beats = part.beats.flatMap((t, k) => (k + 1 < part.beats.length ? [t, (t + part.beats[k + 1]) / 2] : [t]));
+      part.period /= 2;
+    }
+  });
+  const out: number[] = [];
+  const first = parts[0];
+  // Before the first run, back to where the model's beats began.
+  for (let k = Math.round((first.beats[0] - beats[0]) / first.period); k >= 1; k--) out.push(first.beats[0] - k * first.period);
+  parts.forEach((part, r) => {
+    // Neighbouring runs share the beat where they meet.
+    for (const t of part.beats) if (!out.length || t > out[out.length - 1] + 1e-6) out.push(t);
+    const next = parts[r + 1];
+    if (!next) return;
+    // Between two runs: as many beats as fit at their tempo, evenly spaced.
+    const a = part.beats[part.beats.length - 1];
+    const b = next.beats[0];
+    const n = Math.max(1, Math.round((b - a) / ((part.period + next.period) / 2)));
+    for (let k = 1; k < n; k++) out.push(a + ((b - a) * k) / n);
+  });
+  const last = parts[parts.length - 1];
+  const tail = last.beats[last.beats.length - 1];
+  // After the last run, on to where the model's beats ended.
+  const end = Math.round((beats[beats.length - 1] - tail) / last.period);
+  for (let k = 1; k <= end; k++) out.push(tail + k * last.period);
+  return out;
+}
+
+/**
+ * Bar starts (indices into the beat grid) kept to the song's usual bar length: the beat model now
+ * and then marks a bar start in the middle of a bar, or every other beat for a stretch, and the
+ * break countdown counted those bars twice as fast. A bar start that comes early counts only when
+ * the next two follow it at the usual length (the song really moved its bars, as with a short bar);
+ * a missing one is filled in.
+ */
+export function steadyBars(bars: number[]): number[] {
+  if (bars.length < 3) return bars;
+  const counts = new Map<number, number>();
+  for (let j = 1; j < bars.length; j++) counts.set(bars[j] - bars[j - 1], (counts.get(bars[j] - bars[j - 1]) ?? 0) + 1);
+  const usual = [...counts.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0][0];
+  const confirmed = (i: number) => bars[i + 1] === bars[i] + usual && bars[i + 2] === bars[i] + 2 * usual;
+  const out = [bars[0]];
+  for (let i = 1; i < bars.length;) {
+    const due = out[out.length - 1] + usual;
+    const c = bars[i];
+    if (c === due) {
+      out.push(c);
+      i++;
+    } else if (c < due) {
+      if (confirmed(i)) out.push(c);
+      i++;
+    } else if (c < due + usual && confirmed(i)) {
+      // The bars moved on by less than a bar: a longer bar, then the new ones.
+      out.push(c);
+      i++;
+    } else {
+      out.push(due);
+    }
+  }
+  return out;
+}

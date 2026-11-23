@@ -1,5 +1,15 @@
 import type { Beats } from './beat/track';
-import { barsOnGrid, extendGrid, findDownbeats, refineBeats, estimateTempo, smoothBeats, trackBeats } from './dsp/beats';
+import {
+  barsOnGrid,
+  extendGrid,
+  findDownbeats,
+  refineBeats,
+  estimateTempo,
+  smoothBeats,
+  steadyBars,
+  steadyBeats,
+  trackBeats,
+} from './dsp/beats';
 import { beatChroma, CHROMA_TOP_HZ, chromagram, estimateKey, harmonicEvents } from './dsp/chroma';
 import { findSections, resampleCurve, rmsCurve } from './dsp/energy';
 import { hpss } from './dsp/hpss';
@@ -193,7 +203,11 @@ export async function analyzeParts(signal: Float32Array, mix: MixAnalysis, opts:
     drums = detectDrums(percussive, spec, fps, signal, spec.mag);
   }
   // Align the grid with the actual attacks, then extend it at constant tempo to cover the song.
-  beats = extendGrid(calibrateBeats(beats, drums), duration);
+  beats = calibrateBeats(beats, drums);
+  // Where the model lost the pulse for a while and the drums did not bring it back, the beats are
+  // laid out evenly (see steadyBeats).
+  if (modelled) beats = steadyBeats(beats);
+  beats = extendGrid(beats, duration);
   clock.lap('drums');
   report('rhythm', 1);
   await yieldNow();
@@ -210,7 +224,7 @@ export async function analyzeParts(signal: Float32Array, mix: MixAnalysis, opts:
     return kick + (changeAt.get(t) ?? 0) * 1.2;
   });
   // Where the model heard no bar at all, the accents decide as before.
-  const modelBars = modelled ? barsOnGrid(beats, modelled.downbeats) : [];
+  const modelBars = modelled ? steadyBars(barsOnGrid(beats, modelled.downbeats)) : [];
   const downbeats = modelBars.length ? modelBars : findDownbeats(accent);
   clock.lap('harmony');
   report('harmony', 1);
