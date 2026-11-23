@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeSignal } from '../src/analysis/pipeline';
+import { analyzeMix, analyzeParts, analyzeSignal } from '../src/analysis/pipeline';
 import { ANALYSIS_SAMPLE_RATE as SR, type AnalysisResult, type PitchedNote, type StemNotes } from '../src/analysis/types';
 import { generateAll } from '../src/chart/generator';
 import { PARTS } from '../src/chart/types';
@@ -106,6 +106,19 @@ describe('the analysis of a synthesized band', () => {
     expect(a.lead.length).toBeGreaterThan(10);
     expect(a.vocals.length).toBeGreaterThan(20);
     expect(summary(a)).toMatchSnapshot();
+  });
+
+  it('is the same when the mix is analyzed before its stems are there', async () => {
+    const opts = () => ({
+      lines: { bass: [], lead: [], vocals: [] },
+      drumSignal: stems.drums.slice(),
+      stems: { bass: stems.bass.slice(), vocals: stems.vocals.slice(), other: stems.other.slice() },
+      stemNotes: notes,
+    });
+    const beatTracker = async () => ({ beats, downbeats });
+    const whole = await analyzeSignal(mix.slice(), { ...opts(), beatTracker });
+    const first = await analyzeMix(mix, { withStems: true, beatTracker });
+    expect(await analyzeParts(mix, first, opts())).toEqual(whole);
   });
 
   it('is unchanged on the mix alone, with the beat tracker', async () => {

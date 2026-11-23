@@ -44,6 +44,12 @@ export interface PipelineOptions {
    * tracker here decides when it is missing, fails or finds too few beats.
    */
   beatTracker?: BeatTracker;
+  /**
+   * The drums and lines come from stems (`drumSignal` and `lines`), so the mix's own harmonic and
+   * percussive parts are needed only for the chroma. Taken from those two when not given; given by
+   * a caller that analyzes the mix before its stems are ready (see analyzeMix).
+   */
+  withStems?: boolean;
 }
 
 const NFFT = 2048;
@@ -67,29 +73,50 @@ const STEPS: Record<AnalysisStep, [number, number]> = {
 
 const round3 = (x: number) => Math.round(x * 1000) / 1000;
 
-/** Full analysis of a mono signal at ANALYSIS_SAMPLE_RATE. Pure apart from the optional transcriber. */
-export async function analyzeSignal(signal: Float32Array, opts: PipelineOptions = {}): Promise<AnalysisResult> {
-  const sr = ANALYSIS_SAMPLE_RATE;
-  const duration = signal.length / sr;
-  const report = (step: AnalysisStep, p = 0) => {
+const progress =
+  (opts: PipelineOptions) =>
+  (step: AnalysisStep, p = 0) => {
     const [a, b] = STEPS[step];
     opts.onProgress?.({ step, progress: a + (b - a) * Math.min(1, Math.max(0, p)) });
   };
-  const yieldNow = () => new Promise((r) => setTimeout(r, 0));
+const yieldNow = () => new Promise((r) => setTimeout(r, 0));
+
+/** Full analysis of a mono signal at ANALYSIS_SAMPLE_RATE. Pure apart from the optional transcriber. */
+export async function analyzeSignal(signal: Float32Array, opts: PipelineOptions = {}): Promise<AnalysisResult> {
+  return analyzeParts(signal, await analyzeMix(signal, opts), opts);
+}
+
+/** What the analysis takes from the mix alone: its spectrum, harmonic and percussive parts, level and the beat model's grid. */
+export interface MixAnalysis {
+  spec: Spectrogram;
+  harmonic: Float32Array;
+  percussive: Float32Array;
+  rms: Float32Array;
+  modelled?: Beats;
+  clock: Stopwatch;
+}
+
+/**
+ * The first half of analyzeSignal, which needs only the mix: the game runs it while the song is
+ * still being separated into stems, and the rest (analyzeParts) once they are there. Of `opts` it
+ * takes `withStems` (or `drumSignal` and `lines`), the beat model and the reporting.
+ */
+export async function analyzeMix(signal: Float32Array, opts: PipelineOptions = {}): Promise<MixAnalysis> {
+  const sr = ANALYSIS_SAMPLE_RATE;
+  const report = progress(opts);
   const clock = new Stopwatch();
 
   // 1. Spectrum
   report('spectrum');
   const spec = stft(signal, sr, NFFT, HOP, (p) => report('spectrum', p));
-  const fps = sr / HOP;
   clock.lap('spectrum');
   await yieldNow();
 
   // 2. Harmonic / percussive separation. With the stems the drums and lines come from them, and the
   // mix's two parts are read only by the chroma and the low accents: nothing above the chroma's top.
   report('separating');
-  const fromStems = !!opts.drumSignal && !!opts.lines;
-  const top = fromStems ? Math.floor(CHROMA_TOP_HZ / binHz(spec)) + 1 : spec.bins;
+  const withStems = opts.withStems ?? (!!opts.drumSignal && !!opts.lines);
+  const top = withStems ? Math.floor(CHROMA_TOP_HZ / binHz(spec)) + 1 : spec.bins;
   const { harmonic, percussive } = hpss(spec, 17, 17, (p) => report('separating', p), top);
   clock.lap('hpss');
   await yieldNow();
@@ -109,6 +136,16 @@ export async function analyzeSignal(signal: Float32Array, opts: PipelineOptions 
     }
     clock.lap('beat model');
   }
+  return { spec, harmonic, percussive, rms, modelled, clock };
+}
+
+/** The second half of analyzeSignal (see analyzeMix): drums, grid, harmony, lines and sections. */
+export async function analyzeParts(signal: Float32Array, mix: MixAnalysis, opts: PipelineOptions = {}): Promise<AnalysisResult> {
+  const sr = ANALYSIS_SAMPLE_RATE;
+  const duration = signal.length / sr;
+  const report = progress(opts);
+  const { spec, harmonic, percussive, rms, modelled, clock } = mix;
+  const fps = sr / HOP;
   let tempo: number;
   let beats: number[];
   if (modelled) {
