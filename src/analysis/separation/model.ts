@@ -26,11 +26,12 @@ export interface ModelSource {
 }
 
 /**
- * The commit the model file is read from. Pinned, not the main branch: a re-exported model gets a
+ * The commit the model file is read from, one on the main branch (a branch's own commits can go
+ * once it is merged and deleted). Pinned, not the main branch itself: a re-exported model gets a
  * new id, size and hash here, and a game already installed keeps fetching exactly the file it
  * checks against.
  */
-const MODEL_COMMIT = '04e7e6c687a340149aa2d6fe98fb9375380c1544';
+const MODEL_COMMIT = 'cc905dcebf2cb0063bb5a9d26f55dbd45e0f13b9';
 
 /**
  * The file this repository holds (models/htdemucs/htdemucs-v2.onnx, made by
