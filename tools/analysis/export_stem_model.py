@@ -1,6 +1,7 @@
 """Makes the stem-separation model file the game downloads for advanced analysis.
 
     ml-service/.venv/Scripts/python tools/analysis/export_stem_model.py out/htdemucs-v1.onnx
+    ml-service/.venv/Scripts/python tools/analysis/export_stem_model.py --fp16 out/htdemucs-v1-fp16.onnx
 
 Needs the packages of `ml-service/requirements-full.txt` plus `onnx`. It exports Demucs `htdemucs`
 (one model, four stems) to ONNX with the short-time Fourier transform left out of the graph: the
@@ -20,6 +21,14 @@ The stem is the inverse transform of `x_out` plus `xt_out`.
 
 Weights are stored as float16 wherever that is exact (the published weights are float16), and cast
 back to float32 as the graph loads, so the file is half the size and computes the same numbers.
+
+With --fp16 the graph computes in float16 instead, for graphics cards that can (WebGPU's
+`shader-f16`); its inputs and outputs stay float32, and the operators named in FP32_OPS (or given
+with --keep=Op,Op) keep computing in float32. Needs `onnxconverter-common`. The game does not use
+such a file: on the desktop card it was tried on, under ONNX Runtime Web 1.31, it ran no faster than float32 (82-85
+against 83-86 ms a segment), while it matched PyTorch to 56.7 dB. It is kept to try other cards.
+Weights stored as 8-bit integers were tried too and dropped: no faster on the processor, and 29 dB
+from PyTorch with only the transformer's MatMuls quantized (7 dB with the convolutions as well).
 """
 
 from __future__ import annotations
@@ -118,8 +127,34 @@ def store_float16(path: Path) -> tuple[int, int]:
     return len(casts), kept
 
 
+FP32_OPS = ["InstanceNormalization", "LayerNormalization", "Softmax"]
+
+
+def compute_float16(path: Path, keep: list[str]) -> None:
+    """Rewrites the graph to compute in float16, but for the operators in `keep`."""
+    from onnxconverter_common import float16
+
+    model = onnx.load(str(path))
+    # The graph's own casts to float32 (PyTorch's .float()) would leave float32 among float16.
+    for node in model.graph.node:
+        if node.op_type == "Cast":
+            for attr in node.attribute:
+                if attr.name == "to" and attr.i == TensorProto.FLOAT:
+                    attr.i = TensorProto.FLOAT16
+    model = float16.convert_float_to_float16(model, keep_io_types=True, op_block_list=keep, disable_shape_infer=False, check_fp16_ready=False)
+    # The converter retypes some Casts without their recorded output types; the runtime infers them again.
+    del model.graph.value_info[:]
+    onnx.save(model, str(path))
+
+
 def main() -> None:
-    out = Path(sys.argv[1])
+    args = sys.argv[1:]
+    fp16 = "--fp16" in args
+    keep = FP32_OPS
+    for a in args:
+        if a.startswith("--keep="):
+            keep = [op for op in a[len("--keep=") :].split(",") if op]
+    out = Path([a for a in args if not a.startswith("--")][0])
     out.parent.mkdir(parents=True, exist_ok=True)
     model = get_model("htdemucs").models[0].eval()
     segment = int(model.segment * model.samplerate)
@@ -134,11 +169,21 @@ def main() -> None:
     x = (mag - mean) / (1e-5 + std)
     xt = (mix - meant) / (1e-5 + stdt)
     torch.onnx.export(core, (x, xt), str(out), dynamo=False, input_names=["x", "xt"], output_names=["x_out", "xt_out"], opset_version=17)
-    stored, kept = store_float16(out)
+    if fp16:
+        compute_float16(out, keep)
+        stored, kept = 0, 0
+    else:
+        stored, kept = store_float16(out)
 
     import onnxruntime as ort
 
-    x_out, xt_out = ort.InferenceSession(str(out), providers=["CPUExecutionProvider"]).run(None, {"x": x.numpy(), "xt": xt.numpy()})
+    try:
+        x_out, xt_out = ort.InferenceSession(str(out), providers=["CPUExecutionProvider"]).run(None, {"x": x.numpy(), "xt": xt.numpy()})
+    except Exception as e:  # noqa: BLE001 - the processor runtime lacks float16 operators
+        data = out.read_bytes()
+        print(f"{out}: {len(data)} bytes, sha256 {hashlib.sha256(data).hexdigest()}")
+        print(f"not checked against PyTorch here: {str(e).splitlines()[0][:200]}")
+        return
     spec = torch.from_numpy(x_out).view(1, 4, 4, 2048, 336) * std + mean
     wave = torch.from_numpy(xt_out).view(1, 4, 2, segment) * stdt + meant
     with torch.no_grad():
@@ -146,7 +191,7 @@ def main() -> None:
     snr = 10 * torch.log10(reference.pow(2).mean() / (rebuilt - reference).pow(2).mean())
     data = out.read_bytes()
     print(f"{out}: {len(data)} bytes, sha256 {hashlib.sha256(data).hexdigest()}")
-    print(f"sources {model.sources}, segment {segment} samples; {stored} weights stored as float16, {kept} kept as float32")
+    print(f"sources {model.sources}, segment {segment} samples; {stored} weights stored as float16, {kept} kept as float32" + (f"; computes in float16 but {', '.join(keep)}" if fp16 else ""))
     print(f"against PyTorch on one segment: {snr:.1f} dB")
 
 

@@ -187,6 +187,36 @@ export class GpuReader {
     return array;
   }
 
+  /**
+   * Copies stretches of tensors into staging buffers now, and gives back a function that reads them
+   * into the caller's arrays: each part `into.length` values of `tensor` from value `from` on. The
+   * copies are queued straight after the work that made the tensors, so the tensors may be let go
+   * and the next run started before the function is called. Each `key` keeps its staging buffer
+   * for the next time: a part still to be read must not share its key with one being staged.
+   */
+  stageParts(parts: { key: string; tensor: Ort.Tensor; from: number; into: Float32Array }[]): () => Promise<void> {
+    const encoder = this.device.createCommandEncoder();
+    const staged = parts.map((p) => {
+      const bytes = p.into.length * 4;
+      let staging = this.staging.get(p.key);
+      if (!staging || staging.size !== bytes) {
+        staging?.destroy();
+        staging = this.device.createBuffer({ size: bytes, usage: MAP_READ | COPY_DST });
+        this.staging.set(p.key, staging);
+      }
+      encoder.copyBufferToBuffer(p.tensor.gpuBuffer, p.from * 4, staging, 0, bytes);
+      return staging;
+    });
+    this.device.queue.submit([encoder.finish()]);
+    return async () => {
+      await Promise.all(staged.map((s) => s.mapAsync(READ)));
+      parts.forEach((p, i) => {
+        p.into.set(new Float32Array(staged[i].getMappedRange()));
+        staged[i].unmap();
+      });
+    };
+  }
+
   release() {
     for (const b of this.staging.values()) b.destroy();
     this.staging.clear();
