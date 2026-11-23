@@ -1,6 +1,6 @@
 /**
  * The analysis models run by the desktop app itself (src-tauri/src/models.rs), where the webview's
- * own way would fail or crawl: in WebKit (the macOS app, and Linux) WebGPU keeps gigabytes for every
+ * own way would fail or crawl: in WebKit (the macOS app) WebGPU keeps gigabytes for every
  * song it separates until WebKit closes the page, and without it the browser runtime gets no
  * threads there. The app runs them in its own process, with Core ML on a Mac.
  *

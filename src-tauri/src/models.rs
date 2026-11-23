@@ -3,11 +3,14 @@
 //! The page analyzes songs with ONNX Runtime in the browser. In the macOS app WebKit's WebGPU keeps
 //! about 160 MB for every few seconds of a song it separates and frees it only much later, and WebKit
 //! closes a page above 8 GB (16 GB on a Mac with more than 16 GB), or 4 GB while its window is in the
-//! background: a song of a few minutes did not survive. On Linux WebKitGTK has no WebGPU, and without
-//! cross-origin isolation the browser runtime gets no threads. So where ONNX Runtime publishes a build
-//! (Apple silicon with Core ML, and Linux) the app runs the models here, in its own process, and the
-//! page sends it each model run (src/analysis/native.ts). The page still does the work around the
-//! models: spectrograms, putting segments together, decoding notes.
+//! background: a song of a few minutes did not survive. So on Apple silicon, where ONNX Runtime
+//! publishes a build with Core ML, the app runs the models here, in its own process, and the page
+//! sends it each model run (src/analysis/native.ts). The page still does the work around the models:
+//! spectrograms, putting segments together, decoding notes.
+//!
+//! Not on Linux yet: ONNX Runtime's prebuilt Linux library needs a newer glibc and libstdc++ than the
+//! Ubuntu 22.04 the Linux app is built on (so that it runs on older systems too). Intel Macs and
+//! Windows have no build without extra libraries to ship.
 //!
 //! The page talks to it on the app's `swmodel` scheme:
 //! - `GET /has?model=<key>&files=a,b` answers whether those files are stored;
@@ -30,13 +33,7 @@ pub struct NativeModels {
     sessions: Mutex<HashMap<String, Arc<Mutex<Model>>>>,
 }
 
-#[cfg(any(
-    all(target_os = "macos", target_arch = "aarch64"),
-    all(
-        target_os = "linux",
-        any(target_arch = "x86_64", target_arch = "aarch64")
-    )
-))]
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod runtime {
     use ort::environment::Environment;
     use ort::session::{Session, builder::GraphOptimizationLevel};
@@ -153,13 +150,7 @@ mod runtime {
     pub const AVAILABLE: bool = true;
 }
 
-#[cfg(not(any(
-    all(target_os = "macos", target_arch = "aarch64"),
-    all(
-        target_os = "linux",
-        any(target_arch = "x86_64", target_arch = "aarch64")
-    )
-)))]
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 mod runtime {
     use std::path::Path;
 

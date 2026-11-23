@@ -35,13 +35,10 @@ discord-rich-presence = "1.1"
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 
-# The analysis models, run by the app itself where ONNX Runtime publishes a build (models.rs):
-# Apple silicon with Core ML, and Linux. Its prebuilt library is fetched when the app is built.
+# The analysis models, run by the app itself on Apple silicon, with Core ML (models.rs). The prebuilt
+# library is fetched when the app is built. (Its Linux build needs a newer glibc than Ubuntu 22.04's.)
 [target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
 ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "download-binaries", "tls-rustls", "copy-dylibs", "api-31", "coreml"] }
-
-[target.'cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
-ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "download-binaries", "tls-rustls", "copy-dylibs", "api-31"] }
 
 # The Windows webview's own settings (browser shortcuts off in release builds: see lib.rs).
 [target.'cfg(windows)'.dependencies]
