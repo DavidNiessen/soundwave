@@ -1,6 +1,6 @@
 [package]
 name = "soundwave"
-version = "1.5.0"
+version = "1.5.1"
 description = "Rhythm game that charts your own songs"
 authors = []
 license = "Apache-2.0"
