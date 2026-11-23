@@ -117,9 +117,15 @@ self.onmessage = async (e: MessageEvent<SeparationRequest>) => {
     post({ type: 'log', message: `stem model on ${device} loaded in ${Math.round(performance.now() - opened)} ms` });
 
     const reader = device === 'gpu' ? new GpuReader(await ort.env.webgpu.device) : null;
+    const started = performance.now();
     const part = await separatePart(req.left, req.right, runner(session, reader), req.first, req.count, (p) =>
       post({ type: 'progress', progress: p * share, step: 'Separating stems' }),
     );
+    const took = performance.now() - started;
+    post({
+      type: 'log',
+      message: `separated ${(req.left.length / 44100).toFixed(0)} s on ${device} in ${Math.round(took)} ms (${req.count} segments, ${Math.round(took / req.count)} ms each)`,
+    });
     reader?.release();
     await session.release();
     if (device === 'gpu') await letGoOfGpu();

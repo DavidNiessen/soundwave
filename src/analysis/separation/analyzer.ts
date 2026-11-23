@@ -5,6 +5,7 @@ import { ANALYSIS_SAMPLE_RATE, STEM_NAMES, type StemName, type StemNotes } from 
 import { stemModel } from './model';
 import { joinParts, MODEL_RATE, MODEL_STEMS, segmentOffsets } from './separate';
 import { storeBundledModel, storeModel, PITCH_MODEL } from '../native';
+import { Stopwatch } from '../timing';
 import { analysisDevice, onWebKit } from './support';
 import type { ModelDevice, SeparationRequest, SeparationResponse } from './worker';
 
@@ -73,7 +74,9 @@ export const stemAnalyzer: StemAnalyzer = async (songId, onProgress, signal) => 
   if (signal.aborted) throw abortError();
 
   onProgress(0, 'Decoding');
+  const clock = new Stopwatch();
   const [left, right] = await modelInput(await loadSongBuffer(songId));
+  clock.lap('decoding');
   const pitchModelUrl = new URL(`${import.meta.env.BASE_URL}models/basic-pitch/nmp.onnx`, location.href).href;
   // The app runs the models itself: it is handed them once and keeps them (see analysis/native.ts).
   const native = device === 'native' ? { key: stemModel.source.id, entry: stemModel.source.entry } : undefined;
@@ -87,6 +90,7 @@ export const stemAnalyzer: StemAnalyzer = async (songId, onProgress, signal) => 
   }
   const model = native ? null : await stemModel.load();
   if (signal.aborted) throw abortError();
+  clock.lap('loading the model');
 
   // In WebKit the browser's graphics card path cannot keep going in the background (see work).
   const pausable = device === 'gpu' && onWebKit();
@@ -106,19 +110,23 @@ export const stemAnalyzer: StemAnalyzer = async (songId, onProgress, signal) => 
   if (separated.type !== 'part') throw new Error('The song could not be separated into stems (the analysis answered out of turn).');
   // A graphics card that failed to load the stem model is not asked to transcribe.
   const used: ModelDevice = separated.device;
+  clock.lap(`separating on ${used}`);
   const full = joinParts(left, right, [separated.part]);
   const stemsByName = {} as Record<StemName, Float32Array>;
   MODEL_STEMS.forEach((name, i) => (stemsByName[name] = full[i]));
 
   let rated: Record<StemName, Float32Array>;
   try {
-    rated = {} as Record<StemName, Float32Array>;
-    for (const name of STEM_NAMES) rated[name] = await toAnalysisRate(stemsByName[name]);
+    // Each resampler renders on a thread of its own, so the four run side by side.
+    const resampled = await Promise.all(STEM_NAMES.map((name) => toAnalysisRate(stemsByName[name])));
+    rated = Object.fromEntries(STEM_NAMES.map((name, i) => [name, resampled[i]])) as Record<StemName, Float32Array>;
   } catch (err) {
     throw new Error(`The stems could not be prepared (${(err as Error).message}).`);
   }
+  clock.lap('resampling');
   const stems = {} as Record<StemName, ArrayBuffer>;
   for (const name of STEM_NAMES) stems[name] = wavBytes(rated[name], ANALYSIS_SAMPLE_RATE);
+  clock.lap('wav');
   const done = await work(
     () => {
       const pitched = { bass: rated.bass.slice(), vocals: rated.vocals.slice(), other: rated.other.slice() };
@@ -132,6 +140,8 @@ export const stemAnalyzer: StemAnalyzer = async (songId, onProgress, signal) => 
     signal,
   );
   if (done.type !== 'done') throw new Error('The stems could not be transcribed (the analysis answered out of turn).');
+  clock.lap('transcribing');
+  console.info('[analysis]', `stems took ${clock}`);
   return { stems, notes: done.notes };
 };
 

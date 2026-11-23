@@ -124,6 +124,32 @@ describe('AnalysisManager', () => {
     expect(seen[seen.length - 1]).toBeLessThan(1);
   });
 
+  it('begins on the mix while the song is separated, and lets go of it when separating fails', async () => {
+    const wav = () => new ArrayBuffer(8);
+    const events: string[] = [];
+    const local: LocalAnalyzer = Object.assign(
+      (id: string) => {
+        events.push(`analyze ${id}`);
+        return Promise.resolve(result());
+      },
+      {
+        begin(id: string) {
+          events.push(`begin ${id}`);
+          return () => events.push(`let go ${id}`);
+        },
+      },
+    );
+    const m = new AnalysisManager(local, async (id) => {
+      events.push(`separate ${id}`);
+      if (id === 'broken') throw new Error('The song could not be separated into stems.');
+      return { stems: { drums: wav(), bass: wav(), vocals: wav(), other: wav() }, notes: { bass: [], vocals: [], other: [] } };
+    });
+    m.enqueue('song');
+    m.enqueue('broken');
+    for (let i = 0; i < 10 && m.snapshot().broken?.state !== 'error'; i++) await tick();
+    expect(events).toEqual(['begin song', 'separate song', 'analyze song', 'begin broken', 'separate broken', 'let go broken']);
+  });
+
   it('does not chart a song it could not separate', async () => {
     let charted = false;
     const m = new AnalysisManager(

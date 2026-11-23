@@ -49,10 +49,17 @@ interface Segment {
   tDev: number;
 }
 
-/** Where each segment starts in a song of `length` samples. */
+/**
+ * Where each segment starts in a song of `length` samples. The last one is the first that reaches
+ * the end of the song: Demucs itself goes on while a segment starts inside the song, which for about
+ * one song in three runs the network once more on a segment of mostly silence.
+ */
 export function segmentOffsets(length: number): number[] {
   const offsets: number[] = [];
-  for (let offset = 0; offset < length; offset += STRIDE) offsets.push(offset);
+  for (let offset = 0; offset < length; offset += STRIDE) {
+    offsets.push(offset);
+    if (offset + SEGMENT >= length) break;
+  }
   return offsets;
 }
 

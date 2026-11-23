@@ -1,4 +1,5 @@
 import type * as Ort from 'onnxruntime-web/webgpu';
+import { onWebKit } from './separation/support';
 
 /**
  * The runtime's WebAssembly file, unpacked. A server may already have undone the compression on the
@@ -63,8 +64,19 @@ export async function loadRuntime(ort: typeof Ort, device: 'gpu' | 'cpu'): Promi
   ort.env.wasm.wasmPaths = { mjs: URL.createObjectURL(new Blob([fitted.script], { type: 'text/javascript' })) };
   ort.env.wasm.wasmBinary = binary;
   // A graphics card does the arithmetic itself; threads are for the processor path.
-  if (device === 'gpu') ort.env.wasm.numThreads = 1;
+  ort.env.wasm.numThreads = device === 'gpu' ? 1 : processorThreads();
+  // A laptop with two graphics cards is given the faster one, not the one that saves power.
+  if (device === 'gpu') ort.env.webgpu.powerPreference = 'high-performance';
   ort.env.logLevel = 'error';
+}
+
+/**
+ * Threads for a model on the processor: every core but one, which the page keeps for itself. The
+ * runtime's own default is half the cores and never more than four, which left a 16-thread
+ * desktop separating a song in three minutes with most of its cores idle.
+ */
+export function processorThreads(cores = typeof navigator === 'undefined' ? 4 : navigator.hardwareConcurrency || 4): number {
+  return Math.max(1, Math.min(16, cores - 1));
 }
 
 /**
@@ -113,7 +125,10 @@ export async function openOnDevice<T>(
  * GPU memory and WebKit's bookkeeping for it are freed as the work goes. At most once a second.
  */
 let nudged = 0;
+/** Only WebKit needs the nudge; elsewhere it would only zero 256 MB every second. */
+const nudges = onWebKit();
 export function nudgeCollector() {
+  if (!nudges) return;
   const now = performance.now();
   if (now - nudged < 1000) return;
   nudged = now;

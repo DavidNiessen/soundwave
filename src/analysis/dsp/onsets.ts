@@ -7,16 +7,23 @@ import { hzToBin, type Spectrogram } from './stft';
 export function bandFlux(spec: Float32Array, s: Spectrogram, loHz: number, hiHz: number): Float32Array {
   const lo = hzToBin(s, loHz);
   const hi = hzToBin(s, hiHz);
+  const width = hi - lo + 1;
   const out = new Float32Array(s.frames);
+  // Each frame's logs are taken once and kept for the next frame's difference.
+  let prev = new Float64Array(width);
+  let cur = new Float64Array(width);
+  for (let k = 0; k < width; k++) prev[k] = Math.log1p(spec[lo + k]);
   for (let f = 1; f < s.frames; f++) {
-    const row = f * s.bins;
-    const prev = row - s.bins;
+    const row = f * s.bins + lo;
     let sum = 0;
-    for (let k = lo; k <= hi; k++) {
-      const d = Math.log1p(spec[row + k]) - Math.log1p(spec[prev + k]);
+    for (let k = 0; k < width; k++) {
+      const v = Math.log1p(spec[row + k]);
+      cur[k] = v;
+      const d = v - prev[k];
       if (d > 0) sum += d;
     }
-    out[f] = sum / (hi - lo + 1);
+    out[f] = sum / width;
+    [prev, cur] = [cur, prev];
   }
   return out;
 }

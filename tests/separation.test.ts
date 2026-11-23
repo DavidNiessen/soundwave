@@ -118,6 +118,15 @@ describe('separating a song', () => {
     expect(worst).toBeLessThan(0.02);
   }, 120_000);
 
+  it('runs no segment after the first one that reaches the end of the song', () => {
+    const stride = Math.floor(0.75 * SEGMENT);
+    expect(segmentOffsets(0)).toEqual([]);
+    expect(segmentOffsets(SEGMENT)).toEqual([0]);
+    // The second segment already ends past the song: Demucs would start a third, nearly all silence.
+    expect(segmentOffsets(2 * stride + 1000)).toEqual([0, stride]);
+    expect(segmentOffsets(stride + SEGMENT + 1)).toEqual([0, stride, 2 * stride]);
+  });
+
   it('gives the same stems when the song is separated in runs of a few segments', async () => {
     const length = Math.round(SEGMENT * 4.3);
     const l = Float32Array.from({ length }, (_, i) => 0.3 * tone(i));
