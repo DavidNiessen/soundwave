@@ -91,6 +91,9 @@ export interface MixAnalysis {
   spec: Spectrogram;
   harmonic: Float32Array;
   percussive: Float32Array;
+  /** The harmonic part's chroma (frames x 12) and the percussive part's low-band accents (one per frame). */
+  chroma: Float32Array;
+  lowEnv: Float32Array;
   rms: Float32Array;
   modelled?: Beats;
   clock: Stopwatch;
@@ -136,7 +139,20 @@ export async function analyzeMix(signal: Float32Array, opts: PipelineOptions = {
     }
     clock.lap('beat model');
   }
-  return { spec, harmonic, percussive, rms, modelled, clock };
+  const chroma = chromagram(harmonic, spec);
+  const lowEnv = normalize(bandFlux(percussive, spec, 30, 150));
+  return { spec, harmonic, percussive, chroma, lowEnv, rms, modelled, clock };
+}
+
+/**
+ * What the second half needs of a mix analyzed for stems (`withStems`), and nothing more: the
+ * spectrum and its harmonic and percussive parts (about 130 MB for four minutes) are read only on
+ * the way to the chroma and the low accents, which it keeps. Small enough to hand to another worker.
+ */
+export function stemsMix(mix: MixAnalysis): Omit<MixAnalysis, 'clock'> {
+  const none = new Float32Array(0);
+  const { clock: _, spec, ...rest } = mix;
+  return { ...rest, spec: { ...spec, mag: none }, harmonic: none, percussive: none };
 }
 
 /** The second half of analyzeSignal (see analyzeMix): drums, grid, harmony, lines and sections. */
@@ -144,7 +160,7 @@ export async function analyzeParts(signal: Float32Array, mix: MixAnalysis, opts:
   const sr = ANALYSIS_SAMPLE_RATE;
   const duration = signal.length / sr;
   const report = progress(opts);
-  const { spec, harmonic, percussive, rms, modelled, clock } = mix;
+  const { spec, harmonic, percussive, chroma, lowEnv, rms, modelled, clock } = mix;
   const fps = sr / HOP;
   let tempo: number;
   let beats: number[];
@@ -184,11 +200,9 @@ export async function analyzeParts(signal: Float32Array, mix: MixAnalysis, opts:
 
   // 4. Harmony: chroma, chord changes, key
   report('harmony');
-  const chroma = chromagram(harmonic, spec);
   const bc = beatChroma(chroma, spec.frames, fps, beats);
   const harmony = harmonicEvents(beats, bc);
   const key = estimateKey(bc);
-  const lowEnv = normalize(bandFlux(percussive, spec, 30, 150));
   const changeAt = new Map(harmony.map((h) => [h.t, h.strength]));
   const accent = beats.map((t) => {
     const f = Math.round(t * fps);

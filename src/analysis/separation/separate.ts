@@ -206,6 +206,8 @@ export async function separatePart(
   onProgress: (p: number) => void = () => {},
   aborted: () => boolean = () => false,
   overlap = OVERLAP,
+  /** Awaited before each segment after the first: the separation pauses while it waits. */
+  between: () => Promise<void> = () => Promise.resolve(),
 ): Promise<StemPart> {
   const length = left.length;
   const level = songLevel(left, right);
@@ -226,7 +228,10 @@ export async function separatePart(
     if (aborted()) throw new DOMException('analysis cancelled', 'AbortError');
     const next = k + 1 < offsets.length ? prepare(k + 1) : null;
     const out = await pending;
-    if (next) pending = model.run(next.x, next.xt);
+    if (next) {
+      await between();
+      pending = model.run(next.x, next.xt);
+    }
     pairs.forEach((p, i) => p.add(current.info, pairOutput(out, i)));
     onProgress(Math.min(1, (current.info.offset + current.info.span) / length));
     if (next) current = next;
@@ -236,8 +241,12 @@ export async function separatePart(
 
 /** Puts the parts of a song separated in runs (separatePart) together into its four stems. */
 export function joinParts(left: Float32Array, right: Float32Array, parts: readonly StemPart[]): Float32Array[] {
-  const length = left.length;
-  const { mean, scale } = songLevel(left, right);
+  return joinPartsOf(left.length, songLevel(left, right), parts);
+}
+
+/** joinParts for a song of `length` samples levelled by `level`, without the song itself at hand. */
+export function joinPartsOf(length: number, level: SongLevel, parts: readonly StemPart[]): Float32Array[] {
+  const { mean, scale } = level;
   const stems = MODEL_STEMS.map(() => new Float32Array(length));
   const weights = new Float32Array(length);
   for (const part of parts) {

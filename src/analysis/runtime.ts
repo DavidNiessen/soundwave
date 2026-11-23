@@ -35,7 +35,7 @@ export function fitMemory(script: string): { script: string; patched: boolean } 
   if (!script.includes(MEMORY_CALL) || !script.includes(HEAP_MAX)) return { script, patched: false };
   const prelude =
     `let __swHeapMax=4294901760;function __swMemory(){let last;for(const maximum of ${JSON.stringify(MEMORY_MAXIMA)}){` +
-    `try{const m=new WebAssembly.Memory({initial:256,maximum,shared:!0});__swHeapMax=maximum*65536-65536;return m}` +
+    `try{const m=new WebAssembly.Memory({initial:256,maximum,shared:!0});__swHeapMax=maximum*65536-65536;globalThis.__swRuntimeMemory=m;return m}` +
     `catch(e){if(!(e instanceof RangeError))throw e;last=e}}throw last}\n`;
   return {
     script: prelude + script.replace(MEMORY_CALL, '__swMemory()').replace(HEAP_MAX, 'function rc(){return __swHeapMax}'),
@@ -77,6 +77,15 @@ export async function loadRuntime(ort: typeof Ort, device: 'gpu' | 'cpu'): Promi
  */
 export function processorThreads(cores = typeof navigator === 'undefined' ? 4 : navigator.hardwareConcurrency || 4): number {
   return Math.max(1, Math.min(16, cores - 1));
+}
+
+/**
+ * How much memory the runtime of this worker holds, in MB (0 before it started). Its memory only
+ * grows: what a model needed at its largest stays held until the worker ends.
+ */
+export function runtimeMemory(): number {
+  const memory = (globalThis as { __swRuntimeMemory?: WebAssembly.Memory }).__swRuntimeMemory;
+  return memory ? Math.round(memory.buffer.byteLength / 2 ** 20) : 0;
 }
 
 /**

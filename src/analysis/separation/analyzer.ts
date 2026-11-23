@@ -3,8 +3,9 @@ import { serveWorkerFetch } from '../../app/workerFetch';
 import { wavBytes } from '../../audio/wav';
 import { ANALYSIS_SAMPLE_RATE, STEM_NAMES, type StemName, type StemNotes } from '../types';
 import { stemModel } from './model';
-import { joinParts, MODEL_RATE, MODEL_STEMS, segmentOffsets } from './separate';
+import { joinPartsOf, MODEL_RATE, MODEL_STEMS, segmentOffsets, songLevel } from './separate';
 import { storeBundledModel, storeModel, PITCH_MODEL } from '../native';
+import { analysisHold } from '../hold';
 import { Stopwatch } from '../timing';
 import { analysisDevice, onWebKit } from './support';
 import { HELPERS, type HelperPort } from './transform';
@@ -96,33 +97,38 @@ export const stemAnalyzer: StemAnalyzer = async (songId, onProgress, signal) => 
   // In WebKit the browser's graphics card path cannot keep going in the background (see work).
   const pausable = device === 'gpu' && onWebKit();
   const overlap = devOverlap();
-  const count = segmentOffsets(left.length, overlap).length;
+  const length = left.length;
+  const count = segmentOffsets(length, overlap).length;
+  // What the stems are put together with afterwards: the song itself goes to the worker.
+  const level = songLevel(left, right);
   const separated = await work(
     () => {
-      if (!model) return { req: { type: 'separate', left, right, native, device, first: 0, count, overlap }, transfer: [] };
-      // Each try gets its own copy of the model, so it can be run again (see work).
-      const files = model.files.map((f) => ({ name: f.name, data: f.data.slice(0) }));
+      // A piece that may be run again (see work) gets copies of the song and the model; otherwise
+      // they are handed over, not copied: 90 MB of model and 86 MB of song for four minutes.
+      const own = (a: Float32Array) => (pausable ? a.slice() : a);
+      const song = { left: own(left), right: own(right) };
+      const files = model?.files.map((f) => ({ name: f.name, data: pausable ? f.data.slice(0) : f.data }));
       const req: SeparationRequest = {
         type: 'separate',
-        left,
-        right,
-        model: { entry: model.entry, files },
+        ...song,
+        ...(files ? { model: { entry: model!.entry, files, prepared: model!.prepared } } : { native }),
         device,
         first: 0,
         count,
         overlap,
       };
-      return { req, transfer: files.map((f) => f.data) };
+      return { req, transfer: [song.left.buffer, song.right.buffer, ...(files ?? []).map((f) => f.data)] };
     },
     pausable,
     onProgress,
     signal,
   );
   if (separated.type !== 'part') throw new Error('The song could not be separated into stems (the analysis answered out of turn).');
+  await heldFree(onProgress, signal);
   // A graphics card that failed to load the stem model is not asked to transcribe.
   const used: ModelDevice = separated.device;
   clock.lap(`separating on ${used}`);
-  const full = joinParts(left, right, [separated.part]);
+  const full = joinPartsOf(length, level, [separated.part]);
   const stemsByName = {} as Record<StemName, Float32Array>;
   MODEL_STEMS.forEach((name, i) => (stemsByName[name] = full[i]));
 
@@ -222,6 +228,21 @@ function whenVisible(signal: AbortSignal): Promise<void> {
   });
 }
 
+/** Waits while analyzing is held, saying so (see analysis/hold.ts); a cancelled analysis stops waiting. */
+async function heldFree(onProgress: (p: number, label: string) => void, signal: AbortSignal) {
+  const reason = analysisHold.held;
+  if (!reason) return;
+  onProgress(SEPARATED, reason);
+  await new Promise<void>((resolve) => {
+    signal.addEventListener('abort', () => resolve(), { once: true });
+    void analysisHold.free().then(resolve);
+  });
+  if (signal.aborted) throw abortError();
+}
+
+/** How far along a song's bar is once it is separated, before it is transcribed (see the separation worker). */
+const SEPARATED = 0.9;
+
 /** Development only: `localStorage['soundwave.dev.stem-overlap'] = '0.1'` separates with another overlap, to compare. */
 function devOverlap(): number | undefined {
   if (!import.meta.env.DEV) return undefined;
@@ -288,6 +309,16 @@ function inWorker(
       req = { ...req, helpers: helpers.ports };
       transfer = [...transfer, ...helpers.ports];
     }
+    // A separation pauses between segments while analyzing is held (see analysis/hold.ts).
+    let lastProgress = 0;
+    let unwatch = () => {};
+    if (req.type === 'separate') {
+      req = { ...req, held: !!analysisHold.held };
+      unwatch = analysisHold.watch((reason) => {
+        worker.postMessage({ type: 'hold', on: !!reason } satisfies SeparationRequest);
+        if (reason) onProgress(lastProgress, reason);
+      });
+    }
     const stop = () => {
       end();
       reject(abortError());
@@ -297,12 +328,17 @@ function inWorker(
       for (const s of signals) s.removeEventListener('abort', stop);
       worker.terminate();
       helpers?.stop();
+      unwatch();
     };
     worker.onmessage = (e: MessageEvent<SeparationResponse>) => {
       // The worker's fetches, where it cannot make them itself (see app/workerFetch).
       if (serveWorkerFetch(worker, e.data)) return;
       const m = e.data;
-      if (m.type === 'progress') return onProgress(m.progress, m.step);
+      if (m.type === 'progress') {
+        lastProgress = m.progress;
+        // The segment under way when the hold began still reports; the bar keeps saying why it waits.
+        return onProgress(m.progress, (req.type === 'separate' && analysisHold.held) || m.step);
+      }
       if (m.type === 'log') return console.info('[analysis]', m.message);
       end();
       if (m.type === 'error')

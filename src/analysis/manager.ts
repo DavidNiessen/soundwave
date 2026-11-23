@@ -18,6 +18,7 @@ import { writeAnalysisToFile } from '../storage/songFile';
 import { serveWorkerFetch } from '../app/workerFetch';
 import { stemAnalyzer, type StemAnalyzer } from './separation/analyzer';
 import { BEAT_MODEL, storeBundledModel } from './native';
+import { analysisHold, type AnalysisHold } from './hold';
 import { analysisDevice } from './separation/support';
 import { Stopwatch } from './timing';
 import {
@@ -281,6 +282,9 @@ export class AnalysisManager {
     if (this.running) return;
     this.running = true;
     while (this.queue.length) {
+      // The next song starts once nothing holds analyzing (see hold.ts).
+      await this.env.hold?.free();
+      if (!this.queue.length) break;
       const id = this.queue.shift()!;
       const gen = this.generation.get(id) ?? 0;
       const abort = new AbortController();
@@ -366,6 +370,7 @@ export class AnalysisManager {
       };
       clock.lap('stems');
     }
+    await this.whileHeld(id, signal);
     if (signal.aborted) throw abortError();
     const base = assist ? start + SEPARATION_SHARE * (1 - start) : 0;
     progress({ state: 'analyzing', progress: base, step: STEP_LABEL.decoding });
@@ -377,6 +382,17 @@ export class AnalysisManager {
     );
     clock.lap('analysis');
     return { result, stems: assist?.stems, clock };
+  }
+
+  /** Waits while analyzing is held, saying so on the song's bar; a cancelled song stops waiting. */
+  private async whileHeld(id: string, signal: AbortSignal) {
+    const hold = this.env.hold;
+    if (!hold?.held || signal.aborted) return;
+    this.set(id, { ...this.status[id], state: 'analyzing', step: hold.held });
+    await new Promise<void>((resolve) => {
+      signal.addEventListener('abort', () => resolve(), { once: true });
+      void hold.free().then(resolve);
+    });
   }
 
   async analysis(id: string): Promise<AnalysisResult | undefined> {
@@ -472,6 +488,8 @@ export interface ManagerEnv {
   canAnalyze(): Promise<boolean>;
   /** Where the song being analyzed is noted, so that it outlives the page (none in tests). */
   running?: { read(): string | null; write(id: string | null): void };
+  /** What analyzing waits for while a song is played or edited (see hold.ts; none in tests). */
+  hold?: AnalysisHold;
 }
 
 /** What a song the page closed on while analyzing it says. */
@@ -483,6 +501,7 @@ export const DIED =
 const RUNNING_KEY = 'soundwave.cache.analysis-running';
 
 const defaultEnv: ManagerEnv = {
+  hold: analysisHold,
   olderAnalyses: listAnalyses,
   canAnalyze: async () => (await analysisDevice()) !== 'none',
   running: {
@@ -565,8 +584,6 @@ async function beatModelAt(): Promise<BeatModelAt> {
 /** A song whose mix is being analyzed while its stems are separated (see LocalAnalyzer.begin). */
 interface Begun {
   worker: AnalysisWorker;
-  /** Samples in the mix, which the stems are cut or padded to. */
-  length: number;
 }
 const begun = new Map<string, Promise<Begun | null>>();
 
@@ -578,9 +595,8 @@ async function beginMix(id: string, signal: AbortSignal): Promise<Begun | null> 
   const beatModel = await beatModelAt();
   if (signal.aborted) throw abortError();
   const worker = analysisWorker(signal);
-  const length = audio.length;
   worker.send({ type: 'mix', signal: audio, beatModel }, [audio.buffer]);
-  return { worker, length };
+  return { worker };
 }
 
 const localAnalyzer: LocalAnalyzer = Object.assign(
@@ -589,11 +605,20 @@ const localAnalyzer: LocalAnalyzer = Object.assign(
     begun.delete(id);
     const started = assist ? await early?.catch(() => null) : null;
     if (started) {
-      const { inputs, transfer } = await stemSignals(assist, started.length);
-      started.worker.follow(onProgress);
-      started.worker.send({ type: 'parts', ...inputs }, transfer);
       try {
-        return await started.worker.result;
+        // The mix's half came back small and its worker ended; the rest runs in a worker of its own.
+        const { mix, signal: audio } = await started.worker.mixed;
+        const { inputs, transfer } = await stemSignals(assist, audio.length);
+        const worker = analysisWorker(signal);
+        worker.follow(onProgress);
+        worker.send({ type: 'parts', signal: audio, mix, ...inputs }, [
+          audio.buffer,
+          mix.chroma.buffer,
+          mix.lowEnv.buffer,
+          mix.rms.buffer,
+          ...transfer,
+        ]);
+        return await worker.result;
       } catch (err) {
         if (signal.aborted) throw err;
         console.warn('the analysis begun on the mix failed; analyzing the song again from the start', err);
@@ -645,11 +670,15 @@ export async function toAnalysisSignal(buffer: AudioBuffer): Promise<Float32Arra
   return rendered.getChannelData(0).slice();
 }
 
-/** An analysis worker: its answer ends up in `result`, its progress goes to whatever `follow` was given. */
+/**
+ * An analysis worker: its answer ends up in `result` (or, for a `mix` request, `mixed`), its
+ * progress goes to whatever `follow` was given. It ends with its answer.
+ */
 interface AnalysisWorker {
   send(req: WorkerRequest, transfer: Transferable[]): void;
   follow(onProgress: Progress): void;
   result: Promise<AnalysisResult>;
+  mixed: Promise<Omit<Extract<WorkerResponse, { type: 'mixed' }>, 'type'>>;
   /** Ends the worker without an answer (nobody waits for one). */
   end(): void;
 }
@@ -658,6 +687,8 @@ function analysisWorker(abort: AbortSignal): AnalysisWorker {
   const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
   let onProgress: Progress | null = null;
   let end = () => worker.terminate();
+  let gotMix: (m: Extract<WorkerResponse, { type: 'mixed' }>) => void = () => {};
+  const mixedAnswer = new Promise<Extract<WorkerResponse, { type: 'mixed' }>>((resolve) => (gotMix = resolve));
   const result = new Promise<AnalysisResult>((resolve, reject) => {
     const stop = () => {
       worker.terminate();
@@ -677,6 +708,7 @@ function analysisWorker(abort: AbortSignal): AnalysisWorker {
       else {
         end();
         if (m.type === 'done') resolve(m.result);
+        else if (m.type === 'mixed') gotMix(m);
         else reject(new Error(m.message));
       }
     };
@@ -687,10 +719,16 @@ function analysisWorker(abort: AbortSignal): AnalysisWorker {
   });
   // A worker ended unasked for leaves its answer unread.
   result.catch(() => {});
+  // The mix's half fails as the worker does.
+  const mixed = Promise.race([mixedAnswer, result.then(() => Promise.reject(new Error('the analysis answered out of turn')))]).then(
+    ({ mix, signal }) => ({ mix, signal }),
+  );
+  mixed.catch(() => {});
   return {
     send: (req, transfer) => worker.postMessage(req, transfer),
     follow: (p) => (onProgress = p),
     result,
+    mixed,
     end: () => end(),
   };
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeMix, analyzeParts, analyzeSignal } from '../src/analysis/pipeline';
+import { analyzeMix, analyzeParts, analyzeSignal, stemsMix } from '../src/analysis/pipeline';
+import { Stopwatch } from '../src/analysis/timing';
 import { ANALYSIS_SAMPLE_RATE as SR, type AnalysisResult, type PitchedNote, type StemNotes } from '../src/analysis/types';
 import { generateAll } from '../src/chart/generator';
 import { PARTS } from '../src/chart/types';
@@ -119,6 +120,9 @@ describe('the analysis of a synthesized band', () => {
     const whole = await analyzeSignal(mix.slice(), { ...opts(), beatTracker });
     const first = await analyzeMix(mix, { withStems: true, beatTracker });
     expect(await analyzeParts(mix, first, opts())).toEqual(whole);
+    // As the game hands it to another worker: only what the second half reads.
+    const small = await analyzeMix(mix, { withStems: true, beatTracker });
+    expect(await analyzeParts(mix, { ...stemsMix(small), clock: new Stopwatch() }, opts())).toEqual(whole);
   });
 
   it('is unchanged on the mix alone, with the beat tracker', async () => {
