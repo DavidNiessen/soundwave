@@ -56,3 +56,21 @@ jobs:
         working-directory: src-tauri
       - run: cargo test --lib
         working-directory: src-tauri
+
+  # The Mac-only code (the window's menu, the page's process ending) is compiled only on a Mac.
+  rust-macos:
+    name: Desktop app (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: mkdir -p dist
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: src-tauri
+      - run: cargo test --lib
+        working-directory: src-tauri
