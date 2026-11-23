@@ -81,13 +81,29 @@ const level = (env: Envelope, from: number, to: number) => {
   return s / (b - a) / env.ref;
 };
 
-/** Audible attacks in a stem: flux peaks in a band, moved to the attack in the filtered waveform. */
-export function attacks(signal: Float32Array, sr: number, loHz: number, hiHz: number, delta = 0.08): Attack[] {
+/** A stem's sound in one band: its flux (normalised) and the waveform filtered to the band. */
+interface Band {
+  flux: Float32Array;
+  filtered: Float32Array;
+}
+
+function band(signal: Float32Array, sr: number, loHz: number, hiHz: number): Band {
   const spec = stft(signal, sr, 2048, HOP);
-  const flux = normalize(bandFlux(spec.mag, spec, loHz, hiHz));
+  return { flux: normalize(bandFlux(spec.mag, spec, loHz, hiHz)), filtered: highpass(lowpass(signal, sr, hiHz), sr, loHz) };
+}
+
+/** Audible attacks in a stem: flux peaks in a band, moved to the attack in the filtered waveform. */
+export function attacks(
+  signal: Float32Array,
+  sr: number,
+  loHz: number,
+  hiHz: number,
+  delta = 0.08,
+  heard = band(signal, sr, loHz, hiHz),
+): Attack[] {
+  const { flux, filtered } = heard;
   const fps = sr / HOP;
   const peaks = pickPeaks(flux, { maxWin: 2, avgWin: Math.round(0.2 * fps), delta, wait: Math.round(MIN_IOI * fps) });
-  const filtered = highpass(lowpass(signal, sr, hiHz), sr, loHz);
   const out: Attack[] = [];
   for (const f of peaks) {
     const t = refineOnset(filtered, sr, f / fps, 0.03, 0.09);
@@ -112,11 +128,12 @@ function isOnset(env: Envelope, t: number, minLevel: number, keep = 0.9): boolea
 
 /**
  * End of a held pitch: transcribers split long notes (vibrato, breathy tone) into back-to-back
- * pieces of the same pitch, so follow the chain of same-pitch pieces.
+ * pieces of the same pitch, so follow the chain of same-pitch pieces. `byTime` is the notes in
+ * order of their starts.
  */
-function heldUntil(notes: PitchedNote[], start: PitchedNote): number {
+function heldUntil(byTime: PitchedNote[], start: PitchedNote): number {
   let end = start.t + start.dur;
-  for (const n of [...notes].sort((a, b) => a.t - b.t)) {
+  for (const n of byTime) {
     if (n.midi !== start.midi || n.t <= start.t) continue;
     if (n.t - end > 0.12) break;
     end = Math.max(end, n.t + n.dur);
@@ -205,7 +222,7 @@ export function vocalLineFromStem({ signal, sr, notes, mixLoudness }: StemInput)
     if (!pitch && level(env, e.t, e.t + 0.1) >= BORROW_MIN_LEVEL) pitch = dominantPitch(voiced, e.t - BORROW_WINDOW, e.t + BORROW_WINDOW);
     if (!pitch) continue;
     // A borrowed pitch (from a note that ended before this syllable) sets the pitch, not the length.
-    const held = Math.max(heldUntil(voiced, pitch) + 0.1, e.t + 0.1);
+    const held = Math.max(heldUntil(sorted, pitch) + 0.1, e.t + 0.1);
     const end = Math.min(next - 0.02, held, fadeEnd(env, e.t, next, 0.3));
     if (end - e.t < MIN_SYLLABLE) continue;
     out.push({
@@ -299,12 +316,10 @@ function voicing(pitches: number[]): { top: number; chord?: number[] } {
  * Only at eighth-note grid positions where the instrument is playing: a small dip-and-recovery
  * in the flux close to the grid counts there, where it would be noise anywhere else.
  */
-function gridStrums(signal: Float32Array, sr: number, env: Envelope, beats: number[], heard: Attack[]): Attack[] {
-  const spec = stft(signal, sr, 2048, HOP);
-  const flux = normalize(bandFlux(spec.mag, spec, 150, 8000));
+function gridStrums(sound: Band, sr: number, env: Envelope, beats: number[], heard: Attack[]): Attack[] {
+  const { flux, filtered } = sound;
   const fps = sr / HOP;
   const out: Attack[] = [];
-  const filtered = highpass(lowpass(signal, sr, 8000), sr, 150);
   for (let i = 0; i + 1 < beats.length; i++) {
     for (const frac of [0, 0.5]) {
       const g = beats[i] + frac * (beats[i + 1] - beats[i]);
@@ -337,8 +352,9 @@ const GRID_STRUM_RATIO = 1.5;
  * eighth-note grid (re-strummed distorted chords barely change the sound level).
  */
 function instrumentAttacks(signal: Float32Array, sr: number, env: Envelope, beats?: number[]): Attack[] {
-  const heard = attacks(signal, sr, 150, 8000).filter((a) => isOnset(env, a.t, 0.1));
-  if (beats && beats.length > 1) heard.push(...gridStrums(signal, sr, env, beats, heard));
+  const sound = band(signal, sr, 150, 8000);
+  const heard = attacks(signal, sr, 150, 8000, 0.08, sound).filter((a) => isOnset(env, a.t, 0.1));
+  if (beats && beats.length > 1) heard.push(...gridStrums(sound, sr, env, beats, heard));
   heard.sort((a, b) => a.t - b.t);
   const out = heard;
   return out.filter((a, i) => i === 0 || a.t - out[i - 1].t >= MIN_IOI);

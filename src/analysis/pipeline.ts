@@ -1,11 +1,11 @@
 import type { Beats } from './beat/track';
 import { barsOnGrid, extendGrid, findDownbeats, refineBeats, estimateTempo, smoothBeats, trackBeats } from './dsp/beats';
-import { beatChroma, chromagram, estimateKey, harmonicEvents } from './dsp/chroma';
+import { beatChroma, CHROMA_TOP_HZ, chromagram, estimateKey, harmonicEvents } from './dsp/chroma';
 import { findSections, resampleCurve, rmsCurve } from './dsp/energy';
 import { hpss } from './dsp/hpss';
 import { highpass, lowpass, refineOnset } from './dsp/refine';
 import { bandFlux, normalize, onsetEnvelope, pickPeaks } from './dsp/onsets';
-import { hzToBin, stft, type Spectrogram } from './dsp/stft';
+import { binHz, hzToBin, stft, type Spectrogram } from './dsp/stft';
 import { BASS_SPLIT, separateParts } from './pitch/lines';
 import { bassLineFromStem, leadLineFromStem, loudness, vocalLineFromStem } from './pitch/stemLines';
 import { salienceLine } from './pitch/salience';
@@ -85,18 +85,18 @@ export async function analyzeSignal(signal: Float32Array, opts: PipelineOptions 
   clock.lap('spectrum');
   await yieldNow();
 
-  // 2. Harmonic / percussive separation
+  // 2. Harmonic / percussive separation. With the stems the drums and lines come from them, and the
+  // mix's two parts are read only by the chroma and the low accents: nothing above the chroma's top.
   report('separating');
-  const { harmonic, percussive } = hpss(spec, 17, 17, (p) => report('separating', p));
+  const fromStems = !!opts.drumSignal && !!opts.lines;
+  const top = fromStems ? Math.floor(CHROMA_TOP_HZ / binHz(spec)) + 1 : spec.bins;
+  const { harmonic, percussive } = hpss(spec, 17, 17, (p) => report('separating', p), top);
   clock.lap('hpss');
   await yieldNow();
 
   // 3. Rhythm: onset envelope, tempo, beats, drum hits
   report('rhythm');
   const rms = rmsCurve(signal, HOP);
-  // Band-balanced onset envelope so kicks count as much as broadband noise.
-  const env = onsetEnvelope(spec);
-  clock.lap('onsets');
   // The beat model's beats when there are enough of them to be a grid; else the tracker here.
   let modelled: Beats | undefined;
   if (opts.beatTracker) {
@@ -120,6 +120,8 @@ export async function analyzeSignal(signal: Float32Array, opts: PipelineOptions 
       .sort((a, b) => a - b);
     tempo = 60 / gaps[gaps.length >> 1];
   } else {
+    // Band-balanced onset envelope so kicks count as much as broadband noise.
+    const env = onsetEnvelope(spec);
     tempo = estimateTempo(env, fps);
     report('rhythm', 0.3);
     const beatFrames = trackBeats(env, fps, tempo);

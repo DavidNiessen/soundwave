@@ -70,7 +70,12 @@ export function logMel(signal: Float32Array): LogMel {
     const start = f * HOP - NFFT / 2;
     for (let i = 0; i < NFFT; i++) frame[i] = signal[reflect(start + i, n)] * HANN[i];
     fft.realTransform(spectrum, frame);
-    for (let k = 0; k < BINS; k++) magnitudes[k] = Math.hypot(spectrum[2 * k], spectrum[2 * k + 1]) * SCALE;
+    for (let k = 0; k < BINS; k++) {
+      const re = spectrum[2 * k];
+      const im = spectrum[2 * k + 1];
+      // Not Math.hypot, which is several times slower and guards against overflows no spectrum here reaches.
+      magnitudes[k] = Math.sqrt(re * re + im * im) * SCALE;
+    }
     const row = f * MELS;
     for (let m = 0; m < MELS; m++) {
       const { from, weights } = BANDS[m];
