@@ -240,11 +240,36 @@ export function vocalLineFromStem({ signal, sr, notes, mixLoudness }: StemInput)
 
 /**
  * Singers slide and drift: a held E can read as E one time and F the next. Within a phrase, notes
- * whose fine pitches lie within PITCH_MERGE semitones are one sung note; each group gets the median
- * of its fine pitches, corrected by the song's overall tuning, rounded. Repeated notes then stay in
- * one lane and real steps still move.
+ * whose fine pitches lie within PITCH_MERGE semitones of each other are one sung note; each group
+ * gets the median of its fine pitches, corrected by the song's overall tuning, rounded. Repeated
+ * notes then stay in one lane and real steps still move.
+ *
+ * A group never spans more than PITCH_SPAN: in a long phrase the fine pitches of neighbouring notes
+ * (a step sung a little flat, a slide between them) fill the gaps between semitones, and chaining
+ * them would make the whole phrase one pitch. A group that is too wide splits at its widest gap.
  */
 const PITCH_MERGE = 0.5;
+const PITCH_SPAN = 1;
+
+/** Splits ascending values into runs at gaps over PITCH_MERGE, then each run at its widest gaps until it spans at most PITCH_SPAN. */
+function pitchGroups(sorted: number[], fine: (i: number) => number): number[][] {
+  const runs: number[][] = [];
+  for (const i of sorted) {
+    const run = runs[runs.length - 1];
+    if (run && fine(i) - fine(run[run.length - 1]) <= PITCH_MERGE) run.push(i);
+    else runs.push([i]);
+  }
+  const out: number[][] = [];
+  const split = (g: number[]) => {
+    if (g.length < 2 || fine(g[g.length - 1]) - fine(g[0]) <= PITCH_SPAN) return void out.push(g);
+    let at = 1;
+    for (let k = 2; k < g.length; k++) if (fine(g[k]) - fine(g[k - 1]) > fine(g[at]) - fine(g[at - 1])) at = k;
+    split(g.slice(0, at));
+    split(g.slice(at));
+  };
+  runs.forEach(split);
+  return out;
+}
 
 export function stabilizePitches(notes: PitchedNote[]): PitchedNote[] {
   const withFine = notes.filter((n) => n.fine !== undefined);
@@ -265,19 +290,11 @@ export function stabilizePitches(notes: PitchedNote[]): PitchedNote[] {
     while (end < out.length && out[end].t - (out[end - 1].t + out[end - 1].dur) < 0.8) end++;
     const idx = Array.from({ length: end - start }, (_, k) => start + k).filter((i) => out[i].fine !== undefined);
     const sorted = [...idx].sort((a, b) => out[a].fine! - out[b].fine!);
-    let group: number[] = [];
-    const flush = () => {
-      if (!group.length) return;
-      const vals = group.map((i) => out[i].fine!).sort((a, b) => a - b);
+    for (const group of pitchGroups(sorted, (i) => out[i].fine!)) {
+      const vals = group.map((i) => out[i].fine!);
       const midi = Math.round(vals[vals.length >> 1] - tuning);
       for (const i of group) out[i].midi = midi;
-      group = [];
-    };
-    for (const i of sorted) {
-      if (group.length && out[i].fine! - out[group[group.length - 1]].fine! > PITCH_MERGE) flush();
-      group.push(i);
     }
-    flush();
     start = end;
   }
   return out;
@@ -414,6 +431,13 @@ export function leadLineFromStem({ signal, sr, notes, beats, mixLoudness }: Stem
   return out;
 }
 
+/**
+ * How long after a bass attack (s) its transcribed pitch may start. On electric and picked bass the
+ * transcription starts within a few hundredths of a second of the attack; on 808 and sub-bass most
+ * notes start 0.13 to 0.27 s late (measured on separated bass stems).
+ */
+const BASS_LAG = 0.3;
+
 /** Bass line: one note per audible attack in the bass stem, lowest struck pitch, octave-folded. */
 export function bassLineFromStem({ signal, sr, notes, mixLoudness }: StemInput): PitchedNote[] {
   const env = envelope(signal, sr, mixLoudness);
@@ -424,7 +448,11 @@ export function bassLineFromStem({ signal, sr, notes, mixLoudness }: StemInput):
     const h = hits[i];
     const next = hits[i + 1]?.t ?? h.t + 2;
     const struck = low.filter((n) => n.t >= h.t - 0.06 && n.t <= h.t + 0.1);
-    const pool = struck.length ? struck : soundingAt(low, h.t + 0.05);
+    // Sub-bass (808s, synth bass) is recognised late: the transcribed note can start a fifth of a
+    // second after the attack is heard. A note starting that late, before the next attack, is this one.
+    const late = struck.length ? [] : low.filter((n) => n.t > h.t + 0.1 && n.t <= Math.min(h.t + BASS_LAG, next - 0.03));
+    const first = late.length ? Math.min(...late.map((n) => n.t)) : 0;
+    const pool = struck.length ? struck : late.length ? late.filter((n) => n.t - first < 0.05) : soundingAt(low, h.t + 0.05);
     if (!pool.length) continue;
     const lowest = pool.reduce((m, n) => (n.midi < m.midi ? n : m));
     const end = Math.min(next - 0.02, fadeEnd(env, h.t, next, 0.3));

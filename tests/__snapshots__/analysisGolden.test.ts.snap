@@ -2888,7 +2888,7 @@ exports[`the analysis of a synthesized band > is unchanged on the mix alone, wit
     ],
     "source": "local",
     "tempo": 112.35,
-    "version": 5,
+    "version": 6,
     "vocals": [
       {
         "dur": 0.395,
@@ -13850,7 +13850,7 @@ exports[`the analysis of a synthesized band > is unchanged with stems and the be
     ],
     "source": "ml",
     "tempo": 112,
-    "version": 5,
+    "version": 6,
     "vocals": [
       {
         "dur": 0.385,
