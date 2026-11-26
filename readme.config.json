@@ -55,19 +55,9 @@
   },
   "theme": {
     "preset": "ultraviolet",
-    "accent": "#ff4d9d",
+    "accent": "#8b4fc8",
     "overrides": {
-      "dark": {
-        "card": "#160d3d",
-        "raised": "#1a0f4c",
-        "border": "#2b1f66",
-        "text": "#f6f3ff",
-        "muted": "#aba1e6",
-        "subtle": "#3a2c86",
-        "accent": "#ff4d9d",
-        "glow": "#ff7ab8",
-        "accent2": "#5df2d6"
-      }
+      "dark": {}
     },
     "font": "inter",
     "headingFont": "space-grotesk",
@@ -78,28 +68,6 @@
     "surface": true
   },
   "layout": [
-    {
-      "id": "r-hero",
-      "align": "center",
-      "blocks": [
-        {
-          "id": "hero",
-          "type": "project-hero",
-          "options": {
-            "title": "",
-            "align": "center",
-            "version": true,
-            "stats": true,
-            "third": "license",
-            "install": "",
-            "emblem": "music",
-            "emblemStyle": "orbit",
-            "scanline": true,
-            "glow": true
-          }
-        }
-      ]
-    },
     {
       "id": "r-shields",
       "align": "center",
@@ -150,49 +118,36 @@
       ]
     },
     {
-      "id": "r-features",
+      "id": "rhcpa6p67k",
       "align": "center",
       "blocks": [
         {
-          "id": "features",
-          "type": "features",
+          "id": "contributors",
+          "type": "contributors",
           "options": {
-            "label": "what's inside",
-            "columns": "3",
-            "style": "cards",
-            "numbered": false,
-            "items": [
-              {
-                "icon": "music",
-                "title": "Your own music",
-                "text": "Drop in an MP3, WAV, FLAC, OGG or M4A. Every song is analyzed on your machine; nothing is uploaded."
-              },
-              {
-                "icon": "sparkle",
-                "title": "Charts from stems",
-                "text": "Demucs splits the song, Basic Pitch transcribes it: Lead, Bass, Drums and Vocals at four difficulties."
-              },
-              {
-                "icon": "flame",
-                "title": "A 3D festival stage",
-                "text": "A band, a crowd of thousands, beams, screens and pyro that follow the music."
-              },
-              {
-                "icon": "pen",
-                "title": "Track editor",
-                "text": "Change any chart or write one from nothing, record it live and test play it in place."
-              },
-              {
-                "icon": "eye",
-                "title": "Replays and video",
-                "text": "Every run is saved hit for hit, and exports as an MP4 to share."
-              },
-              {
-                "icon": "globe",
-                "title": "Browser and desktop",
-                "text": "Windows, macOS, Linux and the browser, with keyboard, controller or touch."
-              }
-            ]
+            "label": "contributors",
+            "max": 30,
+            "size": "md",
+            "names": true,
+            "shape": "circle",
+            "sort": "contributions"
+          }
+        }
+      ]
+    },
+    {
+      "id": "rf4943th4t",
+      "align": "center",
+      "blocks": [
+        {
+          "id": "changelog",
+          "type": "changelog",
+          "options": {
+            "label": "changelog",
+            "count": 4,
+            "lines": "2",
+            "only": "all",
+            "kinds": true
           }
         }
       ]
@@ -211,38 +166,6 @@
       ]
     },
     {
-      "id": "r-changelog",
-      "align": "center",
-      "blocks": [
-        {
-          "id": "changelog",
-          "type": "changelog",
-          "options": {
-            "label": "changelog",
-            "count": 4,
-            "lines": "2",
-            "only": "all",
-            "kinds": true
-          }
-        }
-      ]
-    },
-    {
-      "id": "r-activity",
-      "align": "center",
-      "blocks": [
-        {
-          "id": "activity",
-          "type": "commit-activity",
-          "options": {
-            "label": "commit activity",
-            "style": "bars",
-            "last": true
-          }
-        }
-      ]
-    },
-    {
       "id": "r-tail",
       "align": "left",
       "blocks": [
@@ -251,22 +174,6 @@
           "type": "markdown",
           "options": {
             "text": "## Releases\n\nEvery push to `main` is checked, and the desktop app is built for Windows, macOS and Linux and published as a **pre-release** (version: the next patch with the run number, such as `0.1.1-42`) for trying the newest work. Only the newest three are kept. Installed apps never update to a pre-release.\n\nA **full release** is started by hand: Actions › **Release** › Run workflow, choosing which part of the version to raise (or an exact version). It checks `main`, commits the version and tags it, builds and signs the app for all three systems, publishes the release with the updater's `latest.json`, and deploys the website to GitHub Pages. The website is only ever deployed from a full release.\n\nThe desktop app looks for a new full release when it starts (Settings › Advanced › Updates; it can be switched off) and shows an **Update** button on the main menu when there is one. Installing downloads the release, checks its signature against the public key in `src-tauri/tauri.conf.json`, installs it and starts again. The matching private key is the repository secret `TAURI_SIGNING_PRIVATE_KEY`; without it a release cannot be built, and if it is lost, installed apps can no longer update themselves, so keep a copy somewhere safe.\n\nThe workflows are in `.github/workflows`: `ci.yml` (checks, also on pull requests), `prerelease.yml` and `release.yml`.\n\n## Contributing\n\nIssues and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) and the [code of conduct](CODE_OF_CONDUCT.md). Security problems go through [private reporting](SECURITY.md).\n\n## Licence\n\nCopyright 2026 DavidNiessen. The source code and the project's own art and audio (stage model, scenery, instruments, animation loops, app icon, menu theme, interface sounds) are licensed under the [Apache License 2.0](LICENSE); see [NOTICE](NOTICE).\n\nThird-party parts keep their own licences:\n\n| Part                                                                                                                                              | Licence                                                                          |\n| ------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |\n| three.js, React, fft.js, music-metadata, ONNX Runtime Web                                                                                         | MIT                                                                              |\n| idb, lucide-react                                                                                                                                 | ISC                                                                              |\n| mediabunny (the replay videos' MP4 writer)                                                                                                        | MPL 2.0                                                                          |\n| Basic Pitch (code and model), Tauri                                                                                                               | Apache-2.0 (Tauri also MIT)                                                      |\n| Archivo typeface (`src/ui/fonts/archivo`)                                                                                                         | SIL Open Font License 1.1                                                        |\n| Band and crowd characters, and the crowd's dance loop: Ultimate Modular Men, Ultimate Modular Women and Universal Animation Library by Quaternius | CC0 1.0 (public domain)                                                          |\n| The crowd in the finale sound: \"Crowd cheering\" by voicebosch, from Pixabay                                                                       | Pixabay Content License (free to use, not to be passed on as a standalone sound) |\n| The applause under it: recordings by thore (public domain) and by Sandermotions (CC0), from Wikimedia Commons                                     | Public domain / CC0 1.0                                                          |\n| Demucs (the code the stem model was exported from)                                                                                                | MIT                                                                              |\n| Beat This (code and model)                                                                                                                        | MIT                                                                              |\n| The Python reference in `ml-service/`: FastAPI, librosa, Demucs and others                                                                        | their own licences; see `ml-service/requirements*.txt`                           |\n\nThe Demucs stem model (`models/htdemucs/`, and the copy the game downloads) is the published `htdemucs` weights in another file format. Its authors released the code under the MIT licence but state that the licence of the weights is not clear, because part of the music they were trained on was only cleared for research; the Apache licence of this repository does not cover them. Songs you import stay on your machine.\n\nThe beat model (`public/models/beat-this/`) is Beat This's published `small0` weights in another file format. Its authors released code and weights under the MIT licence, and note that some of the recordings it was trained on are copyrighted or under limited Creative Commons licences."
-          }
-        }
-      ]
-    },
-    {
-      "id": "r-footer",
-      "align": "center",
-      "blocks": [
-        {
-          "id": "footer",
-          "type": "footer",
-          "options": {
-            "message": "rebuilt every night by readme studio",
-            "stamp": true,
-            "barcode": true,
-            "waves": true
           }
         }
       ]
