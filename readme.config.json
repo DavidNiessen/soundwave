@@ -180,7 +180,7 @@
     }
   ],
   "output": {
-    "branch": "output",
+    "branch": "readme-studio",
     "modes": [
       "dark",
       "light"
