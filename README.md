@@ -6,15 +6,11 @@
 -->
 
 <p align="center">
-<a href="https://soundwave.niessen.dev"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/hero-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/hero-light.svg"><img alt="Soundwave — A rhythm game for your own music" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/hero-dark.svg" width="100%"></picture></a>
-</p>
-
-<p align="center">
 <a href="https://github.com/DavidNiessen/soundwave/releases/tag/v1.5.1"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-version-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-version-light.svg"><img alt="version: v1.5.1" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-version-dark.svg" height="28"></picture></a>
-<a href="https://github.com/DavidNiessen/soundwave/actions/runs/45820363974"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-ci-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-ci-light.svg"><img alt="Pre-release: running" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-ci-dark.svg" height="28"></picture></a>
+<a href="https://github.com/DavidNiessen/soundwave/actions/runs/45859712416"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-ci-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-ci-light.svg"><img alt="Pre-release: running" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-ci-dark.svg" height="28"></picture></a>
 <a href="https://github.com/DavidNiessen/soundwave/blob/main/LICENSE"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-license-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-license-light.svg"><img alt="license: Apache-2.0" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-license-dark.svg" height="28"></picture></a>
 <a href="https://github.com/DavidNiessen/soundwave/stargazers"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-stars-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-stars-light.svg"><img alt="stars: 3" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-stars-dark.svg" height="28"></picture></a>
-<a href="https://github.com/DavidNiessen/soundwave/commits/main"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-commit-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-commit-light.svg"><img alt="last commit: 1 min ago" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-commit-dark.svg" height="28"></picture></a>
+<a href="https://github.com/DavidNiessen/soundwave/commits/main"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-commit-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-commit-light.svg"><img alt="last commit: just now" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/shields-commit-dark.svg" height="28"></picture></a>
 </p>
 
 <div align="center">
@@ -35,7 +31,11 @@ A rhythm game for your own music. Drop in a song (MP3, WAV, FLAC, OGG, M4A). The
 | Expert     | 5     | literal transcription, three-note chords |
 
 <p align="center">
-<a href="https://github.com/DavidNiessen/soundwave"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/features-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/features-light.svg"><img alt="what&#39;s inside: Your own music, Charts from stems, A 3D festival stage, Track editor, Replays and video, Browser and desktop" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/features-dark.svg" width="100%"></picture></a>
+<a href="https://github.com/DavidNiessen/soundwave/graphs/contributors"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/contributors-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/contributors-light.svg"><img alt="6 contributors to DavidNiessen/soundwave" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/contributors-dark.svg" width="100%"></picture></a>
+</p>
+
+<p align="center">
+<a href="https://github.com/DavidNiessen/soundwave/releases"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/changelog-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/changelog-light.svg"><img alt="Soundwave changelog: v1.5.1, v1.5.0, v1.4.0, v1.3.3" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/changelog-dark.svg" width="100%"></picture></a>
 </p>
 
 ## Playing
@@ -68,14 +68,6 @@ pnpm check          # types, lint (oxlint), formatting (Prettier) and tests
 Open http://localhost:5173 and add your own songs. [CONTRIBUTING.md](CONTRIBUTING.md) explains the checks, the code style and how to send a change.
 
 Building the desktop app, the production web build and the tests are in [docs/development.md](docs/development.md).
-
-<p align="center">
-<a href="https://github.com/DavidNiessen/soundwave/releases"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/changelog-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/changelog-light.svg"><img alt="Soundwave changelog: v1.5.1, v1.5.0, v1.4.0, v1.3.3" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/changelog-dark.svg" width="100%"></picture></a>
-</p>
-
-<p align="center">
-<a href="https://github.com/DavidNiessen/soundwave/commits/main"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/activity-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/activity-light.svg"><img alt="429 commits to DavidNiessen/soundwave in the last year" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/activity-dark.svg" width="100%"></picture></a>
-</p>
 
 ## Releases
 
@@ -114,7 +106,3 @@ Third-party parts keep their own licences:
 The Demucs stem model (`models/htdemucs/`, and the copy the game downloads) is the published `htdemucs` weights in another file format. Its authors released the code under the MIT licence but state that the licence of the weights is not clear, because part of the music they were trained on was only cleared for research; the Apache licence of this repository does not cover them. Songs you import stay on your machine.
 
 The beat model (`public/models/beat-this/`) is Beat This's published `small0` weights in another file format. Its authors released code and weights under the MIT licence, and note that some of the recordings it was trained on are copyrighted or under limited Creative Commons licences.
-
-<p align="center">
-<picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/footer-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/footer-light.svg"><img alt="footer" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/output/footer-dark.svg" width="100%"></picture>
-</p>
