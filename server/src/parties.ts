@@ -618,6 +618,15 @@ export class Parties {
     this.share(party);
   }
 
+  /** A player renamed themselves: their party sees the new name at once. */
+  rename(player: string, name: string) {
+    const party = this.partyOf.get(player);
+    const m = party?.member(player);
+    if (!party || !m || m.name === name) return;
+    m.name = name;
+    this.share(party);
+  }
+
   /** A player changed their avatar: the party sees it at once. */
   setAvatar(player: string, avatar: Avatar | undefined) {
     const party = this.partyOf.get(player);

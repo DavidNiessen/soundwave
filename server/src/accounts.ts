@@ -67,6 +67,12 @@ export class Accounts {
 
   /** Makes an account for an identity, if the server's mode lets this request make one, and signs it in. */
   async signUp(req: Partial<SignUp>): Promise<Session> {
+    // The body is the client's: anything but text where text belongs is refused, not looked up.
+    if (
+      (req.invite !== undefined && typeof req.invite !== 'string') ||
+      (req.serverPassword !== undefined && typeof req.serverPassword !== 'string')
+    )
+      throw new Refusal(400, 'That request is broken. Update the game.');
     const name = cleanName(req.name);
     if (!name) throw new Refusal(400, NAME_RULE);
     if (this.store.userByName(name)) throw new Refusal(409, 'That name is taken on this server. Pick another one.');
@@ -202,7 +208,13 @@ export class Accounts {
     if (this.config.mode !== 'invite' && !mod) throw new Refusal(403, 'Only admins and moderators can make invites here.');
     const code = randomToken(12);
     const n = !mod ? 1 : uses === null ? null : typeof uses === 'number' && Number.isInteger(uses) && uses > 0 ? Math.min(uses, 10_000) : 1;
-    const h = !mod ? 24 * 7 : hours === null ? null : typeof hours === 'number' && hours > 0 ? Math.min(hours, 24 * 365) : 24 * 7;
+    const h = !mod
+      ? 24 * 7
+      : hours === null
+        ? null
+        : typeof hours === 'number' && Number.isFinite(hours) && hours > 0
+          ? Math.min(hours, 24 * 365)
+          : 24 * 7;
     const expires = h === null ? null : this.now() + h * 3_600_000;
     this.store.addInvite({ code, by: by.id, uses: n, expires, role: 'player', created: this.now() });
     return { code, uses: n, expires, link: inviteLink(this.config.publicUrl, code) };
@@ -232,7 +244,8 @@ export class Accounts {
 
   ban(actor: UserRow, name: unknown, hours: unknown, reason: unknown): UserRow {
     const user = this.target(actor, name);
-    const until = typeof hours === 'number' && hours > 0 ? this.now() + hours * 3_600_000 : FOREVER;
+    const until =
+      typeof hours === 'number' && Number.isFinite(hours) && hours > 0 ? Math.min(FOREVER, this.now() + hours * 3_600_000) : FOREVER;
     const why = this.reasonOf(reason);
     this.store.setBan(user.id, until, why || null);
     this.store.dropRefreshes(user.id);

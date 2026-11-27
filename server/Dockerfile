@@ -1,11 +1,13 @@
 # A Soundwave server. Build it from the repository's root:
 #   docker build -f server/Dockerfile -t soundwave-server .
 #   docker run -p 7420:7420 -v soundwave-data:/data soundwave-server
-FROM node:24-slim
+# A fixed Node release, so the same image is built every time; raised by hand (24.7 or newer).
+FROM node:24.22.2-slim
 
 WORKDIR /app
-COPY server/package.json server/
-RUN cd server && npm install --omit=dev --no-audit --no-fund
+# The server's own lockfile, installed as it is (npm ci): the same ws every build.
+COPY server/package.json server/package-lock.json server/
+RUN cd server && npm ci --omit=dev --no-audit --no-fund
 COPY src/net/protocol.ts src/net/similarity.ts src/net/
 COPY src/chart/types.ts src/chart/types.ts
 COPY src/game/GameSession.ts src/game/judge.ts src/game/scoring.ts src/game/replay.ts src/game/

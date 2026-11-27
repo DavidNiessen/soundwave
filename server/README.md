@@ -16,7 +16,9 @@ by the project: every server is someone's own. The design is in
 backups and troubleshooting). This file is the reference.
 
 It is TypeScript run directly by Node (24.7 or newer), with one dependency (`ws`). Everything it
-keeps is in one SQLite database in its data folder.
+keeps is in one SQLite database in its data folder. The Docker image is built on a fixed Node release
+and installs `ws` from the server's own lockfile (`server/package-lock.json`, with `npm ci`): after
+changing `server/package.json`, refresh it with `npm install --package-lock-only` in `server/`.
 
 ## Quick start
 
@@ -100,8 +102,8 @@ per player and two servers cannot tell they see the same player.
   An admin's own link, when there are several admins, comes from the server's command line (see
   [Command line](#command-line)), never from another admin.
 
-Players rename themselves on the Online tab, under their account (`POST /me/name`); the moderation
-log keeps the old name.
+Players rename themselves on the Online tab, under their account (`POST /me/name`, five times a
+minute at most); their party sees the new name at once, and the moderation log keeps the old one.
 
 ## Command line
 

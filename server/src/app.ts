@@ -78,6 +78,12 @@ class Binary {
   }
 }
 
+/** A JSON reviver that refuses numbers too big to be one (1e400 parses as Infinity). */
+function finite(_key: string, value: unknown) {
+  if (typeof value === 'number' && !Number.isFinite(value)) throw new Refusal(400, 'That request has a number out of range.');
+  return value;
+}
+
 /**
  * A request's body, refused past `limit`. With its length known up front (`size`) it is read
  * straight into one buffer of that size, so a big upload is held once, not twice.
@@ -145,6 +151,8 @@ export async function startServer(config: Config, store: Store, log: (line: stri
   );
   /** What each player online says they are doing. */
   const activity = new Map<string, string>();
+  /** Each player online, as their connection knows them (a rename changes it). */
+  const live = new Map<string, UserRow>();
   const authLimit = new RateLimit(10, 10);
   // A challenge costs the server nothing to hand out, and every sign-in starts with one: a party of
   // players behind one home address all signing in at once must not run out.
@@ -155,6 +163,9 @@ export async function startServer(config: Config, store: Store, log: (line: stri
   const keyLimit = new RateLimit(30, 30);
   const refreshLimit = new RateLimit(60, 60);
   const uploads = new Uploads(UPLOADS_AT_ONCE, UPLOADS_EACH, UPLOADS_WAITING);
+  // Each tells everyone online (a rename) or the moderators (a report): a few a minute is plenty.
+  const renameLimit = new RateLimit(5, 5);
+  const reportLimit = new RateLimit(10, 10);
   // A whole set's songs at once, and a set's worth an hour after that.
   const partySongLimit = new RateLimit(SET_LIMIT, SET_LIMIT / 60);
 
@@ -193,6 +204,8 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     if (!ws) return;
     send(user, { type: 'bye', reason });
     sockets.delete(user);
+    activity.delete(user);
+    live.delete(user);
     parties.leave(user);
     ws.close(4000, 'bye');
     notify(['users', 'presence']);
@@ -266,7 +279,14 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       return session;
     },
     'POST /me/name': (req, body) => {
-      const you = accounts.rename(me(req), body.name);
+      const u = me(req);
+      if (!renameLimit.take(u.id)) throw new Refusal(429, 'Too many new names at once. Wait a minute.');
+      const you = accounts.rename(u, body.name);
+      // Their connection and their party take the new name at once, not only on their next sign-in.
+      const online = live.get(u.id);
+      if (online) live.set(u.id, { ...online, name: you.name });
+      parties.rename(u.id, you.name);
+      send(u.id, { type: 'you', you });
       notify(['users', 'presence', 'boards', 'replays', 'log']);
       return you;
     },
@@ -438,7 +458,9 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       'POST',
       /^\/songs\/([0-9a-f]{64})\/report$/,
       (req, body, _ip, [id]) => {
-        songs.report(me(req), id, body.reason);
+        const u = me(req);
+        if (!reportLimit.take(u.id)) throw new Refusal(429, 'Too many reports at once. Wait a minute.');
+        songs.report(u, id, body.reason);
         notify(['reports']);
         return { ok: true };
       },
@@ -505,6 +527,8 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     res.setHeader('Access-Control-Expose-Headers', 'X-File-Size, X-Soundwave-Quality');
     // The game's page is cross-origin isolated (for analysis threads): answers must say they may be read there.
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    // Every answer is what its type says: a browser never guesses another (a song file as a page).
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     if (req.method === 'OPTIONS') return void res.writeHead(204).end();
     const path = (req.url ?? '/').split('?')[0].replace(/\/+$/, '') || '/';
     // An invite link's page: plain HTML, with nothing on it that runs.
@@ -560,7 +584,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
         read = true;
         if (raw.length && !upload) {
           try {
-            const parsed: unknown = JSON.parse(raw.toString('utf8'));
+            const parsed: unknown = JSON.parse(raw.toString('utf8'), finite);
             if (typeof parsed === 'object' && parsed && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
           } catch {
             throw new Refusal(400, 'That request is not JSON.');
@@ -665,12 +689,14 @@ export async function startServer(config: Config, store: Store, log: (line: stri
           before.close(4004, 'replaced');
         }
         sockets.set(user.id, ws);
+        live.set(user.id, user);
         notify(['users', 'presence']);
         say({ type: 'welcome', you: { id: user.id, name: user.name, role: user.role }, server: config.name, protocol: PROTOCOL_VERSION });
         parties.reconnected(user.id);
         return;
       }
       if (msg.type === 'hello') return;
+      if (sockets.get(user.id) === ws) user = live.get(user.id) ?? user;
       if (msg.type === 'status') {
         activity.set(user.id, msg.activity);
         return void notify(['presence']);
@@ -684,6 +710,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       if (user && sockets.get(user.id) === ws) {
         sockets.delete(user.id);
         activity.delete(user.id);
+        live.delete(user.id);
         parties.disconnected(user.id);
         notify(['users', 'presence']);
       }

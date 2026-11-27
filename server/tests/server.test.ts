@@ -154,6 +154,23 @@ describe('accounts', () => {
     expect((await api('POST', '/auth/key', { publicKey: 'short', nonce, signature: 'short' })).status).toBe(400);
   });
 
+  it('answer a request with fields of the wrong kind with a 400, and say what every answer is', async () => {
+    await start();
+    const owner = await signUp('Owner', { invite: server.accounts.ownerCode });
+    await signUp('Ana');
+    const odd = await api('POST', '/auth/signup', { name: 'Odd', invite: { code: 1 }, ...(await proof(server.url, newKey())) });
+    expect(odd.status).toBe(400);
+    // 1e400 is Infinity once parsed: a ban "for 1e400 hours" is refused, not stored.
+    const res = await fetch(server.url + '/mod/ban', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${owner.access}` },
+      body: '{"name":"Ana","hours":1e400}',
+    });
+    expect(res.status).toBe(400);
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(store.userByName('Ana')!.banned_until).toBeNull();
+  });
+
   it('let a key join once: a second account for it is refused', async () => {
     await start();
     await signUp('Robin');
@@ -459,6 +476,26 @@ describe('parties over the network', () => {
     expect(seen.party!.members.find((x) => x.name === 'Guest')!.avatar).toEqual(theirs);
     const exp = await exported(guestS.access);
     expect(JSON.parse(exp['avatar.json'])).toEqual(theirs);
+  });
+
+  it('show a player’s new name to their party at once, and in what they do there', async () => {
+    const hostS = await signUp('Host');
+    const guestS = await signUp('Guest');
+    const host = await connect(hostS);
+    const guest = await connect(guestS);
+    host.send({ type: 'party-create' });
+    const made = await host.next('party', (m) => !!m.party);
+    guest.send({ type: 'party-join', code: made.party!.code });
+    await host.next('party', (m) => m.party?.members.length === 2);
+    const renamed = host.next('party', (m) => !!m.party?.members.some((x) => x.name === 'Guesty'));
+    const told = guest.next('you');
+    expect((await api('POST', '/me/name', { name: 'Guesty' }, guestS.access)).status).toBe(200);
+    await renamed;
+    expect((await told).you.name).toBe('Guesty');
+    // A rename a few times over is fine; a stream of them is not.
+    const statuses = [];
+    for (let i = 0; i < 6; i++) statuses.push((await api('POST', '/me/name', { name: `Guest ${i}` }, guestS.access)).status);
+    expect(statuses.at(-1)).toBe(429);
   });
 
   it('end for everyone when the host leaves, and refuse what only the host may do', async () => {
