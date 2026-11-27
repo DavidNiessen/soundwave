@@ -21,6 +21,32 @@ const PUBLIC_KEY = /^[A-Za-z0-9_-]{43}$/;
 /** An Ed25519 signature in base64url: 64 bytes. */
 const SIGNATURE = /^[A-Za-z0-9_-]{86}$/;
 
+/**
+ * The Ed25519 points of small order, as their y coordinate is encoded (the top bit, x's sign, left
+ * out): 0, 1, the two of order 8, and p − 1, p and p + 1 (the last two not canonical, standing for
+ * 0 and 1). A key that is one of them makes any signature of the right shape check out (all zero
+ * bytes, say), whatever the message: such a key proves nothing, so none is taken.
+ */
+const SMALL_ORDER = [
+  '0000000000000000000000000000000000000000000000000000000000000000',
+  '0100000000000000000000000000000000000000000000000000000000000000',
+  '26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05',
+  'c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a',
+  'ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f',
+  'edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f',
+  'eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f',
+];
+
+/** Whether a raw public key is a point of small order, or y is not below p (not canonical). */
+export function weakKey(raw: Buffer): boolean {
+  if (raw.length !== 32) return true;
+  const y = Buffer.from(raw);
+  y[31] &= 0x7f;
+  if (SMALL_ORDER.includes(y.toString('hex'))) return true;
+  // y ≥ p = 2^255 − 19: the top byte 0x7f, every byte between 0xff, the lowest 0xed or more.
+  return y[31] === 0x7f && y.subarray(1, 31).every((b) => b === 0xff) && y[0] >= 0xed;
+}
+
 /** A challenge: its expiry (ms, 8 bytes), 16 random bytes, and the first 16 bytes of their HMAC. */
 const NONCE_BYTES = 8 + 16 + 16;
 
@@ -73,7 +99,8 @@ export class Identities {
       typeof p.publicKey !== 'string' ||
       !PUBLIC_KEY.test(p.publicKey) ||
       typeof p.signature !== 'string' ||
-      !SIGNATURE.test(p.signature)
+      !SIGNATURE.test(p.signature) ||
+      weakKey(Buffer.from(p.publicKey, 'base64url'))
     )
       throw new Refusal(400, 'That sign-in is broken. Update the game.');
     this.sweep();

@@ -184,6 +184,10 @@ always keeps at least one.
 Who can join depends on the server's mode (`SOUNDWAVE_MODE`). Players never pick a password of
 their own: their game's identity signs them in.
 
+Give everyone one address for the server (its domain, the one in `SOUNDWAVE_PUBLIC_URL`): the game
+makes its key for a server from the address it connects to, so reaching the same server by another
+address (its IP instead of its name) makes a new account there.
+
 | Mode       | Who can join                                                           |
 | ---------- | ---------------------------------------------------------------------- |
 | `invite`   | Only people with an invite link (the default)                          |

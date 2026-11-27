@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { startServer, type RunningServer } from '../src/app.ts';
 import { DEFAULTS, type Config } from '../src/config.ts';
 import { Store } from '../src/db.ts';
-import { Identities } from '../src/identity.ts';
+import { Identities, weakKey } from '../src/identity.ts';
 import { addressKey, RateLimit } from '../src/limits.ts';
 import { newKey, signed } from './identity.ts';
 
@@ -77,5 +77,36 @@ describe('challenges', () => {
     const late = signed(ids.serverId, ids.challenge(), key);
     now += 2 * 60_000 + 1;
     expect(() => ids.check(late)).toThrow(/too long/);
+  });
+});
+
+describe('identity keys', () => {
+  it('refuse a key of small order, which would make any signature check out', async () => {
+    const s = await start();
+    const { nonce } = (await (await fetch(`${s.url}/auth/challenge`, { method: 'POST', body: '{}' })).json()) as { nonce: string };
+    const zero = (n: number) => Buffer.alloc(n).toString('base64url');
+    const res = await fetch(`${s.url}/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Nobody', publicKey: zero(32), nonce, signature: zero(64) }),
+    });
+    expect(res.status).toBe(400);
+    expect(store!.countUsers()).toBe(0);
+  });
+
+  it('know every small-order encoding, canonical or not, and pass a real key', () => {
+    const hex = (h: string) => Buffer.from(h, 'hex');
+    const weak = [
+      '0000000000000000000000000000000000000000000000000000000000000000',
+      '0000000000000000000000000000000000000000000000000000000000000080',
+      '0100000000000000000000000000000000000000000000000000000000000080',
+      '26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85',
+      'c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa',
+      'ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+      'edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f',
+      'f3ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f',
+    ];
+    expect(weak.filter((w) => !weakKey(hex(w)))).toEqual([]);
+    expect(weakKey(Buffer.from(newKey().publicKey, 'base64url'))).toBe(false);
   });
 });
