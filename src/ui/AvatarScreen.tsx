@@ -182,10 +182,18 @@ export function LookEditor({
       </div>
 
       <div className="look-group">
-        <span className="label">
-          Colour
-          <Hint {...keysOf('look.slot')} {...hints} />
-        </span>
+        {/* Back to the band member's own colours sits with the colours, so the row of actions under them fits. */}
+        <div className="look-group-head">
+          <span className="label">
+            Colour
+            <Hint {...keysOf('look.slot')} {...hints} />
+          </span>
+          <button type="button" className="btn small quiet" data-action="look-own" disabled={!look} onClick={() => setLook(null)}>
+            <RotateCcw strokeWidth={ICON_STROKE} aria-hidden />
+            Their own look
+            <Hint {...keysOf('look.own')} {...hints} />
+          </button>
+        </div>
         <div className="look-slots" role="tablist" aria-label="What to colour">
           {SLOTS.map((x) => (
             <button
@@ -240,11 +248,6 @@ export function LookEditor({
           <Undo2 strokeWidth={ICON_STROKE} aria-hidden />
           Undo changes
           <Hint {...keysOf('look.undo')} {...hints} />
-        </button>
-        <button type="button" className="btn quiet" data-action="look-own" disabled={!look} onClick={() => setLook(null)}>
-          <RotateCcw strokeWidth={ICON_STROKE} aria-hidden />
-          Their own look
-          <Hint {...keysOf('look.own')} {...hints} />
         </button>
       </div>
       {note && (
