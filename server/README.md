@@ -60,7 +60,7 @@ after a change.
 | `trustProxy`     | `SOUNDWAVE_TRUST_PROXY`      | `false`             | Behind a proxy: take players' addresses (for rate limits) from the proxy. See below.    |
 | `songSharing`    | `SOUNDWAVE_SONG_SHARING`     | `off`               | `songs`, `charts` or `off`: see [Shared songs](#shared-songs).                          |
 | `songMaxMb`      | `SOUNDWAVE_SONG_MAX_MB`      | `100`               | The largest song file, MB.                                                              |
-| `quotaMb`        | `SOUNDWAVE_QUOTA_MB`         | `2000`              | What each player may share in all, MB.                                                  |
+| `quotaMb`        | `SOUNDWAVE_QUOTA_MB`         | `2000`              | What each player may share in all, MB (all the server keeps of their songs).            |
 | `publicCovers`   | `SOUNDWAVE_PUBLIC_COVERS`    | `false`             | Serve song covers without signing in (for Discord statuses).                            |
 | `partySongs`     | `SOUNDWAVE_PARTY_SONGS`      | `true`              | Pass a party's songs on to its players: see [A party's songs](#a-partys-songs).         |
 | `partyCacheMb`   | `SOUNDWAVE_PARTY_CACHE_MB`   | `4000`              | The most the party song cache holds, MB.                                                |
@@ -157,7 +157,9 @@ Off by default. Sharing music with others can infringe copyright, and you answer
 server hands out, so turning it on is your decision: set `songSharing` to `songs` for whole songs,
 audio included, or `charts` to keep everything but the audio (a player then adds their own copy of
 the very same recording, which the game checks). `songMaxMb` limits one song, `quotaMb` what each
-player shares in all. Every song records who shared it and when; players can report a song, and the
+player shares in all: everything the server keeps of their songs counts, the audio, its smaller
+copies, the charts and the covers. A cover over 4 MB is left out, and a song whose analysis comes to
+more than 32 MB is refused (a real one is a few MB). Every song records who shared it and when; players can report a song, and the
 uploader, you or a moderator can remove it everywhere at once.
 
 With `publicCovers` on, song covers are served without signing in, so a player's Discord status can
@@ -190,8 +192,9 @@ A player can only play a song they have. So, on by default, a party's songs are 
 server: when a player in a party lacks one of the set's songs, the host's game sends it here (unless
 the host turned that off in Settings → Online), and the game of every player without it downloads it
 by itself. This is separate from shared songs: nothing lists these songs, and only the players of a
-party with the song in its set can send or get it. The server checks that the file holds the song
-its id names.
+party with the song in its set can get it, and only whoever brought it can send it (the host, or
+with everyone picking, the player who picked it), at most a set's worth (20 new songs) at once and
+20 more an hour. The server checks that the file holds the song its id names.
 
 They are a cache, kept in `party-songs/` in the data folder: a song goes `partyCacheDays` after it
 was last used, and the least recently used go first once the cache passes `partyCacheMb`. Turn it off

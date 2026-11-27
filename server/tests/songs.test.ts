@@ -134,6 +134,26 @@ describe('shared songs', () => {
     expect((await api('POST', '/songs', (await songFile(7)).bytes, bo.access)).status).toBe(413);
   });
 
+  it('count what a song takes on disk against the quota, its charts too, one upload after another', async () => {
+    // Charts only, the audio thrown away: its analysis still counts.
+    await start({ songSharing: 'charts', quotaMb: 0.01 });
+    const ana = await signUp('Ana');
+    const big = async (seed: number, tempo: number[]) => {
+      const audio = new Uint8Array(3000).map((_, i) => (i * seed) % 251);
+      const file = await writeSoundwave({
+        meta: { title: `Song ${seed}`, artist: 'Band', duration: 30 + seed * 20, fileName: 'song.mp3' },
+        analysis: { version: 1, data: { tempo } },
+        audio: new Blob([audio], { type: 'audio/mpeg' }),
+      });
+      return new Uint8Array(await file.arrayBuffer());
+    };
+    const beats = Array.from({ length: 1000 }, (_, i) => i * 1.5);
+    // Each fits alone (some 7 KB of charts in 10 KB), not both: sent at once, only one is taken.
+    const both = await Promise.all([1, 2].map(async (n) => (await api('POST', '/songs', await big(n, beats), ana.access)).status));
+    expect(both.sort()).toEqual([200, 413]);
+    expect((await api<SharedSong[]>('GET', '/songs', undefined, ana.access)).body).toHaveLength(1);
+  });
+
   it('refuse an upload from its headers alone, before its body is read', async () => {
     await start({ songSharing: 'songs', songMaxMb: 10 });
     const ana = await signUp('Ana');
@@ -206,8 +226,9 @@ describe('shared songs', () => {
     host.send({ type: 'set', songs: [{ id: f.id, title: 'Song 9', artist: 'Band', duration: 30 }] });
     await wait(guest, 'party', (m) => m.type === 'party' && m.party?.set.length === 1);
 
-    // Only a song in the party's set, and only the song its id names.
+    // Only a song in the party's set, only the song its id names, and only from whoever brought it.
     expect((await api('PUT', `/party/songs/${other.id}`, other.bytes, sessions[0].access)).status).toBe(403);
+    expect((await api('PUT', `/party/songs/${f.id}`, f.bytes, sessions[1].access)).status).toBe(403);
     expect((await api('PUT', `/party/songs/${f.id}`, other.bytes, sessions[0].access)).status).toBe(400);
     expect((await api('PUT', `/party/songs/${f.id}`, f.bytes, sessions[0].access)).status).toBe(200);
     // The party hears that the server has it.

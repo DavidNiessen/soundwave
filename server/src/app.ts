@@ -20,7 +20,7 @@ import { Scores } from './scores.ts';
 import { joinPage } from './joinPage.ts';
 import { Songs } from './songs.ts';
 import { PartySongs } from './partySongs.ts';
-import { clientMessage } from './validate.ts';
+import { clientMessage, SET_LIMIT } from './validate.ts';
 import { addressKey, RateLimit, Uploads } from './limits.ts';
 
 /** The most bytes an HTTP request's body may have (everything it carries is small). */
@@ -143,6 +143,8 @@ export async function startServer(config: Config, store: Store, log: (line: stri
   const keyLimit = new RateLimit(30, 30);
   const refreshLimit = new RateLimit(60, 60);
   const uploads = new Uploads(UPLOADS_AT_ONCE, UPLOADS_EACH, UPLOADS_WAITING);
+  // A whole set's songs at once, and a set's worth an hour after that.
+  const partySongLimit = new RateLimit(SET_LIMIT, SET_LIMIT / 60);
 
   /** Closes a player's connection, telling them why. */
   /*
@@ -377,6 +379,10 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       async (req, _b, _ip, [id], raw) => {
         const u = me(req);
         if (!parties.inSet(u.id, id)) throw new Refusal(403, 'Only a song in your party’s set can be sent.');
+        if (!parties.maySend(u.id, id)) throw new Refusal(403, 'Only whoever brought a song to the party sends it.');
+        // A song new to the cache pushes older ones out of it, so each player may bring only so many.
+        if (!partySongs.has(id) && !partySongLimit.take(u.id))
+          throw new Refusal(429, 'You sent the server many songs lately. Wait a while before you send more.');
         await partySongs.put(id, raw);
         parties.songCached(id);
         return { ok: true };

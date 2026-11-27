@@ -153,6 +153,17 @@ export class Parties {
     return !!this.partyOf.get(player)?.state.set.some((s) => s.id === songId);
   }
 
+  /**
+   * Whether a player may send a song of their party's set to the server: whoever brought it, the
+   * host, or with everyone picking, a player who picked it. The others only fetch it.
+   */
+  maySend(player: string, songId: string): boolean {
+    const party = this.partyOf.get(player);
+    if (!party?.state.set.some((s) => s.id === songId)) return false;
+    if (party.state.host === player) return true;
+    return !!party.state.everyonePicks && !!party.member(player)?.picks?.some((p) => p.id === songId);
+  }
+
   /** The server now holds a song: every party with it in its set hears so, and its players without it download it. */
   songCached(songId: string) {
     for (const party of this.parties.values()) {
