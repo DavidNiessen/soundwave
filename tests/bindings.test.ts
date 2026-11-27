@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { bound, chordOf, clashes, commandFor, keysOf, normalizeBindings, padCommandFor, setBindings } from '../src/input/bindings';
+import {
+  bound,
+  chordOf,
+  clashes,
+  COMMANDS,
+  commandFor,
+  keysOf,
+  normalizeBindings,
+  padCommandFor,
+  setBindings,
+} from '../src/input/bindings';
 
 const key = (code: string, mods: Partial<Record<'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey', boolean>> = {}) => ({
   code,
@@ -55,6 +65,25 @@ describe('shortcut bindings', () => {
     // The Stage tab's own buttons do not sit on the lists' ones.
     expect(clashes('stages.new', 'pad')).toEqual([]);
     expect(clashes('stages.random', 'pad')).toEqual([]);
+  });
+
+  it('ships no shortcut that Settings shows as clashing', () => {
+    const found = COMMANDS.flatMap((c) =>
+      (['key', 'pad', 'mouse'] as const).flatMap((kind) => clashes(c.id, kind).map((o) => `${c.id} ${kind} ${o.id}`)),
+    );
+    expect(found).toEqual([]);
+  });
+
+  it('counts the main menu’s own shortcuts as working beside the tab open', () => {
+    // The Stage tab keeps T for the Online tab, and the Online tab keeps I for Get the app.
+    setBindings({ 'stages.drop': { key: 'KeyT' }, 'party.invite': { key: 'KeyI' } });
+    expect(clashes('stages.drop', 'key').map((c) => c.id)).toEqual(['home.together']);
+    expect(clashes('party.invite', 'key').map((c) => c.id)).toEqual(['home.install']);
+    // The same key on two screens of a party is not a clash: C starts a party on the Online tab, and calibrates in the lobby.
+    expect(clashes('party.calibrate', 'key')).toEqual([]);
+    // Between songs, the lobby's part and difficulty still work.
+    setBindings({ 'party.next': { pad: 'b3' } });
+    expect(clashes('party.next', 'pad').map((c) => c.id)).toEqual(['party.part']);
   });
 
   it('carries a change made to a list shortcut before they were one over to the shared one, the library’s first', () => {
