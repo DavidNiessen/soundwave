@@ -233,12 +233,34 @@ export function PartyScreen(props: Props) {
 
 function Waiting({ s, onBack }: { s: OnlineState; onBack(): void }) {
   useActions([backAction(onBack)]);
+  const [asking, setAsking] = useState(false);
+  const name = s.info?.name ?? s.server?.replace(/^https?:\/\//, '');
   return (
     <div className="party-center">
       <p className="hint">Connecting to {s.server?.replace(/^https?:\/\//, '')}…</p>
-      <button type="button" className="btn" onClick={() => online.forget()}>
+      <button type="button" className="btn" onClick={() => setAsking(true)}>
         Use another server
       </button>
+      {/* Another server means forgetting this one, and a stray press must not do that. */}
+      {asking && (
+        <Dialog title="Use another server" variant="card" closeLabel="Keep waiting" onClose={() => setAsking(false)}>
+          {(close) => (
+            <div className="pause-card">
+              <h2 className="display">Forget {name}?</h2>
+              <p className="hint">
+                The game stops connecting to it and no longer knows it. Your account and scores stay on it; to come back you need its
+                address or an invite again.
+              </p>
+              <button type="button" className="btn wide" data-autofocus data-sfx="back" onClick={close}>
+                Keep waiting
+              </button>
+              <button type="button" className="btn primary wide danger" onClick={() => online.forget()}>
+                Forget it
+              </button>
+            </div>
+          )}
+        </Dialog>
+      )}
     </div>
   );
 }
@@ -613,9 +635,11 @@ function PartyCode({
         <button
           type="button"
           className={`btn small party-discord ${settings.discordJoin ? 'is-on' : ''}`}
+          data-action="party-discord"
           aria-pressed={settings.discordJoin}
           onClick={onDiscord}
         >
+          <Hint {...keysOf('party.discord')} {...hints} />
           <MessageCircle strokeWidth={ICON_STROKE} aria-hidden />
           {settings.discordJoin ? 'On Discord: friends can join' : 'Let Discord friends join'}
         </button>
@@ -631,6 +655,8 @@ function PartyCode({
 function Players({ party, me, host, showReady }: { party: PartyState; me: Member; host: boolean; showReady: boolean }) {
   const ready = party.members.filter((m) => m.ready).length;
   const n = party.members.length;
+  /** The player the host asked to remove, waiting for them to say yes. */
+  const [removing, setRemoving] = useState<Member | null>(null);
   return (
     <section className="party-players" aria-label="Players">
       <h2 className="label">
@@ -651,7 +677,7 @@ function Players({ party, me, host, showReady }: { party: PartyState; me: Member
             me={m.id === me.id}
             setSize={party.set.length}
             showReady={showReady}
-            onRemove={host && m.id !== me.id ? () => online.kick(m.id) : undefined}
+            onRemove={host && m.id !== me.id ? () => setRemoving(m) : undefined}
           />
         ))}
         {n < PARTY_MAX && (
@@ -668,6 +694,29 @@ function Players({ party, me, host, showReady }: { party: PartyState; me: Member
           </li>
         )}
       </ul>
+      {removing && (
+        <Dialog title="Remove a player" variant="card" closeLabel="Keep them" onClose={() => setRemoving(null)}>
+          {(close) => (
+            <div className="pause-card">
+              <h2 className="display">Remove {removing.name}?</h2>
+              <p className="hint">They leave the party at once. They can join again with its code.</p>
+              <button type="button" className="btn wide" data-autofocus data-sfx="back" onClick={close}>
+                Keep them
+              </button>
+              <button
+                type="button"
+                className="btn primary wide danger"
+                onClick={() => {
+                  online.kick(removing.id);
+                  close();
+                }}
+              >
+                Remove
+              </button>
+            </div>
+          )}
+        </Dialog>
+      )}
     </section>
   );
 }
@@ -811,6 +860,18 @@ function PartyRoom({ party, s, settings, onBack, onSettings, me }: PartyProps & 
             ...keysOf('party.private'),
             bar: false,
             run: () => online.setPrivate(!party.private),
+          },
+        ]
+      : []),
+    ...('__TAURI_INTERNALS__' in window && !party.private
+      ? [
+          {
+            id: 'party-discord',
+            label: 'Discord',
+            icon: MessageCircle,
+            ...keysOf('party.discord'),
+            bar: false,
+            run: () => onSettings({ discordJoin: !settings.discordJoin }),
           },
         ]
       : []),
@@ -960,9 +1021,13 @@ function ModeLobby({
   const everyoneReady = party.members.every((m) => m.ready || !m.connected);
   const nextSong = party.set[nextIndex];
   const canStart = host && !watching && !!nextSong && playable(nextSong.id);
+  // Whether the host has the next song: everyone plays their charts, so without it nothing starts.
+  const hostHas =
+    !!nextSong && (host ? playable(nextSong.id) : !!party.members.find((m) => m.id === party.host)?.have.includes(nextSong.id));
   const total = formatTime(party.set.reduce((t, x) => t + x.duration, 0));
   // Everyone ready (two or more): the next song counts down and starts by itself; the host can still start it now.
-  const counting = !watching && !!nextSong && party.members.filter((m) => m.connected).length >= 2 && everyoneReady;
+  // Not while the host cannot start it: a count that runs out on nothing says something that is not so.
+  const counting = !watching && hostHas && party.members.filter((m) => m.connected).length >= 2 && everyoneReady;
   const left = useCountdown(counting, AUTO_START_S);
   const started = useRef(false);
   // The count is heard: a tick a second, and a go as it runs out.
@@ -991,6 +1056,18 @@ function ModeLobby({
     },
     { id: 'party-part', label: 'Next part', icon: PART_ICON[me.part], ...keysOf('party.part'), bar: false, run: nextPart },
     { id: 'party-difficulty', label: 'Next difficulty', icon: Gauge, ...keysOf('party.difficulty'), bar: false, run: nextDifficulty },
+    ...(!calibrated
+      ? [
+          {
+            id: 'party-calibrate',
+            label: 'Calibrate',
+            icon: Gauge,
+            ...keysOf('party.calibrate'),
+            bar: false,
+            run: () => setCalibrating(true),
+          },
+        ]
+      : []),
     ...(everyone && !host
       ? [{ id: 'party-pick-songs', label: 'Pick songs', icon: ListMusic, ...keysOf('party.pickSongs'), bar: false, run: onPickSongs }]
       : []),
@@ -1136,6 +1213,11 @@ function ModeLobby({
         {watching && <PartyBoardPanel s={s} party={party} hints={hints} />}
         <h2 className="label" id="party-part-label">
           Your part
+          {!pad && !locked && (
+            <span className="label-hints" aria-hidden>
+              <Hint kbd={keysOf('party.part').kbd} {...hints} />
+            </span>
+          )}
         </h2>
         <div className="pick-line">
           {pad && (
@@ -1168,6 +1250,11 @@ function ModeLobby({
         </div>
         <h2 className="label" id="party-diff-label">
           Difficulty
+          {!pad && (
+            <span className="label-hints" aria-hidden>
+              <Hint kbd={keysOf('party.difficulty').kbd} {...hints} />
+            </span>
+          )}
         </h2>
         <div className="pick-line">
           {pad && (
@@ -1206,7 +1293,8 @@ function ModeLobby({
         {!calibrated && (
           <p className="hint party-calibrate">
             <span>Your audio offset was never calibrated on this output, and scores are compared here.</span>
-            <button type="button" className="btn small" onClick={() => setCalibrating(true)}>
+            <button type="button" className="btn small" data-action="party-calibrate" onClick={() => setCalibrating(true)}>
+              <Hint {...keysOf('party.calibrate')} {...hints} />
               <Gauge strokeWidth={ICON_STROKE} aria-hidden />
               Calibrate
             </button>
@@ -1268,7 +1356,7 @@ function ModeLobby({
         ) : (
           <p className="hint party-wait">
             <Crown strokeWidth={ICON_STROKE} aria-hidden /> {party.members.find((m) => m.id === party.host)?.name ?? 'The host'} starts each
-            song{everyoneReady ? '.' : ' once everyone is ready.'}
+            song{nextSong && !hostHas ? ', and needs this one first.' : everyoneReady ? '.' : ' once everyone is ready.'}
           </p>
         )}
         <LeaveButton host={host} hints={hints} />
