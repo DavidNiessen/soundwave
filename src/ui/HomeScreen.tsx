@@ -26,7 +26,7 @@ import { formatTime, SET_MAX, suggestSets, type SuggestedSet } from '../game/set
 import type { SongMeta } from '../storage/db';
 import { getInputMode, useInputMode, usesFocus } from '../input/inputMode';
 import type { Settings } from '../game/settings';
-import { focusStart, TAB_EVENT } from '../input/menuNav';
+import { focusStart, TAB_EVENT, tabsHeld } from '../input/menuNav';
 import { backInput } from '../input/pads';
 import { menuPulse } from '../input/rumble';
 import { useGlyphStyle } from '../input/usePads';
@@ -146,6 +146,14 @@ export function HomeScreen({
     setTurn(tabIndex(t) > tabIndex(tabRef.current) ? 'fwd' : 'back');
     setTabState(t);
   };
+  /** A tab the player picked: the look editor with changes not saved asks first, then switches. */
+  const pickTab = (t: Tab, then?: () => void) => {
+    const go = () => {
+      then?.();
+      setTab(t);
+    };
+    if (t === tabRef.current || !tabsHeld(go)) go();
+  };
 
   useEffect(() => {
     const onTab = (e: Event) => {
@@ -155,8 +163,7 @@ export function HomeScreen({
       if (!next) return;
       playSfx('tab');
       menuPulse(step > 0 ? 'tab-right' : 'tab-left');
-      follow.current = true;
-      setTab(next);
+      pickTab(next, () => (follow.current = true));
     };
     window.addEventListener(TAB_EVENT, onTab);
     return () => window.removeEventListener(TAB_EVENT, onTab);
@@ -186,7 +193,7 @@ export function HomeScreen({
   // What every tab has: T for Online, the settings, an update, the app, and the way out. The
   // Online tab declares its own actions over these (OnlinePanel), so it is handed them.
   const common: Action[] = [
-    { id: 'together', label: 'Online', icon: Globe, ...keysOf('home.together'), bar: false, run: () => setTab('online') },
+    { id: 'together', label: 'Online', icon: Globe, ...keysOf('home.together'), bar: false, run: () => pickTab('online') },
     // The Stage tab has its own actions; Settings has nothing to do with it there.
     ...(tab === 'stage' ? [] : [{ id: 'settings', label: 'Settings', icon: SettingsIcon, ...keysOf('home.settings'), run: onSettings }]),
     ...(update
@@ -287,7 +294,7 @@ export function HomeScreen({
                 aria-controls="home-panel"
                 data-on={tab === id}
                 className={`tab ${tab === id ? 'on' : ''}`}
-                onClick={() => setTab(id)}
+                onClick={() => pickTab(id)}
               >
                 <Icon strokeWidth={ICON_STROKE} aria-hidden />
                 <span className="tab-label">{label}</span>
@@ -340,10 +347,8 @@ export function HomeScreen({
             commands={replayCommands}
           />
         ) : tab === 'online' ? (
-          <>
-            <h2 className="page-title">Play online</h2>
-            <OnlinePanel {...online} settings={settings} base={common} />
-          </>
+          // The panel titles itself: signed out, its landing page has a title of its own.
+          <OnlinePanel {...online} settings={settings} base={common} />
         ) : tab === 'play' ? (
           <>
             <h2 className="page-title">Pick a set</h2>
