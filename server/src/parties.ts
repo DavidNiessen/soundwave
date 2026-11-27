@@ -47,6 +47,12 @@ import {
 const FINISH_GRACE_MS = 30_000;
 /** The least time between one watching player's cheers, ms. */
 const CHEER_EVERY_MS = 1_500;
+/** The least time between one player's Strikes, ms: a Strike spends the whole meter, which takes a phrase to fill again. */
+const STRIKE_EVERY_MS = 2_000;
+/** How far a player's song may run ahead of the server's reckoning of it (clocks and the network), seconds. */
+const SONG_CLOCK_SLACK_S = 1;
+/** The overdrive meter a completed phrase fills (src/game/GameSession.ts, PHRASE_REWARD). */
+const PHRASE_CHARGE = 0.25;
 
 /**
  * How many players are left after song `songIndex` of a Showdown that `start` players began with:
@@ -64,6 +70,13 @@ export function hitLength(charge: number, repeat: boolean): number {
   const k = Math.max(0, Math.min(1, (charge - STRIKE_MIN_CHARGE) / (1 - STRIKE_MIN_CHARGE)));
   const ms = Math.round(HIT_MIN_MS + k * (HIT_MAX_MS - HIT_MIN_MS));
   return repeat ? Math.round(ms / 2) : ms;
+}
+
+/** The song times a chart's phrases end at (the time of each one's last note), earliest first. */
+function phraseEnds(chart: Chart): number[] {
+  const last = new Map<number, number>();
+  for (const n of chart.notes) if (n.phrase >= 0) last.set(n.phrase, Math.max(last.get(n.phrase) ?? -Infinity, n.t));
+  return [...last.values()].sort((a, b) => a - b);
 }
 
 /**
@@ -97,6 +110,13 @@ interface Song {
   hits: Map<string, { at: number; until: number }>;
   /** Showdown: when each player's last hit started. */
   lastHit: Map<string, number>;
+  /** When the song starts (server clock, ms). */
+  at: number;
+  /** Showdown: the song times each player's chart's phrases end at, which fill their meter. */
+  phrases: Map<string, number[]>;
+  /** Showdown: the charge each player spent on Strikes so far, and when their last one went. */
+  spent: Map<string, number>;
+  lastStrike: Map<string, number>;
 }
 
 class Party {
@@ -109,6 +129,8 @@ class Party {
   started = 0;
   /** When each watching player last cheered. */
   cheered = new Map<string, number>();
+  /** Players the host removed: they cannot come back into this party. */
+  kicked = new Set<string>();
 
   constructor(code: string, host: Player) {
     this.state = {
@@ -201,6 +223,7 @@ export class Parties {
         const p = this.parties.get(cleanCode(msg.code));
         if (!p) return fail('There is no party with that code. Check it with the host.');
         if (p === party) return this.share(p);
+        if (p.kicked.has(player.id)) return fail('The host removed you from that party.');
         if (p.state.members.length >= PARTY_MAX) return fail(`That party is full: it has ${PARTY_MAX} players.`);
         if (party) this.leave(player.id);
         this.addMember(p, player);
@@ -305,6 +328,7 @@ export class Parties {
       case 'kick': {
         if (!host) return fail('Only the host can remove players.');
         if (msg.id === player.id || !party.member(msg.id)) return;
+        party.kicked.add(msg.id);
         this.removeMember(party, msg.id);
         this.send(msg.id, { type: 'error', message: 'The host removed you from the party.' });
         return;
@@ -342,10 +366,12 @@ export class Parties {
     const playing = new Map<string, SongScore | null | undefined>();
     const board = new Map<string, BoardLine>();
     const par = new Map<string, number>();
+    const phrases = new Map<string, number[]>();
     for (const m of s.members) {
       const chart = msg.assign[m.id];
       const plays = chart !== undefined && m.connected && m.have.includes(songId) && !m.eliminated;
       if (plays && s.showdown) par.set(m.id, new GameSession(msg.charts[chart] as Chart).par);
+      if (plays && s.showdown) phrases.set(m.id, phraseEnds(msg.charts[chart] as Chart));
       if (plays) playing.set(m.id, undefined);
       board.set(m.id, { id: m.id, score: 0, streak: 0, stars: 0, ...(plays ? {} : { out: true }) });
     }
@@ -360,6 +386,10 @@ export class Parties {
       par,
       hits: new Map(),
       lastHit: new Map(),
+      at,
+      phrases,
+      spent: new Map(),
+      lastStrike: new Map(),
     };
     s.phase = 'playing';
     s.songIndex = msg.songIndex;
@@ -453,14 +483,37 @@ export class Parties {
     return out;
   }
 
-  /** Showdown: a player spends their charge. The server picks the target and the hit's length. */
-  private strike(party: Party, player: Player, songIndex: number, charge: number) {
+  /**
+   * Showdown: the charge a player can have earned by now: a quarter of the meter for each phrase
+   * of their chart that has ended, less what they spent on Strikes already. The server does not
+   * see their meter, so this is the most it can be (overdrive spends it too).
+   */
+  private earned(song: Song, id: string, now: number) {
+    const t = (now - song.at) / 1000 + SONG_CLOCK_SLACK_S;
+    const ends = song.phrases.get(id) ?? [];
+    let done = 0;
+    while (done < ends.length && ends[done] <= t) done++;
+    return done * PHRASE_CHARGE - (song.spent.get(id) ?? 0);
+  }
+
+  /**
+   * Showdown: a player spends their charge. The server picks the target and the hit's length. The
+   * charge is the player's word, so it is held to what their chart's phrases can have given them,
+   * and Strikes to one every STRIKE_EVERY_MS.
+   */
+  private strike(party: Party, player: Player, songIndex: number, claimed: number) {
     const song = party.song;
+    const now = this.now();
+    const charge = song ? Math.min(claimed, this.earned(song, player.id, now) + 1e-9) : 0;
+    const ready = !!song && now - (song.lastStrike.get(player.id) ?? -Infinity) >= STRIKE_EVERY_MS;
     const line =
-      party.state.showdown?.hits && song?.index === songIndex && charge >= STRIKE_MIN_CHARGE ? song.board.get(player.id) : undefined;
+      party.state.showdown?.hits && song?.index === songIndex && ready && charge >= STRIKE_MIN_CHARGE
+        ? song.board.get(player.id)
+        : undefined;
     const target = line && !line.done && !line.out ? this.aims(party).get(player.id) : undefined;
     if (!target || !song) return this.send(player.id, { type: 'struck', songIndex, target: null });
-    const now = this.now();
+    song.spent.set(player.id, (song.spent.get(player.id) ?? 0) + charge);
+    song.lastStrike.set(player.id, now);
     const repeat = now - (song.lastHit.get(target) ?? -Infinity) < HIT_REPEAT_MS;
     const ms = hitLength(Math.min(1, charge), repeat);
     this.send(player.id, { type: 'struck', songIndex, target, ms });
@@ -497,6 +550,7 @@ export class Parties {
   /** A new set: no results yet, nobody ready, and in a Showdown everyone in again. */
   private newSet(party: Party, songs: SetSong[]) {
     const s = party.state;
+    party.started = 0;
     s.set = songs.map((song) => ({ ...song, cached: this.cached(song.id) }));
     s.results = [];
     s.songIndex = -1;
@@ -592,6 +646,9 @@ export class Parties {
   }
 
   private addMember(party: Party, player: Player) {
+    // A Showdown under way is watched by whoever comes in: a player knocked out who left and came
+    // back is still out, and nobody joins halfway to skip the songs before.
+    const underway = !!party.state.showdown && party.started > 0;
     party.state.members.push({
       id: player.id,
       name: player.name,
@@ -602,6 +659,7 @@ export class Parties {
       calibrated: false,
       have: [],
       connected: true,
+      ...(underway ? { eliminated: true } : {}),
     });
     this.partyOf.set(player.id, party);
     // One more player can change how many songs each picks.

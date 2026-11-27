@@ -147,7 +147,11 @@ A player's look on the stage is three colours (`GET` and `PUT /me/profile`, body
 
 A party's host can make it a Showdown: scores count as a share of each chart's par, the lowest
 players go out after each song, and (with hits on) the overdrive button strikes the player above.
-The server decides whom a Strike hits and for how long. The host can play the server's Showdown
+The server decides whom a Strike hits and for how long, and holds each Strike to the charge the
+player's chart's phrases can have given them by then (a quarter of the meter each), one every two
+seconds at most. Once a Showdown's first song has started, a player who joins (a knocked-out one who
+left and came back too) watches until the host starts the set over; a player the host removed
+cannot rejoin that party. The host can play the server's Showdown
 rotation instead of their own set: the owner and moderators set it on the Admin page (**Showdown
 rotation**; `GET` and `POST /showdown/rotation`, body `{ songs }`).
 
