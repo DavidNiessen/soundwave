@@ -8,7 +8,8 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import type { Chart } from '../../src/chart/types.ts';
-import { replayResults } from '../../src/game/replay.ts';
+import { GameSession } from '../../src/game/GameSession.ts';
+import { OP, replayResults } from '../../src/game/replay.ts';
 import {
   chartKey,
   SONG_ID,
@@ -29,6 +30,38 @@ import { chart as checkChart } from './validate.ts';
 const OPS_MAX = 400_000;
 const WEEK_MS = 7 * 24 * 60 * 60_000;
 
+/*
+ * A run comes with its own chart, which the server cannot check against the song (it does not
+ * have it), so a chart is held to what a real one can be: anything past these is made up.
+ */
+/** The longest song, seconds. */
+const SONG_MAX_S = 2 * 60 * 60;
+/** One beat from 400 BPM to 20. */
+const BEAT_MIN_S = 0.15;
+const BEAT_MAX_S = 3;
+/** The longest hold, seconds. */
+const HOLD_MAX_S = 120;
+/**
+ * Notes and points per second of song, on average over the whole song: expert charts keep notes
+ * 65 ms apart, and drums play two at once, some 30 a second at the most at the top multiplier.
+ */
+const NOTES_PER_S = 40;
+const PAR_PER_S = 10_000;
+/** How far before the song a run starts (the countdown, PlayController's LEAD_IN) and how long after it may go on. */
+const LEAD_IN_S = 3;
+const AFTER_S = 30;
+/** How far back a resumed pause winds the song (PlayController.resume). */
+const REWIND_S = 1.5;
+/**
+ * How far one input may be stamped before the one recorded ahead of it: inputs are stamped with
+ * the moment they happened and can be handled a little after an overdrive stamped now.
+ */
+const BACK_SLACK_S = 0.25;
+/** Float rounding between two song times the game took for the same moment. */
+const EPS = 0.05;
+/** The runs kept per player on each board: their best (and any they shared). */
+const RUNS_KEPT = 5;
+
 interface ScoreRow {
   id: string;
   user: string;
@@ -47,6 +80,47 @@ interface ScoreRow {
   artist: string;
   ops: Uint8Array;
   times: Uint8Array;
+}
+
+/** What a board's line needs of a run: not its inputs, which are most of its size. */
+const LINE_COLUMNS = 's.id, s.user, s.score, s.stars, s.accuracy, s.full_combo, s.at, s.shared, u.name AS name';
+type LineRow = Pick<ScoreRow, 'id' | 'user' | 'score' | 'stars' | 'accuracy' | 'full_combo' | 'at' | 'shared'> & { name: string };
+
+/** Whether a chart is one a song can have (see the bounds above). */
+function realistic(c: WireChart): boolean {
+  if (c.duration > SONG_MAX_S || c.secondsPerBeat < BEAT_MIN_S || c.secondsPerBeat > BEAT_MAX_S) return false;
+  if (c.notes.length > NOTES_PER_S * c.duration + 100) return false;
+  for (const n of c.notes) if (n.t < 0 || n.t > c.duration || n.dur > HOLD_MAX_S || n.t + n.dur > c.duration + AFTER_S) return false;
+  return new GameSession(c as Chart).par <= PAR_PER_S * c.duration;
+}
+
+/**
+ * Whether a run's inputs are ones the game records: every time a real one, in order, but for a
+ * resumed pause, which drops the holds and winds the song back up to REWIND_S; and no frames
+ * (finite updates), which only runs from before judging by time held, and which wind back too.
+ * The one update is the song's end, at +Infinity, last.
+ */
+function playable(c: WireChart, ops: Uint8Array, times: Float32Array): boolean {
+  let clock = -Infinity;
+  for (let i = 0; i < ops.length; i++) {
+    const kind = ops[i] & 7;
+    const t = times[i];
+    if (kind === OP.update) {
+      if (t !== Infinity || i !== ops.length - 1) return false;
+      continue;
+    }
+    if (!Number.isFinite(t) || t < -LEAD_IN_S - EPS || t > c.duration + AFTER_S) return false;
+    if ((kind === OP.press || kind === OP.release) && ops[i] >> 3 >= c.lanes) return false;
+    if (kind === OP.rewind) {
+      const from = i > 0 && (ops[i - 1] & 7) === OP.dropHolds ? times[i - 1] : NaN;
+      if (!(t <= from + EPS && t >= from - REWIND_S - EPS)) return false;
+      clock = t;
+      continue;
+    }
+    if (t < clock - BACK_SLACK_S) return false;
+    clock = Math.max(clock, t);
+  }
+  return true;
 }
 
 export const chartIdOf = (c: WireChart) => createHash('sha256').update(chartKey(c)).digest('hex');
@@ -90,6 +164,7 @@ export class Scores {
   submit(user: UserRow, body: Partial<ScoreSubmission>): { id: string; rank: number; best: boolean } {
     const chart = checkChart(body.chart);
     if (!chart) throw new Refusal(400, 'That run’s chart is damaged.');
+    if (!realistic(chart)) throw new Refusal(422, 'That run’s chart is not one a song can have, so it was not taken.');
     if (typeof body.songId !== 'string' || !SONG_ID.test(body.songId)) throw new Refusal(400, 'That run’s song is not named.');
     if (typeof body.ops !== 'string' || typeof body.times !== 'string') throw new Refusal(400, 'That run has no inputs.');
     const ops = new Uint8Array(Buffer.from(body.ops, 'base64'));
@@ -97,6 +172,7 @@ export class Scores {
     if (ops.length > OPS_MAX || timeBytes.length !== ops.length * 4) throw new Refusal(400, 'That run’s inputs are damaged.');
     const times = new Float32Array(ops.length);
     for (let i = 0; i < ops.length; i++) times[i] = timeBytes.readFloatLE(i * 4);
+    if (!playable(chart, ops, times)) throw new Refusal(422, 'That run’s inputs are not ones a game records, so it was not taken.');
     const claimed = body.result;
     const judged = replayResults(chart as Chart, { ops, times });
     const same =
@@ -135,6 +211,19 @@ export class Scores {
         ops,
         new Uint8Array(timeBytes),
       );
+    // Only a player's best few runs on a board are kept (those they shared too, and this one, which
+    // they may share next): the others can never show, and would only fill the database.
+    this.store.db
+      .prepare(
+        `DELETE FROM scores WHERE user = ? AND song_id = ? AND chart_id = ? AND part = ? AND difficulty = ? AND shared = 0 AND id != ?
+         AND id NOT IN (SELECT id FROM scores WHERE user = ? AND song_id = ? AND chart_id = ? AND part = ? AND difficulty = ?
+                        ORDER BY score DESC, at ASC LIMIT ?)`,
+      )
+      .run(
+        ...[user.id, body.songId, chartId, chart.part, chart.difficulty, id],
+        ...[user.id, body.songId, chartId, chart.part, chart.difficulty],
+        RUNS_KEPT,
+      );
     const board = this.board(user, body.songId, chartId, chart.part, chart.difficulty, false);
     return { id, rank: board.me?.rank ?? 0, best: before === undefined || judged.score > before };
   }
@@ -149,26 +238,28 @@ export class Scores {
   /** Each player's best run on one chart, best first; this week's only, or of all time. */
   board(me: UserRow, song: string, chart: string, part: string, difficulty: string, week: boolean): Board {
     const since = week ? this.now() - WEEK_MS : 0;
-    const rows = this.store.db
-      .prepare(
-        `SELECT s.*, u.name AS name FROM scores s JOIN users u ON u.id = s.user
-         WHERE s.song_id = ? AND s.chart_id = ? AND s.part = ? AND s.difficulty = ? AND s.at >= ?
-         ORDER BY s.score DESC, s.at ASC`,
-      )
-      .all(song, chart, part, difficulty, since) as unknown as (ScoreRow & { name: string })[];
-    const seen = new Set<string>();
-    const lines: (RankLine & { user: string })[] = [];
-    for (const r of rows) {
-      if (seen.has(r.user)) continue;
-      seen.add(r.user);
-      lines.push({ ...this.line(r, lines.length + 1), user: r.user });
+    // Each player's best run (the earliest of equal ones), worked out by the database: a board
+    // can hold many runs, and the inputs they carry are never read here.
+    const best = `SELECT * FROM (
+        SELECT ${LINE_COLUMNS}, ROW_NUMBER() OVER (PARTITION BY s.user ORDER BY s.score DESC, s.at ASC) AS n
+        FROM scores s JOIN users u ON u.id = s.user
+        WHERE s.song_id = ? AND s.chart_id = ? AND s.part = ? AND s.difficulty = ? AND s.at >= ?
+      ) WHERE n = 1`;
+    const args = [song, chart, part, difficulty, since];
+    const rows = this.store.db.prepare(`${best} ORDER BY score DESC, at ASC LIMIT 50`).all(...args) as unknown as LineRow[];
+    const lines = rows.map((r, i) => this.line(r, i + 1));
+    const mine = this.store.db.prepare(`${best} AND user = ?`).get(...args, me.id) as LineRow | undefined;
+    let mineLine: RankLine | null = null;
+    if (mine) {
+      const above = this.store.db
+        .prepare(`SELECT COUNT(*) AS n FROM (${best}) WHERE score > ? OR (score = ? AND at < ?)`)
+        .get(...args, mine.score, mine.score, mine.at) as { n: number };
+      mineLine = this.line(mine, above.n + 1);
     }
-    const mine = lines.find((l) => l.user === me.id);
-    const strip = ({ user: _user, ...l }: RankLine & { user: string }): RankLine => l;
-    return { lines: lines.slice(0, 50).map(strip), me: mine ? strip(mine) : null };
+    return { lines, me: mineLine };
   }
 
-  private line(r: ScoreRow & { name: string }, rank: number): RankLine {
+  private line(r: LineRow, rank: number): RankLine {
     return {
       rank,
       scoreId: r.id,
@@ -192,12 +283,19 @@ export class Scores {
       .all(song);
   }
 
-  /** The players with the most points this week, over every board: for the main menu. */
+  /**
+   * The players with the most points this week, over every board: for the main menu. A chart comes
+   * from the player's own game, and one made up and played by a program would top any list, so a
+   * board counts only once two players or more have runs on that very chart: a chart one player
+   * made up alone counts for nothing here (it still has its own board).
+   */
   topThisWeek(limit = 5) {
     return this.store.db
       .prepare(
         `SELECT u.name AS name, SUM(best) AS score FROM (
-           SELECT user, MAX(score) AS best FROM scores WHERE at >= ? GROUP BY user, song_id, chart_id, part, difficulty
+           SELECT user, MAX(score) AS best FROM scores
+           WHERE at >= ? AND chart_id IN (SELECT chart_id FROM scores GROUP BY chart_id HAVING COUNT(DISTINCT user) >= 2)
+           GROUP BY user, song_id, chart_id, part, difficulty
          ) b JOIN users u ON u.id = b.user GROUP BY b.user ORDER BY score DESC LIMIT ?`,
       )
       .all(this.now() - WEEK_MS, limit) as { name: string; score: number }[];
@@ -238,10 +336,10 @@ export class Scores {
   shared(song?: string) {
     const rows = this.store.db
       .prepare(
-        `SELECT s.*, u.name AS name FROM scores s JOIN users u ON u.id = s.user
+        `SELECT ${LINE_COLUMNS}, s.song_id, s.title, s.artist, s.part, s.difficulty FROM scores s JOIN users u ON u.id = s.user
          WHERE s.shared = 1 ${song ? 'AND s.song_id = ?' : ''} ORDER BY s.at DESC LIMIT 100`,
       )
-      .all(...(song ? [song] : [])) as unknown as (ScoreRow & { name: string })[];
+      .all(...(song ? [song] : [])) as unknown as (LineRow & Pick<ScoreRow, 'song_id' | 'title' | 'artist' | 'part' | 'difficulty'>)[];
     return rows.map((r, i) => ({
       ...this.line(r, i + 1),
       songId: r.song_id,

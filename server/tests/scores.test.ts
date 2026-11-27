@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Chart } from '../../src/chart/types';
 import { GameSession } from '../../src/game/GameSession';
-import { ReplayRecorder, type ReplayInputs } from '../../src/game/replay';
+import { OP, ReplayRecorder, replayResults, type ReplayInputs } from '../../src/game/replay';
 import type { Board, Run, Session } from '../../src/net/protocol.ts';
 import { startServer, type RunningServer } from '../src/app.ts';
 import { DEFAULTS } from '../src/config.ts';
@@ -111,5 +111,70 @@ describe('leaderboards', () => {
     expect((await api('DELETE', `/scores/${own.body.id}?reason=test`, undefined, owner.access)).status).toBe(200);
     const after = await api<Board>('GET', `/boards/${SONG}/${chartId}/lead/hard`, undefined, ana.access);
     expect(after.body.lines.map((l) => l.name)).toEqual(['Ana']);
+  });
+
+  it('refuse a chart no song can have, and inputs no game records', async () => {
+    const mo = await signUp('Mo');
+    const send = (c: object, ops: number[], times: number[]) => {
+      const inputs = { ops: new Uint8Array(ops), times: new Float32Array(times) };
+      const r = replayResults(c as Chart, inputs);
+      return api('POST', '/scores', submission(inputs, r, { chart: c }), mo.access);
+    };
+    // One endless hold on a beat of a ten-thousandth of a second.
+    const endless = { ...chart, notes: [{ t: 1, lane: 0, dur: 1e7, phrase: 0 }], secondsPerBeat: 1e-4, duration: 1e7 + 2 };
+    expect((await send(endless, [OP.press, OP.update], [1, Infinity])).status).toBe(422);
+    // A plausible chart, but far more points a second than a song can hold.
+    const crammed = { ...chart, notes: Array.from({ length: 800 }, (_, i) => ({ t: 1, lane: i % 4, dur: 18, phrase: -1 })) };
+    expect((await send(crammed, [OP.update], [Infinity])).status).toBe(422);
+
+    // Winding back again and again over a held note, without the pause that drops it.
+    const hold = { ...chart, notes: [{ t: 1, lane: 0, dur: 2, phrase: -1 }] };
+    const ops = [OP.press];
+    const times = [1];
+    for (let i = 0; i < 100; i++) (ops.push(OP.release, OP.rewind), times.push(4.9, 1));
+    expect((await send(hold, [...ops, OP.release, OP.update], [...times, 3, Infinity])).status).toBe(422);
+    // A pause's wind-back further than the game winds back.
+    expect((await send(hold, [OP.press, OP.dropHolds, OP.rewind, OP.update], [1, 6, 1, Infinity])).status).toBe(422);
+    // A frame (a finite update), which winds back in an old run's format.
+    expect((await send(hold, [OP.press, OP.update, OP.release, OP.update], [1, 0.5, 3, Infinity])).status).toBe(422);
+    // An input at no time, or at none in the song.
+    expect((await send(hold, [OP.press, OP.overdrive, OP.update], [1, Number.NaN, Infinity])).status).toBe(422);
+    expect((await send(hold, [OP.press, OP.release, OP.update], [1, 1e6, Infinity])).status).toBe(422);
+    // A lane the chart does not have.
+    expect((await send(hold, [OP.press | (6 << 3), OP.update], [1, Infinity])).status).toBe(422);
+    // An input stamped well before the one ahead of it.
+    expect((await send(hold, [OP.press, OP.release, OP.press, OP.update], [1, 3, 1.5, Infinity])).status).toBe(422);
+
+    // A real pause is fine: the holds dropped, the song wound back a little.
+    const rec = new ReplayRecorder(new GameSession(hold as Chart));
+    rec.press(0, 1);
+    rec.dropHolds(2);
+    rec.rewind(0.5);
+    rec.press(0, 2.1);
+    rec.release(0, 3);
+    rec.end();
+    const paused = await api('POST', '/scores', submission(rec.take(), rec.session.results(), { chart: hold }), mo.access);
+    expect(paused.status).toBe(200);
+  });
+
+  it('keep each player’s best few runs on a board, and count only shared charts in the week’s top', async () => {
+    const own = { ...chart, difficulty: 'easy' as const };
+    const solo = { ...chart, difficulty: 'medium' as const, notes: chart.notes.map((n) => ({ ...n, t: n.t + 0.1 })) };
+    const [kim, lu] = [await signUp('Kim'), await signUp('Lu')];
+    const submit = (c: Chart, miss: number, token: string) => {
+      const rec = new ReplayRecorder(new GameSession(c));
+      c.notes.forEach((n, i) => i % miss && (rec.press(n.lane, n.t), rec.release(n.lane, n.t + n.dur + 0.03)));
+      rec.end();
+      return api('POST', '/scores', submission(rec.take(), rec.session.results(), { chart: c }), token);
+    };
+    for (let i = 0; i < 8; i++) expect((await submit(own, 2 + i, kim.access)).status).toBe(200);
+    const kept = store.db.prepare("SELECT COUNT(*) AS n FROM scores WHERE difficulty = 'easy'").get() as { n: number };
+    expect(kept.n).toBe(5);
+    // A chart only Lu played counts for nothing in the top; once Kim plays it too, it counts.
+    expect((await submit(solo, 1000, lu.access)).status).toBe(200);
+    const top = async () => (await api<{ name: string }[]>('GET', '/boards/top', undefined, lu.access)).body.map((t) => t.name);
+    expect(await top()).not.toContain('Lu');
+    expect((await submit(solo, 3, kim.access)).status).toBe(200);
+    expect(await top()).toEqual(expect.arrayContaining(['Lu', 'Kim']));
   });
 });
