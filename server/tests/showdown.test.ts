@@ -127,7 +127,8 @@ describe('Showdown', () => {
   it('strikes the player just above, warns them half a second ahead with the striker’s name', () => {
     const { say, start, progress, advance, last } = showdown(3);
     start(0);
-    advance(6000);
+    // Into the song (after its countdown), its phrases played: the meter is full.
+    advance(9000);
     progress(0, 300);
     progress(1, 200);
     progress(2, 100);
@@ -135,7 +136,7 @@ describe('Showdown', () => {
     expect(last(2, 'struck')).toMatchObject({ target: 'p1' });
     const hit = last(1, 'hit')!;
     expect(hit).toMatchObject({ from: 'Player 2', ms: 14000 });
-    expect(hit.at).toBe(7000 + HIT_WARNING_MS);
+    expect(hit.at).toBe(10_000 + HIT_WARNING_MS);
     // Everyone sees the Strike fly, the players it is not about too.
     for (const i of [0, 1, 2]) expect(last(i, 'strikeFired')).toMatchObject({ from: 'p2', to: 'p1', at: hit.at });
     // First place has nobody above: their press stays an overdrive.
@@ -150,7 +151,8 @@ describe('Showdown', () => {
   it('hits one at a time, protects for 6 s after, and halves a repeat within 30 s', () => {
     const { say, start, progress, advance, last } = showdown(3);
     start(0);
-    advance(6000);
+    // Into the song (after its countdown), its phrases played: the meter is full.
+    advance(9000);
     progress(0, 300);
     progress(1, 200);
     progress(2, 100);
@@ -177,7 +179,8 @@ describe('Showdown', () => {
   it('lets at most two players aim at the same player', () => {
     const { say, start, progress, advance, last } = showdown(5);
     start(0);
-    advance(6000);
+    // Into the song (after its countdown), its phrases played: the meter is full.
+    advance(9000);
     [500, 400, 300, 200, 100].forEach((score, i) => progress(i, score));
     // p1 and p2 are under hits: p3 and p4 would both look past them…
     say(2, { type: 'strike', songIndex: 0, charge: 0.25 }); // p2 hits p1
@@ -277,14 +280,15 @@ describe('Showdown', () => {
   it('holds Strikes to the charge the chart’s phrases can have given, one every two seconds', () => {
     const { say, start, progress, advance, last } = showdown(3);
     start(0);
-    // Before the song's first phrase ends there is no charge, whatever the game says.
+    // In the countdown, before the song's first phrase ends, there is no charge, whatever the game says.
     advance(4000);
     progress(0, 300);
     progress(1, 200);
     say(2, { type: 'strike', songIndex: 0, charge: 1 });
     expect(last(2, 'struck')).toMatchObject({ target: null });
-    // A second in (and the server's second of slack): the phrases ended by 2 s gave 1.75 of meter.
-    advance(2000);
+    // A second into the song after its 3 s countdown (and the server's second of slack): the
+    // phrases ended by 2 s gave 1.75 of meter.
+    advance(5000);
     say(2, { type: 'strike', songIndex: 0, charge: 1 });
     expect(last(1, 'hit')).toMatchObject({ ms: 14000 });
     // Not again within two seconds, whatever the charge.

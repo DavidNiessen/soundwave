@@ -51,6 +51,8 @@ const CHEER_EVERY_MS = 1_500;
 const STRIKE_EVERY_MS = 2_000;
 /** How far a player's song may run ahead of the server's reckoning of it (clocks and the network), seconds. */
 const SONG_CLOCK_SLACK_S = 1;
+/** The countdown before a song's first moment, which starts at the start's `at` (PlayController's LEAD_IN), seconds. */
+const COUNTDOWN_S = 3;
 /** The overdrive meter a completed phrase fills (src/game/GameSession.ts, PHRASE_REWARD). */
 const PHRASE_CHARGE = 0.25;
 
@@ -112,7 +114,7 @@ interface Song {
   hits: Map<string, { at: number; until: number }>;
   /** Showdown: when each player's last hit started. */
   lastHit: Map<string, number>;
-  /** When the song starts (server clock, ms). */
+  /** When the song's countdown starts (server clock, ms). */
   at: number;
   /** Showdown: the song times each player's chart's phrases end at, which fill their meter. */
   phrases: Map<string, number[]>;
@@ -500,7 +502,7 @@ export class Parties {
    * see their meter, so this is the most it can be (overdrive spends it too).
    */
   private earned(song: Song, id: string, now: number) {
-    const t = (now - song.at) / 1000 + SONG_CLOCK_SLACK_S;
+    const t = (now - song.at) / 1000 - COUNTDOWN_S + SONG_CLOCK_SLACK_S;
     const ends = song.phrases.get(id) ?? [];
     let done = 0;
     while (done < ends.length && ends[done] <= t) done++;
