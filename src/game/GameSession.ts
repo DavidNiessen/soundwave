@@ -278,10 +278,12 @@ export class GameSession {
   /**
    * The song was wound back to song time t (resuming from a pause): time counts on from there, so
    * an overdrive still running drains again over the stretch that is played twice. Notes already
-   * judged stay judged. Holds are dropped first (`dropHolds`), as a pause does.
+   * judged stay judged. Holds are dropped first, as a pause does: here too, so a run that winds
+   * back over a hold it still holds cannot count the same stretch of it twice.
    */
   rewind(t: number) {
-    if (!(t < this.now)) return;
+    if (!(t < this.now) || !Number.isFinite(t)) return;
+    this.dropHolds(this.now);
     this.settle(this.now);
     this.now = t;
     this.mark = t;
@@ -289,6 +291,9 @@ export class GameSession {
 
   /** Brings the session to the time of an input: what was due before it has happened, and the points up to it are settled. */
   private reach(t: number) {
+    // An input at no time at all (NaN, from a damaged or made-up run) happens now: NaN in the
+    // overdrive meter would keep overdrive on to the end of the song.
+    if (!Number.isFinite(t)) t = this.now;
     this.advance(t);
     this.settle(t);
     if (t > this.now) this.now = t;
