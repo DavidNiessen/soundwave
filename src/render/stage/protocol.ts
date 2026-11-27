@@ -1,6 +1,8 @@
 import type { BandLevels } from '../../audio/bands';
 import type { GraphicsSettings } from '../../game/graphics';
-import type { StageOptions } from './Stage';
+import type { Part } from '../../chart/types';
+import type { RingPlace, RingSeat } from '../aurora/ring';
+import type { Avatars, StageOptions } from './Stage';
 import type { StageLook } from './look';
 
 /** What the music is doing, as the page last heard it. The stage reads the latest on each of its frames. */
@@ -47,6 +49,16 @@ export type ToStage =
   /** A drop tried out in the stage browser: the pyro fires, and the jets keep time for `seconds`. */
   | { type: 'drop'; id: number; seconds: number }
   | { type: 'finale'; id: number; seconds: number }
+  /** Dresses the band as the players on its parts. */
+  | { type: 'avatars'; id: number; avatars: Avatars }
+  /** Keeps the camera on one part's band member, or lets it roam again (null). */
+  | { type: 'hold'; id: number; part: Part | null; shift?: number }
+  /** A Showdown's players on a ring of podiums in place of the band, or the band again (null). */
+  | { type: 'ring'; id: number; seats: RingSeat[] | null }
+  /** A Showdown's board as it stands: the ring's podiums follow it. */
+  | { type: 'places'; id: number; places: RingPlace[] }
+  /** A Showdown Strike flies from one player to another and lands in `ms` milliseconds. */
+  | { type: 'strike'; id: number; from: string; to: string; ms: number }
   | { type: 'debug'; id: number }
   /** Sends a copy of every frame drawn (`frame`) while on: for recording a video. */
   | { type: 'capture'; id: number; on: boolean }

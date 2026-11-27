@@ -3,6 +3,7 @@ import { applyPreset, DEFAULT_GRAPHICS, normalizeGraphics, PRESETS, tierForGpu }
 import { normalizeSettings } from '../src/game/settings';
 import { barAt, barIntensity, LightShow, type ShowFrame } from '../src/render/stage/LightShow';
 import { buildShots, Director } from '../src/render/stage/Director';
+import { MAX_SEATS, ringLayout, SEAT_RADIUS } from '../src/render/aurora/ring';
 import type { Chart } from '../src/chart/types';
 
 describe('graphics settings', () => {
@@ -187,5 +188,26 @@ describe('camera director', () => {
     const a = d.pose().pos;
     d.update(5, false, 'groove', 2);
     expect(d.pose().pos).not.toEqual(a);
+  });
+});
+
+describe('Showdown ring', () => {
+  const deck = { center: [0, 0, -10] as [number, number, number], a: 24, b: 12, power: 2.6, height: 2.4, barrier: 1.44 };
+
+  it('stands every player on the deck, apart from their neighbours, the first nearest the audience', () => {
+    for (const n of [1, 2, 5, 8, 16]) {
+      const { spots } = ringLayout(n, deck);
+      expect(spots).toHaveLength(n);
+      expect(Math.max(...spots.map((s) => s[2]))).toBe(spots[0][2]);
+      for (const [x, , z] of spots) {
+        // Inside the deck's outline with the podium's radius to spare.
+        const edge = (Math.abs(x) + SEAT_RADIUS) / deck.a;
+        const depth = (Math.abs(z - deck.center[2]) + SEAT_RADIUS) / deck.b;
+        expect(edge ** deck.power + depth ** deck.power).toBeLessThan(1);
+      }
+      for (let i = 1; i < n; i++)
+        expect(Math.hypot(spots[i][0] - spots[i - 1][0], spots[i][2] - spots[i - 1][2])).toBeGreaterThan(2 * SEAT_RADIUS + 0.5);
+    }
+    expect(ringLayout(30, deck).spots).toHaveLength(MAX_SEATS);
   });
 });

@@ -38,6 +38,8 @@ export async function buildMoonrise(ctx: VenueContext): Promise<Venue> {
   owned.push(sky.geometry, sky.material);
 
   const venue = assets.scene.clone(true);
+  const stacks = cutOut(venue, ISLAND_STACKS);
+  owned.push(...stacks.map((x) => x.cut));
   owned.push(...applyVenueMaterials(venue, data.deck, g.lights === 'medium' || g.lights === 'high'));
   root.add(venue);
 
@@ -73,6 +75,8 @@ export async function buildMoonrise(ctx: VenueContext): Promise<Venue> {
   const players = makeBand(data, assets.band.data.band ?? {}, ctx.focus);
   // Each podium and what stands on it moves as one (the model dresses them itself).
   const podiums = new Podiums(venue, data.podiums, data.band, players, false);
+  /** What makes way for a Showdown's ring: the band's island, its steps and podiums. */
+  const island = [...venue.children.filter((o) => /^(Island|Step_)/.test(o.name)), ...podiums.groups];
 
   // Seven jets along the front edge of the deck, between the CO2 nozzles.
   const deck = data.deck;
@@ -171,6 +175,46 @@ export async function buildMoonrise(ctx: VenueContext): Promise<Venue> {
     beam,
     // A close-up of a player follows their podium up and down.
     cameraLift: (shot) => podiums.cameraLift(shot),
+    ring: {
+      deck,
+      makeWay(on) {
+        for (const o of island) o.visible = !on;
+        for (const x of stacks) x.mesh.geometry = on ? x.cut : x.whole;
+      },
+    },
     dispose: () => owned.forEach((o) => o.dispose()),
   };
+}
+
+/** The speaker stacks on the band's island, merged into the venue's meshes: without the island they would float. */
+const ISLAND_STACKS = [-1, 1].map(
+  (side) => new THREE.Box3(new THREE.Vector3(side < 0 ? -7.1 : 4.2, 2.4, -6.4), new THREE.Vector3(side < 0 ? -4.2 : 7.1, 4.9, -5.4)),
+);
+
+/**
+ * Copies of the meshes directly under `root` without the triangles that lie wholly inside one of
+ * `boxes`, beside the geometry they have now (the loaded venue's, shared, so it is never changed).
+ */
+function cutOut(root: THREE.Object3D, boxes: THREE.Box3[]): { mesh: THREE.Mesh; whole: THREE.BufferGeometry; cut: THREE.BufferGeometry }[] {
+  const made: { mesh: THREE.Mesh; whole: THREE.BufferGeometry; cut: THREE.BufferGeometry }[] = [];
+  const v = new THREE.Vector3();
+  for (const o of root.children) {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.geometry.index) continue;
+    const pos = mesh.geometry.getAttribute('position');
+    const inside = (i: number) => boxes.some((b) => b.containsPoint(v.fromBufferAttribute(pos, i)));
+    const index = mesh.geometry.index;
+    const keep: number[] = [];
+    for (let t = 0; t < index.count; t += 3) {
+      const a = index.getX(t);
+      const b = index.getX(t + 1);
+      const c = index.getX(t + 2);
+      if (!(inside(a) && inside(b) && inside(c))) keep.push(a, b, c);
+    }
+    if (keep.length === index.count) continue;
+    const cut = mesh.geometry.clone();
+    cut.setIndex(keep);
+    made.push({ mesh, whole: mesh.geometry, cut });
+  }
+  return made;
 }

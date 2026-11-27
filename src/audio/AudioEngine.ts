@@ -144,6 +144,16 @@ export class AudioEngine {
     this.stopSource();
   }
 
+  /**
+   * How far the sound heard now lags what the graph plays (s): the output's latency, and in the
+   * desktop app its own output's. Playing together starts a song this much early, so everyone hears
+   * it at the same moment rather than sends it to their speakers at the same moment.
+   */
+  heardLag(): number {
+    const lag = this.ctx.currentTime - this.heardContextTime();
+    return Number.isFinite(lag) ? Math.min(1, Math.max(0, lag)) : 0;
+  }
+
   /** Context time currently reaching the speakers, mapped to a performance.now() timestamp. */
   private heardContextTime(perfNow?: number) {
     const now = perfNow ?? performance.now();

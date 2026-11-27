@@ -102,6 +102,8 @@ export interface MetaChange {
   artist: string;
   album?: string;
   cover?: Blob | null;
+  /** Where the song came from on a server (see SongMeta.server); undefined keeps what it was. */
+  server?: SongMeta['server'];
 }
 
 /**
@@ -119,6 +121,7 @@ export function updateSongMeta(id: string, change: MetaChange): Promise<SongMeta
       artist: change.artist.trim(),
       album: change.album?.trim() || undefined,
       cover: change.cover === null ? undefined : (change.cover ?? meta.cover),
+      ...(change.server ? { server: change.server } : {}),
     };
     const has = await readSoundwave(stored);
     const [analysis, edits] = await Promise.all([cachedAnalysis(id), storedEdits(id)]);

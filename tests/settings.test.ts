@@ -128,3 +128,12 @@ describe('a remembered window place', () => {
     expect(frameOnScreen({ x: 100, y: -400, width: 1280, height: 800 }, monitors)).toBe(false);
   });
 });
+
+describe('calibration from before the game kept where it was made', () => {
+  it('counts an offset already set as calibrated on the output used then', () => {
+    expect(normalizeSettings({ offsetMs: 40, outputDevice: 'usb' }).calibratedOn).toBe('usb');
+    expect(normalizeSettings({ offsetMs: 40 }).calibratedOn).toBe('');
+    expect(normalizeSettings({ offsetMs: 0 }).calibratedOn).toBeNull();
+    expect(normalizeSettings({ offsetMs: 40, calibratedOn: null }).calibratedOn).toBeNull();
+  });
+});

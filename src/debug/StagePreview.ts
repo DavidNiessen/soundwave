@@ -5,7 +5,8 @@ import { DEFAULT_VENUE, isVenueId } from '../render/venues/catalog';
 /**
  * Dev-only: the 3D stage full screen with a simulated song, for checking looks and performance
  * without playing. Open /#stage?preset=high&bpm=126&shot=hero&level=0.9&mode=play (shot pins one
- * camera, level pins how busy the music is, od = seconds until overdrive, venue = a venue's id).
+ * camera, level pins how busy the music is, od = seconds until overdrive, venue = a venue's id, ring = a
+ * Showdown ring of that many players, with a Strike every few seconds).
  */
 export async function runStagePreview(root: HTMLElement) {
   const q = new URLSearchParams(location.hash.split('?')[1] ?? '');
@@ -18,7 +19,23 @@ export async function runStagePreview(root: HTMLElement) {
   root.replaceChildren(canvas);
   const choice = q.get('venue');
   const venue = isVenueId(choice) ? choice : DEFAULT_VENUE;
-  const stage = await Stage.create(canvas, g, { mode: q.get('mode') === 'menu' ? 'menu' : 'play', part: 'lead', venue });
+  const seats = Number(q.get('ring') ?? 0);
+  const parts = ['lead', 'bass', 'drums', 'vocals'] as const;
+  const looks = [
+    undefined,
+    { top: '#ff4fa3', bottom: '#1b1a2e', finish: '#45d6ff' },
+    { top: '#ffc94a', bottom: '#3a2a6e', finish: '#ffffff' },
+  ];
+  const ring = Array.from({ length: seats }, (_, i) => ({ id: `p${i}`, part: parts[i % 4], avatar: looks[i % 3], me: i === 0 }));
+  const stage = await Stage.create(canvas, g, { mode: q.get('mode') === 'menu' ? 'menu' : 'play', part: 'lead', venue, ring });
+  if (seats) {
+    stage.setPlaces(ring.map((p, i) => ({ id: p.id, place: i + 1, hit: i === 2 })));
+    let n = 0;
+    setInterval(() => {
+      n++;
+      stage.strike(`p${n % seats}`, `p${(n * 3 + 1) % seats}`, 500);
+    }, 2500);
+  }
   const fit = () => stage.setSize(innerWidth, innerHeight, devicePixelRatio);
   fit();
   (window as unknown as { __stage: Stage }).__stage = stage;

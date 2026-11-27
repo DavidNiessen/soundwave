@@ -104,6 +104,11 @@ export class Podiums {
     });
   }
 
+  /** Each podium and what stands on it, as one object (to hide them all at once). */
+  get groups(): THREE.Object3D[] {
+    return this.lifts.map((l) => l.group);
+  }
+
   /** Tells the shaders where the players' feet are, lifts and all (after the stage set the marks). */
   bind() {
     for (const l of this.lifts) if (l.index >= 0) shared.uBand.value[l.index].y = l.rest + l.height;

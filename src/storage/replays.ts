@@ -20,9 +20,10 @@
 import { DIFFICULTIES, PARTS, type Chart, type Difficulty, type Note, type Part } from '../chart/types';
 import type { Results } from '../game/GameSession';
 import { GOLD_STARS } from '../game/scoring';
-import type { ReplayInputs } from '../game/replay';
+import { LAST_OP, OP, type ReplayInputs } from '../game/replay';
 
-export const REPLAY_VERSION = 1;
+/** 2: a run is its inputs, with a rewind for each pause (1 also held an update for every frame). */
+export const REPLAY_VERSION = 2;
 const MAGIC = 'SWREPLAY';
 /** Most operations read from one file: a long song at a high frame rate stays far below it. */
 const MAX_OPS = 4_000_000;
@@ -45,7 +46,13 @@ export interface ReplayMeta {
   kept: boolean;
   /** Length of the song, seconds. */
   duration: number;
+  /** How it was played: alone, or in a party's Versus or Showdown (missing in older replays: alone). */
+  mode?: ReplayMode;
 }
+
+export type ReplayMode = 'solo' | 'versus' | 'showdown';
+/** A replay's mode, said in a word. */
+export const MODE_LABEL: Record<ReplayMode, string> = { solo: 'Solo', versus: 'Versus', showdown: 'Showdown' };
 
 /** What is needed to play a replay: the chart it was played on and the run itself. */
 export interface ReplayData {
@@ -123,7 +130,10 @@ export async function readReplay(file: Blob): Promise<Replay> {
   const m = cleanMeta(meta);
   const c = cleanChart(chart);
   if (!m || !c || c.part !== m.part || c.difficulty !== m.difficulty) throw bad();
-  for (let i = 0; i < k; i++) if ((ops[i] & 7) > 4 || ops[i] >> 3 >= c.lanes || Number.isNaN(times[i])) throw bad();
+  // The upper bits name a lane for a press or release (other operations carry a value there).
+  const laned = (op: number) => (op & 7) === OP.press || (op & 7) === OP.release;
+  for (let i = 0; i < k; i++)
+    if ((ops[i] & 7) > LAST_OP || (laned(ops[i]) && ops[i] >> 3 >= c.lanes) || Number.isNaN(times[i])) throw bad();
   return { meta: m, data: { id: m.id, chart: c, inputs: { ops, times } } };
 }
 
@@ -170,10 +180,12 @@ function cleanMeta(raw: unknown): ReplayMeta | null {
     best: m.best === true,
     kept: m.kept === true,
     duration: finite(m.duration) ? Math.max(0, m.duration) : 0,
+    ...(m.mode === 'versus' || m.mode === 'showdown' ? { mode: m.mode } : {}),
   };
 }
 
-function cleanChart(raw: unknown): Chart | null {
+/** A chart from outside (a replay file, a party's host), checked note by note; null when it is not one. */
+export function cleanChart(raw: unknown): Chart | null {
   if (!raw || typeof raw !== 'object') return null;
   const c = raw as Record<string, unknown>;
   if (!PARTS.includes(c.part as Part) || !DIFFICULTIES.includes(c.difficulty as Difficulty)) return null;

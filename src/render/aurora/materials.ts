@@ -161,12 +161,13 @@ void main() {
  */
 export const PODIUM_FRAGMENT = /* glsl */ `
 ${COMMON}
-uniform float uWho; uniform vec2 uRadii; uniform float uFloor;
+uniform float uWho; uniform vec2 uRadii; uniform float uFloor; uniform vec4 uSeat;
 varying vec3 vWPos; varying vec3 vWNorm; varying vec2 vUv; varying float vAo;
 void main() {
-  int who = int(uWho + 0.5);
-  vec3 c = uBand[who];
-  float feature = uFeature[who];
+  // A band member's podium (uWho 0..3), or a Showdown seat that brings its own centre and light (-1).
+  int who = int(max(uWho, 0.0) + 0.5);
+  vec3 c = uWho < -0.5 ? uSeat.xyz : uBand[who];
+  float feature = uWho < -0.5 ? uSeat.w : uFeature[who];
   vec3 n = normalize(vWNorm);
   vec3 v = normalize(cameraPosition - vWPos);
   float fres = 0.05 + 0.95 * pow(max(0.0, 1.0 - max(0.0, dot(n, v))), 4.0);
@@ -586,6 +587,7 @@ export function applyVenueMaterials(root: THREE.Object3D, deck: DeckInfo, glitte
         uniforms.uWho = { value: info.who ?? 0 };
         uniforms.uRadii = { value: new THREE.Vector2(info.rx ?? 1.7, info.ry ?? 1.7) };
         uniforms.uFloor = { value: info.floor ?? 0 };
+        uniforms.uSeat = { value: new THREE.Vector4() };
       } else if (kind === 'screen') {
         uniforms.uCells = { value: moon ? 150 : 60 };
       } else if (kind === 'lamp' || kind === 'canvas') {
@@ -608,4 +610,24 @@ export function applyVenueMaterials(root: THREE.Object3D, deck: DeckInfo, glitte
     mesh.frustumCulled = false;
   });
   return made;
+}
+
+/**
+ * The podium shader for a Showdown seat: a round podium of `radius` standing on `floor`, whose top
+ * and light come from its own `uSeat` (centre of the lid, and how much it is lit) instead of a
+ * band member's. The geometry marks its lid with v below -0.5 (see ring.ts).
+ */
+export function seatMaterial(radius: number, floor: number): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    name: 'seat',
+    uniforms: {
+      ...shared,
+      uWho: { value: -1 },
+      uRadii: { value: new THREE.Vector2(radius, radius) },
+      uFloor: { value: floor },
+      uSeat: { value: new THREE.Vector4() },
+    },
+    vertexShader: STATIC_VERTEX,
+    fragmentShader: FRAGMENTS.podium,
+  });
 }

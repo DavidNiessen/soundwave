@@ -6,9 +6,11 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import type { BandLevels } from '../../audio/bands';
 import type { Part } from '../../chart/types';
 import type { GraphicsSettings, Level } from '../../game/graphics';
+import type { Avatar } from '../../net/protocol';
 import { loadCast, type Cast } from '../aurora/assets';
-import { Figures } from '../aurora/figures';
+import { Figures, type Person } from '../aurora/figures';
 import { Flames } from '../aurora/flames';
+import { Ring, type RingPlace, type RingSeat } from '../aurora/ring';
 import { Beams } from '../aurora/beams';
 import { shared } from '../aurora/shared';
 import { DEFAULT_VENUE, type VenueId } from '../venues/catalog';
@@ -24,11 +26,18 @@ export interface StageOptions {
   mode: 'play' | 'menu';
   /** The part being played: that band member gets the close-ups. */
   part?: Part;
+  /** Players' looks: each part's band member in the colours of the player on it. */
+  avatars?: Avatars;
+  /** A Showdown: the players on a ring of podiums, in place of the band. */
+  ring?: RingSeat[];
   /** Where the show takes place (Moonrise when not given). */
   venue?: VenueId;
   /** How the player's stage looks (colours, brightness, show): see setLookOptions. */
   look?: StageLook;
 }
+
+/** The look of the player on each part (a part without one keeps the band member's own). */
+export type Avatars = Partial<Record<Part, Avatar>>;
 
 export interface StageFrame {
   beat: 'none' | 'beat' | 'downbeat';
@@ -83,7 +92,10 @@ export class Stage {
     return new Stage(canvas, venue, cast, g, opts);
   }
 
-  readonly director: Director;
+  /** The camera's director: the band's, or a Showdown ring's while there is one. */
+  director: Director;
+  private readonly bandDirector: Director;
+  private readonly bandSet: Cast['band'];
   /** Bass, middle and treble as the page meters them (see BandMeter). */
   private readonly bandsIn: BandLevels = { low: 0.25, mid: 0.25, high: 0.2 };
   /** The canvas's size on the page, in CSS pixels, and the screen's pixel ratio. */
@@ -96,6 +108,11 @@ export class Stage {
   private readonly beams: Beams;
   private readonly crowd: Figures;
   private readonly band: Figures;
+  /** The band members, by part, for dressing them as the players. */
+  private players: Person[] = [];
+  /** A Showdown's ring of players (see StageOptions.ring), or null for the band. */
+  private ring: Ring | null = null;
+  private ringFigures: Figures | null = null;
   /** A level surface's mirror image (see Venue.mirror): the scene drawn once more from below it. */
   private mirror: THREE.WebGLRenderTarget | null = null;
   private readonly mirrorCamera = new THREE.PerspectiveCamera();
@@ -172,7 +189,9 @@ export class Stage {
     const menu = opts.mode === 'menu';
     this.menu = menu;
     this.show = new LightShow(menu);
-    this.director = new Director(venue.shots, menu ? 'calm' : 'auto', 7, menu);
+    this.bandDirector = new Director(venue.shots, menu ? 'calm' : 'auto', 7, menu);
+    this.director = this.bandDirector;
+    this.bandSet = cast.band;
     this.looks = venue.looks;
     this.owned.push(venue);
     this.scene.add(venue.root);
@@ -181,7 +200,10 @@ export class Stage {
     this.crowd.add(venue.audience);
     this.band = new Figures(cast.band);
     this.band.add(venue.players, true);
+    this.players = venue.players;
+    if (opts.avatars) this.setAvatars(opts.avatars);
     this.focus = opts.part === 'vocals' ? 'vox' : opts.part;
+    if (opts.ring?.length) this.setRing(opts.ring);
     this.scene.add(this.crowd.group, this.band.group);
     this.owned.push(this.crowd, this.band);
 
@@ -367,6 +389,83 @@ export class Stage {
   }
 
   /**
+   * Puts a Showdown's players on a ring of podiums in place of the band (the island, its steps and
+   * podiums and the speaker stacks on it make way), or brings the band back (null or nobody).
+   * The camera's shots go with it: the ring's, or the band's.
+   */
+  setRing(seats: RingSeat[] | null) {
+    if (this.ring) {
+      this.scene.remove(this.ring.group, this.ringFigures!.group);
+      this.ring.dispose();
+      this.ringFigures!.dispose();
+      this.ring = this.ringFigures = null;
+    }
+    const way = this.venue.ring;
+    const on = !!seats?.length && !!way;
+    way?.makeWay(on);
+    this.band.group.visible = !on;
+    if (!on || !way) {
+      this.director = this.bandDirector;
+      return;
+    }
+    const figures = new Figures(this.bandSet);
+    const ring = new Ring(seats!, way.deck, this.bandSet.data.band ?? {}, figures);
+    this.ring = ring;
+    this.ringFigures = figures;
+    this.scene.add(ring.group, figures.group);
+    // The band's own shots have nobody to film: the ring's take their place. The menu keeps to the ring's.
+    const shots = ring.shots();
+    this.director = this.menu
+      ? new Director(
+          // Not over this player's shoulder: in a menu they stand behind its panels at the left.
+          shots.filter((x) => x.name !== 'ring-me').map((x) => ({ ...x, calm: true })),
+          'calm',
+          7,
+          true,
+          'ring',
+        )
+      : new Director([...this.venue.shots.filter((x) => !/^(band|close)/.test(x.name)), ...shots], 'auto', 7, false, 'ring');
+  }
+
+  /** A Showdown's board as it stands (see Ring.setPlaces). */
+  setPlaces(places: RingPlace[]) {
+    this.ring?.setPlaces(places);
+  }
+
+  /** A Showdown Strike from one player to another, landing in `ms` milliseconds. */
+  strike(from: string, to: string, ms: number) {
+    this.ring?.strike(from, to, ms);
+  }
+
+  /**
+   * Keeps the camera on one part's band member (while a player dresses them), or lets it roam again
+   * (null). `shift`: how far right of the middle they stand in the picture, as a share of its width
+   * (the menus beside them take the left).
+   */
+  lookAt(part: Part | null, shift = 0) {
+    this.director.hold(part ? `band-${part}` : null);
+    this.shift = part ? shift : 0;
+    this.frameShift();
+  }
+
+  /** A share of the picture's width the view is moved by, so the held subject stands off-centre. */
+  private shift = 0;
+  private frameShift() {
+    const { width: w, height: h } = this.size;
+    if (this.shift) this.camera.setViewOffset(w, h, -this.shift * w, 0, w, h);
+    else this.camera.clearViewOffset();
+  }
+
+  /** Dresses each part's band member as the player on that part, or as themselves where nobody is. */
+  setAvatars(avatars: Avatars) {
+    for (const p of this.players) {
+      const a = avatars[(p.part === 'vox' ? 'vocals' : p.part) as Part];
+      Object.assign(p, { top: a?.top, bottom: a?.bottom, finish: a?.finish, recolor: a ? 1 : 0 });
+      this.band.restyle(p);
+    }
+  }
+
+  /**
    * A drop on the menus' stage, as the stage browser's Test the drop asks for: everything fires as
    * when overdrive starts in a song, and for `seconds` the flame jets keep time on the stage's own
    * beat (the menus hear none). The show runs at full tilt meanwhile from its input (see menuStage).
@@ -407,6 +506,7 @@ export class Stage {
     this.mirror?.setSize(Math.max(1, Math.round((w * ratio) / 2)), Math.max(1, Math.round((h * ratio) / 2)));
     this.camera.aspect = w / Math.max(1, h);
     this.camera.updateProjectionMatrix();
+    this.frameShift();
   }
 
   /**
@@ -528,9 +628,18 @@ export class Stage {
       height: this.renderer.domElement.height,
     });
     this.venue.update(fr);
+    if (this.ring) {
+      this.ring.update(dt, this.pulse, this.sparks);
+      // No band member's light pools on the deck; its rings of light spread from the ring's middle.
+      // (Set every frame: the shaders' values are shared by every stage drawn here.)
+      for (const v of shared.uBand.value) v.set(0, -100, 0);
+      const { center, rx, rz } = this.ring.layout;
+      shared.uIsland.value.set(center[0], center[2], rx, rz);
+    }
 
     const pose = this.director.pose();
-    const raised = this.venue.cameraLift?.(this.director.shot.name) ?? 0;
+    const shot = this.director.shot.name;
+    const raised = this.ring ? this.ring.raised(shot) : (this.venue.cameraLift?.(shot) ?? 0);
     pose.pos[1] += raised;
     pose.target[1] += raised;
     this.camera.position.set(...pose.pos);
@@ -571,6 +680,11 @@ export class Stage {
     cam.aspect = main.aspect;
     cam.near = main.near;
     cam.far = main.far;
+    // The reflection is framed as the picture is, off-centre too.
+    if (main.view?.enabled) {
+      const v = main.view;
+      cam.setViewOffset(v.fullWidth, v.fullHeight, v.offsetX, v.offsetY, v.width, v.height);
+    } else cam.clearViewOffset();
     cam.updateProjectionMatrix();
     const pos = main.position;
     const ahead = TMP_V.set(0, 0, -1).applyQuaternion(main.quaternion).add(pos);
@@ -582,7 +696,9 @@ export class Stage {
       .set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1)
       .multiply(cam.projectionMatrix)
       .multiply(cam.matrixWorldInverse);
-    const left = [this.crowd.group, this.band.group, this.beams.group, ...(this.venue.mirror.hide ?? [])].filter((o) => o.visible);
+    const left = [this.crowd.group, this.band.group, this.ringFigures?.group, this.beams.group, ...(this.venue.mirror.hide ?? [])].filter(
+      (o): o is THREE.Object3D => !!o?.visible,
+    );
     for (const o of left) o.visible = false;
     // A mirror surface drawn into its own picture must not read that picture (a feedback loop the
     // GPU refuses): in this pass it does not mirror.
@@ -617,6 +733,7 @@ export class Stage {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this.setRing(null);
     this.canvas.removeEventListener('webglcontextlost', this.onContextLost);
     this.canvas.removeEventListener('webglcontextrestored', this.onContextRestored as EventListener);
     for (const o of this.owned) o.dispose();

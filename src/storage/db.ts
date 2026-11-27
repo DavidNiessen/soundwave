@@ -16,6 +16,12 @@ export interface SongMeta {
   duration: number;
   addedAt: number;
   cover?: Blob;
+  /**
+   * Where the song came from, when it was downloaded from a server: that server's address, the
+   * song's own id there and the hash of the file it was then. A different hash there means the
+   * server's copy changed (its details were edited), and the game takes it over.
+   */
+  server?: { url: string; uid: string; hash: string };
 }
 
 export interface BestScore {

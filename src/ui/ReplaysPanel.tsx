@@ -4,7 +4,7 @@ import type { Settings } from '../game/settings';
 import { getInputMode, usesFocus } from '../input/inputMode';
 import { focusEl, focusStart } from '../input/menuNav';
 import type { SongMeta } from '../storage/db';
-import type { ReplayMeta } from '../storage/replays';
+import { MODE_LABEL, type ReplayMeta } from '../storage/replays';
 import { Hint, useHints } from './actions';
 import { Cover } from './Cover';
 import { exportOf, exportShort, exportStatus, useExports } from './ExportProgress';
@@ -147,6 +147,7 @@ export function ReplaysPanel({ replays, songs, settings, actions, onSettings, co
                       <span className="song-title">{r.title}</span>
                       <span className="song-artist replay-row-sub">
                         <Icon strokeWidth={ICON_STROKE} aria-hidden />
+                        {r.mode && <span className={`mode-tag ${r.mode}`}>{MODE_LABEL[r.mode]}</span>}
                         {PART_LABEL[r.part]} · {DIFFICULTY_LABEL[r.difficulty]} · {replayDate(r.date)}
                       </span>
                     </span>

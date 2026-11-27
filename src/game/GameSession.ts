@@ -15,14 +15,20 @@ export type GameEvent =
   | { type: 'overdrive-start' }
   | { type: 'overdrive-end' };
 
-const enum NoteState {
-  Pending = 0,
-  Hit = 1,
-  Missed = 2,
-}
+// A plain object rather than an enum: the server runs this file as it is (Node strips the types).
+const NoteState = { Pending: 0, Hit: 1, Missed: 2 } as const;
 
 /** How early a sustain may be released and still count as complete. */
 const SUSTAIN_RELEASE_GRACE = 0.12;
+/**
+ * Playing together changes the multiplier by a rule, a few bits. Showdown's Drain halves the
+ * streak's multiplier (`halve`; overdrive still doubles what is left), and in runs from before that
+ * it capped the whole multiplier (`cap`, 0..3, in the low bits), which those runs keep doing. The rule
+ * is part of a run (replay.ts), so a re-judged score includes it. Bits beyond these are ignored (an
+ * older version's band mode used them).
+ */
+export const RULE = { cap: 3, halve: 4 } as const;
+
 /** Fraction of the overdrive meter a completed phrase awards. */
 export const PHRASE_REWARD = 0.25;
 /** Beats of overdrive per PHRASE_REWARD of meter. */
@@ -44,6 +50,11 @@ export interface Results {
 /**
  * Pure gameplay state machine. It knows nothing about audio or rendering:
  * callers feed it song time (seconds) and lane presses/releases.
+ *
+ * A run is decided by its inputs alone (each press, release and overdrive start with its time), not
+ * by how often `update` is called: what happens by itself (a note's window closing, a hold ending,
+ * overdrive running out) happens at its own time, in order, and sustain points and the overdrive
+ * meter are worked out between those times. The same inputs give the same result at any frame rate.
  */
 export class GameSession {
   readonly chart: Chart;
@@ -55,20 +66,31 @@ export class GameSession {
   readonly releaseState: Uint8Array;
   releasesHit = 0;
 
-  score = 0;
   streak = 0;
   bestStreak = 0;
-  overdrive = 0;
   overdriveActive = false;
   overdriveActivations = 0;
   counts: Record<Grade | 'miss', number> = { perfect: 0, great: 0, good: 0, miss: 0 };
 
   private cursor = 0;
-  private lastTime = 0;
+  /** Points settled so far: every hit, and sustain points up to `mark`. */
+  private points = 0;
+  /** The overdrive meter (0..1) as it stood at `mark`. */
+  private meter = 0;
+  /** The song time up to which sustain points and the overdrive drain are settled. */
+  private mark = 0;
+  /** The song time the session was last advanced to. */
+  private now = 0;
+  /** Overdrive meter drained per second while it is active. */
+  private readonly drain: number;
   private readonly phraseFailed = new Set<number>();
   private readonly phraseLast = new Map<number, number>();
-  /** The score of a flawless run without overdrive: what the stars are measured against. */
-  private readonly par: number;
+  /** The score of a flawless run without overdrive: what the stars (and Showdown's shares) are measured against. */
+  readonly par: number;
+  /**
+   * What playing together does to the multiplier now (see `RULE`): Showdown's Drain halves it.
+   */
+  private rule = 0;
   /** The share of par that turns the stars gold on this chart (it depends on how much overdrive the chart offers). */
   private readonly goldAt: number;
   private listeners: ((e: GameEvent) => void)[] = [];
@@ -92,6 +114,22 @@ export class GameSession {
     const span = notes.length ? notes[notes.length - 1].t + notes[notes.length - 1].dur - notes[0].t : 0;
     const overdriveTime = this.phraseLast.size * BEATS_PER_REWARD * chart.secondsPerBeat;
     this.goldAt = goldThreshold(span > 0 ? overdriveTime / span : 0);
+    this.drain = PHRASE_REWARD / (BEATS_PER_REWARD * chart.secondsPerBeat);
+  }
+
+  /** The score right now: what is settled, and the sustain points of the holds since. */
+  get score() {
+    return this.points + this.sustainPoints(this.now);
+  }
+
+  /** The song time the session has reached. */
+  get time() {
+    return this.now;
+  }
+
+  /** The overdrive meter right now, 0..1. */
+  get overdrive() {
+    return this.overdriveActive ? Math.max(0, this.meter - Math.max(0, this.now - this.mark) * this.drain) : this.meter;
   }
 
   on(fn: (e: GameEvent) => void) {
@@ -104,11 +142,15 @@ export class GameSession {
   }
 
   get multiplier() {
-    return multiplierFor(this.streak) * (this.overdriveActive ? OVERDRIVE_FACTOR : 1);
+    const streak = multiplierFor(this.streak);
+    const m = (this.rule & RULE.halve ? Math.max(1, Math.ceil(streak / 2)) : streak) * (this.overdriveActive ? OVERDRIVE_FACTOR : 1);
+    const cap = this.rule & RULE.cap;
+    return cap > 0 ? Math.min(cap, m) : m;
   }
 
   press(lane: number, t: number) {
     if (lane < 0 || lane >= this.chart.lanes) return;
+    this.reach(t);
     this.laneDown[lane] = 1;
     const notes = this.chart.notes;
     let best = -1;
@@ -132,7 +174,7 @@ export class GameSession {
     this.counts[grade]++;
     this.streak++;
     this.bestStreak = Math.max(this.bestStreak, this.streak);
-    this.score += NOTE_POINTS[grade] * this.multiplier;
+    this.points += NOTE_POINTS[grade] * this.multiplier;
     if (n.dur > 0) this.holding[lane] = best;
     this.emit({ type: 'hit', lane, grade, noteIndex: best, delta: t - n.t });
     this.checkPhrase(best);
@@ -140,6 +182,7 @@ export class GameSession {
 
   release(lane: number, t: number) {
     if (lane < 0 || lane >= this.chart.lanes) return;
+    this.reach(t);
     this.laneDown[lane] = 0;
     const idx = this.holding[lane];
     if (idx < 0) return;
@@ -160,7 +203,7 @@ export class GameSession {
   private releaseHit(i: number, lane: number, grade: Grade, delta = 0) {
     this.releaseState[i] = 1;
     this.releasesHit++;
-    this.score += NOTE_POINTS[grade] * this.multiplier;
+    this.points += NOTE_POINTS[grade] * this.multiplier;
     this.emit({ type: 'release', lane, grade, noteIndex: i, delta });
   }
 
@@ -174,7 +217,8 @@ export class GameSession {
    * Ends every hold without judging it (pausing rewinds the song, so a hold can't be finished).
    * A release note dropped this way counts as not released, but doesn't break the streak.
    */
-  dropHolds() {
+  dropHolds(t = this.now) {
+    this.reach(t);
     for (let lane = 0; lane < this.holding.length; lane++) {
       this.laneDown[lane] = 0;
       const idx = this.holding[lane];
@@ -193,67 +237,149 @@ export class GameSession {
     return this.releaseState[i] === 2;
   }
 
-  activateOverdrive() {
-    if (this.overdriveActive || this.overdrive < PHRASE_REWARD) return false;
+  activateOverdrive(t = this.now) {
+    this.reach(t);
+    if (this.overdriveActive || this.meter < PHRASE_REWARD) return false;
     this.overdriveActive = true;
     this.overdriveActivations++;
     this.emit({ type: 'overdrive-start' });
     return true;
   }
 
-  /** Advance to song time t: scores sustains, drains overdrive, registers misses. */
-  update(t: number) {
-    const dt = Math.max(0, t - this.lastTime);
-    this.lastTime = t;
-    const notes = this.chart.notes;
-    const spb = this.chart.secondsPerBeat;
+  /**
+   * Showdown's Strike: the whole charge is spent at song time t, on a hit against another player.
+   * Gives the charge spent (0 when there is not enough of it, or overdrive is running).
+   */
+  spendCharge(t = this.now): number {
+    this.reach(t);
+    if (this.overdriveActive || this.meter < PHRASE_REWARD) return 0;
+    const spent = this.meter;
+    this.meter = 0;
+    return spent;
+  }
 
+  /** From song time t the multiplier follows `rule` (see `RULE`; 0 for none). */
+  setRule(rule: number, t = this.now) {
+    this.reach(t);
+    this.rule = rule & (RULE.cap | RULE.halve);
+  }
+
+  /**
+   * Advance to song time t: what is due before t happens, each thing at its own time. Time only
+   * goes forward here, so a frame whose clock reads a little behind the last input changes nothing;
+   * the song is wound back only by `rewind`.
+   */
+  update(t: number) {
+    if (!(t > this.now)) return;
+    this.advance(t);
+    this.now = t;
+  }
+
+  /**
+   * The song was wound back to song time t (resuming from a pause): time counts on from there, so
+   * an overdrive still running drains again over the stretch that is played twice. Notes already
+   * judged stay judged. Holds are dropped first, as a pause does: here too, so a run that winds
+   * back over a hold it still holds cannot count the same stretch of it twice.
+   */
+  rewind(t: number) {
+    if (!(t < this.now) || !Number.isFinite(t)) return;
+    this.dropHolds(this.now);
+    this.settle(this.now);
+    this.now = t;
+    this.mark = t;
+  }
+
+  /** Brings the session to the time of an input: what was due before it has happened, and the points up to it are settled. */
+  private reach(t: number) {
+    // An input at no time at all (NaN, from a damaged or made-up run) happens now: NaN in the
+    // overdrive meter would keep overdrive on to the end of the song.
+    if (!Number.isFinite(t)) t = this.now;
+    this.advance(t);
+    this.settle(t);
+    if (t > this.now) this.now = t;
+  }
+
+  /** Sustain points of the holds from `mark` to `to`, at the multiplier that holds now. */
+  private sustainPoints(to: number): number {
+    let sum = 0;
     for (let lane = 0; lane < this.holding.length; lane++) {
       const idx = this.holding[lane];
       if (idx < 0) continue;
-      const n = notes[idx];
-      const end = n.t + n.dur;
-      const from = Math.max(n.t, t - dt);
-      const to = Math.min(end, t);
-      if (to > from) this.score += ((to - from) / spb) * SUSTAIN_POINTS_PER_BEAT * this.multiplier;
-      if (n.release) {
-        // Still holding once the release window has passed: too late.
-        if (t > end + WINDOWS.good) {
-          this.holding[lane] = -1;
-          this.releaseMiss(idx, lane, false);
-          this.emit({ type: 'sustain-end', lane, complete: false });
-        }
-      } else if (t >= end) {
-        this.holding[lane] = -1;
-        this.emit({ type: 'sustain-end', lane, complete: true });
-      }
+      const n = this.chart.notes[idx];
+      const start = Math.max(n.t, this.mark);
+      const end = Math.min(n.t + n.dur, to);
+      if (end > start) sum += ((end - start) / this.chart.secondsPerBeat) * SUSTAIN_POINTS_PER_BEAT * this.multiplier;
     }
+    return sum;
+  }
 
-    if (this.overdriveActive) {
-      this.overdrive -= (dt / (BEATS_PER_REWARD * spb)) * PHRASE_REWARD;
-      if (this.overdrive <= 0) {
-        this.overdrive = 0;
+  /**
+   * Settles sustain points and the overdrive drain up to `to`. Called only at the times of inputs
+   * and of the things that happen by themselves, never at a frame: between those the multiplier
+   * does not change, and a run adds up the same however often it is drawn.
+   */
+  private settle(to: number) {
+    if (to <= this.mark) return;
+    this.points += this.sustainPoints(to);
+    if (this.overdriveActive) this.meter = Math.max(0, this.meter - (to - this.mark) * this.drain);
+    this.mark = to;
+  }
+
+  /** Lets everything happen that is due before t, in order of time. */
+  private advance(t: number) {
+    const notes = this.chart.notes;
+    for (;;) {
+      while (this.cursor < notes.length && this.state[this.cursor] !== NoteState.Pending) this.cursor++;
+      // The earliest of: the next note's window closing, a hold ending, overdrive running out.
+      let at = Infinity;
+      let what: 'miss' | 'overdrive' | number = 'miss';
+      if (this.cursor < notes.length) at = notes[this.cursor].t + WINDOWS.good;
+      for (let lane = 0; lane < this.holding.length; lane++) {
+        const idx = this.holding[lane];
+        if (idx < 0) continue;
+        const n = notes[idx];
+        // A hold that must be let go on time is missed once its release window has passed.
+        const due = n.t + n.dur + (n.release ? WINDOWS.good : 0);
+        if (due < at) {
+          at = due;
+          what = lane;
+        }
+      }
+      if (this.overdriveActive) {
+        const out = this.mark + this.meter / this.drain;
+        if (out < at) {
+          at = out;
+          what = 'overdrive';
+        }
+      }
+      if (!(at < t)) return;
+      this.settle(at);
+      if (what === 'miss') this.miss(this.cursor++);
+      else if (what === 'overdrive') {
+        this.meter = 0;
         this.overdriveActive = false;
         this.emit({ type: 'overdrive-end' });
+      } else {
+        const idx = this.holding[what];
+        this.holding[what] = -1;
+        if (notes[idx].release) {
+          this.releaseMiss(idx, what, false);
+          this.emit({ type: 'sustain-end', lane: what, complete: false });
+        } else this.emit({ type: 'sustain-end', lane: what, complete: true });
       }
     }
+  }
 
-    while (this.cursor < notes.length) {
-      const i = this.cursor;
-      const n = notes[i];
-      if (this.state[i] === NoteState.Pending) {
-        if (t - n.t <= WINDOWS.good) break;
-        this.state[i] = NoteState.Missed;
-        if (n.release) this.releaseState[i] = 2;
-        this.counts.miss++;
-        this.streak = 0;
-        this.emit({ type: 'miss', lane: n.lane, noteIndex: i });
-        if (n.phrase >= 0 && !this.phraseFailed.has(n.phrase)) {
-          this.phraseFailed.add(n.phrase);
-          this.emit({ type: 'phrase-failed', phrase: n.phrase });
-        }
-      }
-      this.cursor++;
+  private miss(i: number) {
+    const n = this.chart.notes[i];
+    this.state[i] = NoteState.Missed;
+    if (n.release) this.releaseState[i] = 2;
+    this.counts.miss++;
+    this.streak = 0;
+    this.emit({ type: 'miss', lane: n.lane, noteIndex: i });
+    if (n.phrase >= 0 && !this.phraseFailed.has(n.phrase)) {
+      this.phraseFailed.add(n.phrase);
+      this.emit({ type: 'phrase-failed', phrase: n.phrase });
     }
   }
 
@@ -280,7 +406,7 @@ export class GameSession {
         return;
       }
     }
-    this.overdrive = Math.min(1, this.overdrive + PHRASE_REWARD);
+    this.meter = Math.min(1, this.meter + PHRASE_REWARD);
     this.emit({ type: 'phrase-complete', phrase: p });
   }
 

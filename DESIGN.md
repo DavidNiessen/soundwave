@@ -32,6 +32,9 @@ colors:
   lane-3: '#3a8bff'
   lane-4: '#ff8a1f'
   overdrive: '#bfe6ff'
+  showdown-1: '#3d6bff'
+  showdown-2: '#8a4dff'
+  showdown-3: '#c04dff'
 typography:
   display:
     fontFamily: "'Archivo Variable', 'Archivo', system-ui, sans-serif"
@@ -444,6 +447,7 @@ A violet night with four lights that have fixed jobs, and five lane colours that
 - **Warning Red** (danger): destructive confirmation only (the "Delete song and scores" button in the card that asks before a song is removed). Error text uses a softened pink-red (#ffa3b4) and warnings a soft amber (#ffc98a) so sentences stay readable.
 - **Warning Red Light** (danger-2): the hover state of a Warning Red button.
 - **Ready Green** (ok): the "Connected" status pill, as an 18% wash with pale green text.
+- **Showdown Blue to Violet** (showdown-1, showdown-2, showdown-3): a Showdown player's pill over the stage, as one gradient from night blue into violet, so it reads over any stage without taking one of the four light roles. The host's crown and the owner's role are neutral marks, not gold: they are not earned.
 
 ### Neutral
 

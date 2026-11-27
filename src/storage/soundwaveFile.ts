@@ -21,7 +21,8 @@
  *
  * Chunk types:
  *
- *     META  required. UTF-8 JSON: { title, artist, album?, duration, fileName, addedAt? }.
+ *     META  required. UTF-8 JSON: { title, artist, album?, duration, fileName, addedAt?, copyOf? }
+ *           (copyOf: on a server's smaller copy of a song for streaming, the id of the song it is of).
  *     COVR  optional. The cover image: u8 length m, m bytes of ASCII MIME type, then the image.
  *     ANLS  optional. The analysis: u16 analysis version, then gzip-compressed UTF-8 JSON of it.
  *     EDIT  optional. Charts made or changed by hand in the track editor, and the beat grid they sit
@@ -45,6 +46,14 @@ const CRC = 4;
 const MAX_TEXT = 300;
 /** Largest META, ANLS or EDIT payload read (analysis JSON of a long song is well under this, compressed). */
 const MAX_SMALL_CHUNK = 32 * 1024 * 1024;
+/**
+ * The most an ANLS or EDIT payload may inflate to. An hour-long song's analysis is a few MB of
+ * JSON, so this is far past any real one; a small file made to inflate to gigabytes stops here
+ * instead of filling the memory of whoever opens it (a player's browser, or a server).
+ */
+export const MAX_INFLATED = 64 * 1024 * 1024;
+/** The most chunks a file may have: a real one has five at most, and walking each costs a read. */
+const MAX_CHUNKS = 1000;
 const COVER_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
 export interface SoundwaveMeta {
@@ -54,6 +63,8 @@ export interface SoundwaveMeta {
   duration: number;
   fileName: string;
   addedAt?: number;
+  /** A server's smaller copy of a song, for streaming: the id (audio hash) of the song it was made of. */
+  copyOf?: string;
 }
 
 export interface SoundwaveAnalysis {
@@ -127,8 +138,29 @@ async function bytesOf(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> 
 }
 
 const gzip = (data: Uint8Array) => bytesOf(new Blob([data as Uint8Array<ArrayBuffer>]).stream().pipeThrough(new CompressionStream('gzip')));
-const gunzip = (data: Uint8Array) =>
-  bytesOf(new Blob([data as Uint8Array<ArrayBuffer>]).stream().pipeThrough(new DecompressionStream('gzip')));
+/** Inflates gzip data, counting what comes out, and gives up past MAX_INFLATED. */
+async function gunzip(data: Uint8Array): Promise<Uint8Array> {
+  const reader = new Blob([data as Uint8Array<ArrayBuffer>]).stream().pipeThrough(new DecompressionStream('gzip')).getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.length;
+    if (size > MAX_INFLATED) {
+      await reader.cancel().catch(() => {});
+      throw new SoundwaveFileError('This song file is damaged.');
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
+}
 
 /** A payload that starts with a version and carries gzip-compressed JSON (ANLS, EDIT). */
 async function versioned(v: { version: number; data: unknown }): Promise<Uint8Array> {
@@ -161,6 +193,7 @@ export async function writeSoundwave(c: SoundwaveContents): Promise<Blob> {
     duration: c.meta.duration,
     fileName: c.meta.fileName,
     ...(c.meta.addedAt ? { addedAt: c.meta.addedAt } : {}),
+    ...(c.meta.copyOf ? { copyOf: c.meta.copyOf } : {}),
   };
   const parts: Uint8Array[] = [header, chunk('META', utf8.encode(JSON.stringify(meta)))];
   if (c.cover) parts.push(chunk('COVR', typed(c.cover.type || 'image/jpeg', new Uint8Array(await c.cover.arrayBuffer()))));
@@ -205,6 +238,7 @@ async function index(blob: Blob): Promise<ChunkRef[]> {
     const length = new DataView(head.buffer).getUint32(4, true);
     if (!/^[A-Z0-9]{4}$/.test(type) || at + CHUNK_HEAD + length + CRC > blob.size)
       throw new SoundwaveFileError('This song file is damaged.');
+    if (refs.length >= MAX_CHUNKS) throw new SoundwaveFileError('This song file is damaged.');
     refs.push({ type, offset: at + CHUNK_HEAD, length });
     at += CHUNK_HEAD + length + CRC;
   }
@@ -246,6 +280,7 @@ function parseMeta(data: Uint8Array): SoundwaveMeta {
     duration,
     fileName: text(raw.fileName, 'song'),
     ...(addedAt ? { addedAt } : {}),
+    ...(typeof raw.copyOf === 'string' && /^[0-9a-f]{64}$/.test(raw.copyOf) ? { copyOf: raw.copyOf } : {}),
   };
 }
 
@@ -254,8 +289,10 @@ const MIME = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i;
 /**
  * Reads a whole .soundwave file and checks every chunk. For files from elsewhere: whatever is
  * malformed throws a SoundwaveFileError, and a cover or analysis that cannot be used is left out.
+ * `analysis: false` leaves the analysis and edits out unread, for a reader that needs only the
+ * details and the audio (a server checking whose song a file is), so it never inflates them.
  */
-export async function readSoundwave(blob: Blob): Promise<SoundwaveContents> {
+export async function readSoundwave(blob: Blob, options: { analysis?: boolean } = {}): Promise<SoundwaveContents> {
   const refs = await index(blob);
   const find = (type: string) => refs.find((r) => r.type === type);
   const metaRef = find('META');
@@ -284,8 +321,9 @@ export async function readSoundwave(blob: Blob): Promise<SoundwaveContents> {
     if (!ref || ref.length <= 2 || ref.length > MAX_SMALL_CHUNK) return undefined;
     return readVersioned(await payload(blob, ref, true));
   };
-  const analysis: SoundwaveAnalysis | undefined = await small('ANLS');
-  const edits: SoundwaveEdits | undefined = await small('EDIT');
+  const inflate = options.analysis !== false;
+  const analysis: SoundwaveAnalysis | undefined = inflate ? await small('ANLS') : undefined;
+  const edits: SoundwaveEdits | undefined = inflate ? await small('EDIT') : undefined;
   return { meta, cover, analysis, edits, audio };
 }
 

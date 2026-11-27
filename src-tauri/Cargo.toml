@@ -24,7 +24,8 @@ log = "0.4"
 tauri = { version = "2.12.6", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
-tauri-plugin-single-instance = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+tauri-plugin-deep-link = "2"
 cpal = "0.16"
 # Shared on macOS: by default hidapi seizes a device there, and the web view would stop
 # seeing the controller it reads the touchpad and sets the light bar of.
@@ -34,6 +35,10 @@ discord-rich-presence = "1.1"
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
+
+# The player's identity is kept in the system's store for secrets (src/identity.rs; a file on Linux).
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+keyring = { version = "3.6", features = ["apple-native", "windows-native"] }
 
 # The analysis models, run by the app itself on Apple silicon, with Core ML (models.rs). The prebuilt
 # library is fetched when the app is built. (Its Linux build needs a newer glibc than Ubuntu 22.04's.)

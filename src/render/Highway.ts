@@ -5,6 +5,8 @@ import { MAX_MULTIPLIER, multiplierFor } from '../game/scoring';
 import { DRIVE_KIND, PHRASE_KIND, TILE_BANDS, TILE_PALETTES, tileColour, type TileBand } from './tilePalette';
 
 export const LANE_COLORS = [0x3ddc5a, 0xff3b4e, 0xffd23d, 0x3a8bff, 0xff8a1f];
+/** How far the highway sinks as it leaves for an interlude (world units). */
+const AWAY_DROP = 2.6;
 const OVERDRIVE_COLOR = new THREE.Color(0xeaf6ff);
 /** While overdrive lasts every tile on the lane is this light blue, and glows. */
 const OVERDRIVE_TILE = new THREE.Color(0x7fd2ff);
@@ -28,6 +30,8 @@ const WIDE_SHARE = 0.37;
 const BACK = 0.485 / WIDE_SHARE;
 const TALL_SHARE = 0.9;
 const LENGTH = 24;
+/** How much of the deck before the strike line a Showdown hit leaves clear, units. */
+const FOG_CLEAR = 1.2;
 /**
  * How far the deck runs on past the strike line, toward the player: far enough to leave the foot
  * of the screen, so the multiplier dial and the lane labels stand on it.
@@ -189,6 +193,69 @@ const highwayFragment = /* glsl */ `
  * Overdrive's light: a soft light-blue glow lying along the outside of both edges of the lane,
  * brightest at the edge, with slow swells running down it toward the player and a fine shimmer.
  */
+/**
+ * A Showdown hit: a sheet of wavy, shimmering bands lying over the deck from just past the strike
+ * line to the horizon. Ridges warp from side to side and roll toward the player; their crests
+ * stand up out of the deck (fogVertex), catch the light white and fringe into rainbow colours,
+ * and the milky sheet between them blurs out what is underneath, so far notes are hard to read.
+ * The strike line stays clear: the sheet fades in a little beyond it. It flashes as it lands (uFlash).
+ */
+const FOG_WAVES = /* glsl */ `
+  uniform float uTime;
+  // How far up the deck a point is (0 near, 1 far) and across it (0..1) -> the bands' phase there.
+  float fogPhase(vec2 uv) {
+    float bend = 0.16 * sin(uv.x * 8.0 + uTime * 1.3 + uv.y * 6.0)
+      + 0.09 * sin(uv.x * 19.0 - uTime * 2.2 + uv.y * 11.0)
+      + 0.05 * sin(uv.x * 37.0 + uTime * 3.1);
+    return uv.y * 11.0 + uTime * 1.3 + bend * (0.8 + 1.2 * uv.y);
+  }
+`;
+
+const fogVertex = /* glsl */ `
+  uniform float uLevel;
+  varying vec2 vUv;
+  ${FOG_WAVES}
+  void main() {
+    vUv = uv;
+    float s = sin(6.2831853 * fogPhase(uv));
+    vec3 p = position;
+    // The plane lies flat once turned: its own z is up.
+    p.z += pow(max(0.0, s), 3.0) * 0.16 * uLevel * smoothstep(0.0, 0.15, uv.y);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+  }
+`;
+
+const fogFragment = /* glsl */ `
+  uniform float uLevel;
+  uniform float uFlash;
+  varying vec2 vUv;
+  ${FOG_WAVES}
+  float crest(float phase, float sharp) { return pow(max(0.0, sin(6.2831853 * phase)), sharp); }
+  void main() {
+    float ph = fogPhase(vUv);
+    float s = sin(6.2831853 * ph);
+    float c = cos(6.2831853 * ph);
+    // A crest's bright line, split into red, green and blue a hair apart: the rainbow fringe.
+    float fringe = 0.034;
+    vec3 line = vec3(crest(ph + fringe, 26.0), crest(ph, 30.0), crest(ph - fringe, 26.0));
+    // Thin-film colours over each crest's shoulders, drifting along it.
+    vec3 film = 0.5 + 0.5 * cos(6.2831853 * (ph * 0.5 + vUv.x * 0.7 + vec3(0.0, 0.33, 0.67)));
+    float shoulder = smoothstep(0.35, 0.85, s) * (1.0 - smoothstep(0.92, 1.0, s));
+    // The far side of each crest lies in its shadow.
+    float shade = smoothstep(0.0, -0.9, c) * max(0.0, s);
+    // Fine ripples between the crests, like the lines of a contour map.
+    float ripple = pow(max(0.0, sin(6.2831853 * ph * 3.0 + 1.3)), 40.0) * (1.0 - max(0.0, s));
+    vec3 milk = vec3(0.74, 0.72, 0.95);
+    vec3 col = milk * (0.55 + 0.45 * max(0.0, s)) * (1.0 - 0.65 * shade);
+    col += film * shoulder * 0.7 + line * 1.5 + milk * ripple * 0.5 + vec3(1.0, 0.92, 1.0) * uFlash * 0.6;
+    float sides = smoothstep(0.0, 0.05, vUv.x) * smoothstep(1.0, 0.95, vUv.x);
+    // Clear at the strike line, thick from a little beyond it to the horizon.
+    float reach = smoothstep(0.0, 0.14, vUv.y);
+    float alpha = (0.55 + 0.3 * max(0.0, s) + 0.3 * line.g + 0.15 * shoulder + 0.3 * shade) * sides * reach + uFlash * 0.3 * sides * reach;
+    gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.95) * uLevel);
+  }
+`;
+
 const glowFragment = /* glsl */ `
   uniform float uTime;
   uniform float uLevel;
@@ -651,6 +718,25 @@ export class Highway {
   private readonly root = new THREE.Group();
   private readonly trackMat: THREE.ShaderMaterial;
   private readonly glowMats: THREE.ShaderMaterial[] = [];
+  /** Showdown's Fog: 1 while a hit hazes the far highway, 0 otherwise (it fades between). */
+  fog = 0;
+  /**
+   * How far the highway is gone, during an interlude (0: in place, 1: out of sight; see
+   * breaks.highwayAway): it sinks and fades, or with `awaySlide` off (reduced motion) only fades.
+   * The canvas's own opacity is set for the page; a video lays the canvas with the same alpha.
+   */
+  away = 0;
+  awaySlide = true;
+  private shownAway = -1;
+  private readonly fogMat = new THREE.ShaderMaterial({
+    vertexShader: fogVertex,
+    fragmentShader: fogFragment,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    uniforms: { uLevel: { value: 0 }, uTime: { value: 0 }, uFlash: { value: 0 } },
+  });
+  private fogMesh: THREE.Mesh | null = null;
   private readonly glow = new THREE.Group();
   private lip!: THREE.MeshBasicMaterial;
   /** The motes of light beside the rails (see floatMotes). */
@@ -785,6 +871,16 @@ export class Highway {
     this.lip = lip.material as THREE.MeshBasicMaterial;
     track.renderOrder = -2;
     this.root.add(track);
+
+    // A Showdown hit: from a little beyond the strike line to the horizon, finely cut so its crests can stand up.
+    const fogLen = LENGTH - FOG_CLEAR;
+    const fog = new THREE.Mesh(new THREE.PlaneGeometry(this.width + 0.3, fogLen, 24, 240), this.fogMat);
+    fog.rotation.x = -Math.PI / 2;
+    fog.position.set(0, 0.05, -FOG_CLEAR - fogLen / 2);
+    fog.renderOrder = 5;
+    fog.visible = false;
+    this.fogMesh = fog;
+    this.root.add(fog);
 
     // Overdrive's light: a strip of glow lying flat along the outside of each edge.
     const glowWidth = 1.1;
@@ -1294,6 +1390,18 @@ export class Highway {
     u.uTime.value = (now / 1000) % 1000;
     // The facets move with the notes; 16 units is a whole number of their repeats.
     u.uTravel.value = (t * speed) % 16;
+    if (this.away !== this.shownAway) {
+      this.shownAway = this.away;
+      this.root.position.y = this.awaySlide ? -AWAY_DROP * this.away : 0;
+      if ('style' in this.canvas) this.canvas.style.opacity = this.away > 0 ? String(1 - this.away) : '';
+    }
+    const fu = this.fogMat.uniforms;
+    // A hit rolls in fast, with a flash, and clears more slowly.
+    if (this.fog > 0.5 && fu.uLevel.value < 0.05) fu.uFlash.value = 1;
+    fu.uFlash.value = Math.max(0, fu.uFlash.value - dt * 2.5);
+    fu.uLevel.value += (this.fog - fu.uLevel.value) * Math.min(1, dt * (this.fog > fu.uLevel.value ? 9 : 3));
+    fu.uTime.value = u.uTime.value;
+    if (this.fogMesh) this.fogMesh.visible = fu.uLevel.value > 0.01;
     this.pulse = Math.max(0, this.pulse - dt * 2);
     // The music's push (beats and bass) is eased before it reaches the deck: it rises over a few
     // hundredths of a second and settles over a few tenths, so the light swells and ebbs with the

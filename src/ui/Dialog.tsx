@@ -37,6 +37,8 @@ interface Props {
   /** Actions for the bar while the dialog is open (Close is added). */
   actions?: Action[];
   closeLabel?: string;
+  /** A press outside closes it (true); false for a question a stray click must not answer. */
+  outsideCloses?: boolean;
   children: ReactNode | ((close: () => void) => ReactNode);
 }
 
@@ -44,7 +46,16 @@ interface Props {
  * A modal dialog: it takes focus and directional navigation while open, keeps Tab inside, closes
  * on Esc, the controller's back button or a press outside, and hands focus back where it was.
  */
-export function Dialog({ title, variant = 'sheet', className = '', onClose, actions = [], closeLabel = 'Close', children }: Props) {
+export function Dialog({
+  title,
+  variant = 'sheet',
+  className = '',
+  onClose,
+  actions = [],
+  closeLabel = 'Close',
+  outsideCloses = true,
+  children,
+}: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [leaving, close] = useExit(onClose);
 
@@ -79,7 +90,7 @@ export function Dialog({ title, variant = 'sheet', className = '', onClose, acti
       ref={ref}
       className={`overlay ${variant} ${className} ${leaving ? 'leaving' : ''}`}
       data-modal
-      onPointerDown={(e) => e.target === e.currentTarget && close()}
+      onPointerDown={(e) => outsideCloses && e.target === e.currentTarget && close()}
     >
       <div className="dialog" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} data-ring="none">
         <button type="button" className="icon-btn dialog-close" data-sfx="back" data-nav-skip aria-label={closeLabel} onClick={close}>

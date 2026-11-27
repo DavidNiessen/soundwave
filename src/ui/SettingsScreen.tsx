@@ -1,4 +1,5 @@
 import {
+  Globe,
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
@@ -38,8 +39,11 @@ import { lightPads, type LightPad } from '../input/lightbar';
 import { dualSenseHaptics, menuPulse, Rumbler } from '../input/rumble';
 import { usePads } from '../input/usePads';
 import { Hint, keyName, useActions, useHints } from './actions';
+import { online } from '../net/client';
 import { Calibration } from './Calibration';
 import { Dialog } from './Dialog';
+import { IdentityDialog } from './IdentityDialog';
+import { identity as identityStore, type IdentityState } from '../net/identity';
 import { ICON_STROKE } from './icons';
 import { deleteAllReplays } from '../storage/db';
 import { REPLAY_LIMIT } from '../storage/replays';
@@ -66,6 +70,7 @@ function updateButton(u: UpdateStatus, upToDate: boolean): string {
   }
 }
 import { useSlide } from './useSlide';
+import { notify } from './notify';
 import {
   AREAS,
   bound,
@@ -93,7 +98,7 @@ interface Props {
   onReplaysDeleted?(): void;
 }
 
-type Tab = 'video' | 'audio' | 'game' | 'controller' | 'touch' | 'shortcuts' | 'advanced';
+type Tab = 'video' | 'audio' | 'game' | 'controller' | 'touch' | 'shortcuts' | 'online' | 'advanced';
 const TABS: [Tab, string, LucideIcon][] = [
   ['video', 'Video', Monitor],
   ['audio', 'Audio', Volume2],
@@ -101,6 +106,7 @@ const TABS: [Tab, string, LucideIcon][] = [
   ['controller', 'Controller', Gamepad2],
   ['touch', 'Touch', Hand],
   ['shortcuts', 'Shortcuts', CommandIcon],
+  ['online', 'Online', Globe],
   ['advanced', 'Advanced', SlidersHorizontal],
 ];
 const TAB_KEY = 'soundwave.settings-tab';
@@ -123,6 +129,7 @@ const FIELDS: Record<Tab, readonly (keyof Settings)[]> = {
   controller: ['glyphs', 'rumble', 'rumbleHits', 'rumbleMisses', 'rumbleSustains', 'rumbleOverdrive', 'ps5Haptics', 'lightbar'],
   touch: ['touchHaptics', 'touchOverdriveSide'],
   shortcuts: ['keys4', 'keys5', 'overdriveKey', 'pad4', 'pad5', 'padOverdrive', 'bindings'],
+  online: ['postScores', 'discordJoin', 'shareSongs', 'shareLibrary', 'serverSongs', 'streamQuality'],
   advanced: ['checkUpdates', 'discordStatus'],
 };
 
@@ -419,6 +426,10 @@ export function SettingsScreen({ settings, model, device, onChange, onBack, inSo
     if (ok) setOutputs(await listOutputs());
   };
 
+  const me = useSyncExternalStore(identityStore.subscribe, identityStore.snapshot);
+  useEffect(() => void identityStore.load(), []);
+  const [identityDialog, setIdentityDialog] = useState<'export' | 'import' | null>(null);
+
   const resetTab = () => {
     const patch: Partial<Settings> = {};
     for (const f of FIELDS[tab]) (patch as Record<string, unknown>)[f] = structuredClone(DEFAULT_SETTINGS[f]);
@@ -450,6 +461,8 @@ export function SettingsScreen({ settings, model, device, onChange, onBack, inSo
     outputs,
     outputsRefused,
     askOutputs: () => void askOutputs(),
+    identity: me,
+    openIdentity: setIdentityDialog,
   });
   const rows = sections.flatMap((s) => s.rows);
   const active = rows.find((r) => r.id === activeId) ?? rows[0];
@@ -568,13 +581,17 @@ export function SettingsScreen({ settings, model, device, onChange, onBack, inSo
           )}
         </Dialog>
       )}
+      {/* Done out of sight (a file saved, a sign-in changed): a notification says so, not another window. */}
+      {identityDialog && (
+        <IdentityDialog kind={identityDialog} onClose={() => setIdentityDialog(null)} onDone={(text) => notify.success(text)} />
+      )}
       {library.ui}
       {updateOpen && <UpdateCard settings={settings} onClose={() => setUpdateOpen(false)} />}
       {calibrating && (
         <Calibration
           onDone={(ms) => {
             setCalibrating(false);
-            if (ms !== null) set({ offsetMs: ms });
+            if (ms !== null) set({ offsetMs: ms, calibratedOn: settings.outputDevice });
           }}
         />
       )}
@@ -609,10 +626,14 @@ interface Ctx {
   outputs: OutputList;
   outputsRefused: boolean;
   askOutputs(): void;
+  /** The player's identity (null before it is made), and the dialogs that back it up and bring it back. */
+  identity: IdentityState | null;
+  openIdentity(kind: 'export' | 'import'): void;
 }
 
 function buildSections(tab: Tab, c: Ctx): Section[] {
   const { settings: s, set } = c;
+  if (tab === 'online') return onlineSections(s, set, c);
   const toggle = (id: string, label: string, help: string, value: boolean, change: (v: boolean) => void, disabled = false): Row => ({
     kind: 'choice',
     id,
@@ -1767,4 +1788,165 @@ function Detail({ row }: { row: Row }) {
       )}
     </div>
   );
+}
+
+/* ------------------------------------------------------------------------------------------- */
+/* Online (docs/specs/online-play.md, 5.1)                                                      */
+
+function onlineSections(s: Settings, set: (patch: Partial<Settings>) => void, c: Ctx): Section[] {
+  const o = online.snapshot();
+  const signedIn = !!o.account;
+  const onOff = (
+    id: keyof Settings & string,
+    label: string,
+    help: string,
+    value: boolean,
+    change: (v: boolean) => void,
+    disabled = false,
+  ): Row => ({
+    kind: 'choice',
+    id,
+    label,
+    help,
+    disabled,
+    value: value ? 'on' : 'off',
+    options: [
+      { value: 'off', label: 'Off' },
+      { value: 'on', label: 'On' },
+    ],
+    set: (v) => change(v === 'on'),
+  });
+  const where = o.info?.name ?? o.server?.replace(/^https?:\/\//, '');
+  return [
+    {
+      title: 'Your server',
+      rows: [
+        {
+          kind: 'info',
+          id: 'serverInfo',
+          label: signedIn ? `Signed in as ${o.account!.name}` : 'Not signed in',
+          help: 'The Soundwave server you play on. Connect, sign out or switch servers on the main menu’s Online tab.',
+          body: signedIn
+            ? `On ${where}${o.status === 'online' ? '' : ', connecting…'}`
+            : o.server
+              ? `${where} is your server, but you are not signed in. Sign in on the Online tab.`
+              : 'No server yet. Pick one on the main menu’s Online tab; the settings below apply once you are on one.',
+        },
+      ],
+    },
+    {
+      title: 'Your identity',
+      rows: [
+        {
+          kind: 'info',
+          id: 'identityInfo',
+          label: c.identity ? (c.identity.backedUp ? 'Backed up' : 'Not backed up yet') : 'Not made yet',
+          help: 'This game signs you in to every server with its identity: no passwords. Each server sees a key of its own, so servers cannot tell they see the same player.',
+          body: !c.identity
+            ? 'It is made the first time you join a server.'
+            : c.identity.backedUp
+              ? 'Keep the backup file and its passphrase somewhere safe. Bring it back on another device or a new installation.'
+              : 'Back it up: if this device is lost or the game’s data is cleared, the backup is the way back to your accounts.',
+        },
+        {
+          kind: 'text',
+          id: 'identityName',
+          label: 'Your name',
+          help: 'The name you join new servers with. Each server can have you by another name: change it there, on the Online tab under your account.',
+          value: c.identity?.name ?? '',
+          set: (v) => void identityStore.setName(v.slice(0, 24)),
+        },
+        {
+          kind: 'action',
+          id: 'identityExport',
+          label: 'Back up',
+          help: 'Saves your identity as a small file locked with a passphrase you pick.',
+          button: 'Back up…',
+          disabled: !c.identity,
+          run: () => c.openIdentity('export'),
+        },
+        {
+          kind: 'action',
+          id: 'identityImport',
+          label: 'Bring back',
+          help: 'Takes an identity from its backup file, on a new installation or another device. It replaces the one here.',
+          button: 'Bring back…',
+          run: () => c.openIdentity('import'),
+        },
+      ],
+    },
+    {
+      title: 'Other players’ songs',
+      rows: [
+        {
+          kind: 'choice',
+          id: 'serverSongs',
+          label: 'Play them by',
+          help: 'How a song you do not have reaches you: one shared on the server, or one a party plays.',
+          value: s.serverSongs,
+          options: [
+            {
+              value: 'stream',
+              label: 'Streaming',
+              help: 'Plays without going into your library. Kept on this device for a while, so it starts at once next time.',
+            },
+            { value: 'download', label: 'Downloading', help: 'Goes into your library, to keep and to play offline.' },
+          ],
+          set: (v) => set({ serverSongs: v as Settings['serverSongs'] }),
+        },
+        {
+          kind: 'choice',
+          id: 'streamQuality',
+          label: 'Streaming quality',
+          help: 'Lower uses less data, for a slow or metered connection. A song the server has no smaller copy of yet comes as shared.',
+          disabled: s.serverSongs !== 'stream',
+          value: s.streamQuality,
+          options: [
+            { value: 'high', label: 'High', help: 'As it was shared. The best sound.' },
+            { value: 'medium', label: 'Medium', help: 'About 1 MB a minute. Hard to tell apart.' },
+            { value: 'low', label: 'Low', help: 'Under 1 MB a minute, for a weak connection.' },
+          ],
+          set: (v) => set({ streamQuality: v as Settings['streamQuality'] }),
+        },
+      ],
+    },
+    {
+      title: 'Your songs',
+      rows: [
+        onOff(
+          'shareLibrary',
+          'Share my library with the server',
+          'Your analysed songs go to the server, where its owner takes songs, so everyone there can play them. Songs you add later go too. Off: nothing of yours is shared.',
+          s.shareLibrary,
+          (v) => set({ shareLibrary: v }),
+        ),
+        onOff(
+          'shareSongs',
+          'Send my party’s songs to who lacks them',
+          'In a party you host, a song a player does not have reaches them through the server, so nobody sits it out. The server keeps it only for your party.',
+          s.shareSongs,
+          (v) => set({ shareSongs: v }),
+        ),
+      ],
+    },
+    {
+      title: 'Scores and friends',
+      rows: [
+        onOff(
+          'postScores',
+          'Post my scores to the leaderboards',
+          'Every song you finish while signed in goes to the server’s leaderboards with its run, which the server checks by judging it again.',
+          s.postScores,
+          (v) => set({ postScores: v }),
+        ),
+        onOff(
+          'discordJoin',
+          'Let Discord friends join',
+          'Your party shows a Join button on your Discord status, and works with Discord’s invites and Ask to Join. Never for a private party. Desktop app only.',
+          s.discordJoin,
+          (v) => set({ discordJoin: v }),
+        ),
+      ],
+    },
+  ];
 }

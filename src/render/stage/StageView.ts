@@ -1,7 +1,9 @@
 import { gpuFound, type GraphicsSettings } from '../../game/graphics';
+import type { Part } from '../../chart/types';
+import type { RingPlace, RingSeat } from '../aurora/ring';
+import type { Avatars, StageOptions } from './Stage';
 import { serveWorkerFetch } from '../../app/workerFetch';
 import { DEFAULT_LOOK, type StageLook } from './look';
-import type { StageOptions } from './Stage';
 import type { Beat, FromStage, StageInput, StageRate, ToStage } from './protocol';
 
 /**
@@ -342,6 +344,31 @@ export class StageView {
 
   finale(seconds: number) {
     this.send({ type: 'finale', id: this.id, seconds });
+  }
+
+  /** Dresses the band as the players on its parts. */
+  setAvatars(avatars: Avatars) {
+    this.send({ type: 'avatars', id: this.id, avatars });
+  }
+
+  /** A Showdown's players on a ring of podiums in place of the band, or the band again (null). */
+  setRing(seats: RingSeat[] | null) {
+    this.send({ type: 'ring', id: this.id, seats });
+  }
+
+  /** A Showdown's board as it stands: the ring's podiums follow it. */
+  setPlaces(places: RingPlace[]) {
+    this.send({ type: 'places', id: this.id, places });
+  }
+
+  /** A Showdown Strike from one player to another, landing in `ms` milliseconds. */
+  strike(from: string, to: string, ms: number) {
+    this.send({ type: 'strike', id: this.id, from, to, ms });
+  }
+
+  /** Keeps the camera on one part's band member, or lets it roam again (null). */
+  lookAt(part: Part | null, shift = 0) {
+    this.send({ type: 'hold', id: this.id, part, shift });
   }
 
   /**

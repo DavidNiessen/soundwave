@@ -261,10 +261,11 @@ export function VideoExportScreen({ replay, chart, inputs, buffer, settings, vid
             scoreLabel,
             session: ctrl.session,
             feedback: ctrl.lastFeedback,
-            deck: layout ? { x: layout.x * k, y: layout.y * k, foot: layout.foot * k, width: layout.width * k } : null,
+            // During an interlude the highway leaves (see breaks.highwayAway), and the deck's dial with it.
+            deck: layout && ctrl.away < 0.5 ? { x: layout.x * k, y: layout.y * k, foot: layout.foot * k, width: layout.width * k } : null,
           })
         : null;
-      composeVideoFrame(g, width, height, video.stage ? stageFrame : null, highway, hud);
+      composeVideoFrame(g, width, height, video.stage ? stageFrame : null, highway, hud, 1 - ctrl.away);
       const p = Math.max(0, Math.min(1, (t - REPLAY_START) / (length + TAIL - REPLAY_START)));
       barRef.current?.style.setProperty('width', `${(p * 100).toFixed(2)}%`);
       const sec = Math.floor(Math.max(0, Math.min(t, chart.duration)));

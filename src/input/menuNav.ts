@@ -33,6 +33,19 @@ const FOCUSABLE =
 
 /** Sent to switch tabs (detail: -1 or 1). */
 export const TAB_EVENT = 'nav-tab';
+/**
+ * Sent, instead of switching, to a part of a tab that must not be left without asking (marked
+ * `data-holds-tabs`: the look editor with changes not saved). Its detail is the switch, to run
+ * once the player has answered.
+ */
+export const TAB_HOLD_EVENT = 'nav-tab-hold';
+/** Hands a tab switch to the part of the screen holding the tabs, if one is; returns whether one was. */
+export function tabsHeld(go: () => void): boolean {
+  const holder = document.querySelector('[data-holds-tabs]');
+  if (!holder) return false;
+  holder.dispatchEvent(new CustomEvent(TAB_HOLD_EVENT, { detail: go }));
+  return true;
+}
 /** Sent after directional navigation moved focus (for move sounds and pulses). */
 export const MOVE_EVENT = 'nav-moved';
 /** Offered to the focused control before focus moves (detail: { dir }); cancel it to keep focus. */

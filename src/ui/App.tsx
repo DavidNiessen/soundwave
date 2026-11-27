@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { setDiscordEnabled, showScene } from '../app/discord';
+import {
+  answerDiscordJoin,
+  onDiscordJoin,
+  onDiscordJoinRequest,
+  setDiscordEnabled,
+  setDiscordJoin,
+  showScene,
+  type JoinRequest,
+} from '../app/discord';
 import { findStage } from '../game/stages';
 import { setActiveStage } from '../render/stage/showStage';
 import { analysisHold } from '../analysis/hold';
@@ -66,7 +74,7 @@ import {
   type SongMeta,
 } from '../storage/db';
 import { getMedia } from '../storage/stageMedia';
-import { newReplayId, type ReplayData, type ReplayMeta } from '../storage/replays';
+import { cleanChart, newReplayId, type ReplayData, type ReplayMeta, type ReplayMode } from '../storage/replays';
 import { soundwaveFileName, isSoundwaveFile } from '../storage/soundwaveFile';
 import { chooseSaveTarget, saveSongFile, watchOpenedFiles, type SaveTarget } from '../storage/share';
 import { videoFileName, type VideoExportSettings } from '../game/videoExport';
@@ -82,7 +90,7 @@ import { Dialog } from './Dialog';
 import type { PickedSong } from './TrackPicker';
 import { EditorScreen } from './EditorScreen';
 import { FocusRing } from './FocusRing';
-import { HomeScreen } from './HomeScreen';
+import { HomeScreen, showOnlineTab } from './HomeScreen';
 import { DIFFICULTY_LABEL, PART_LABEL } from './icons';
 import { LibraryScreen, type SongStatus } from './LibraryScreen';
 import { LobbyScreen } from './LobbyScreen';
@@ -100,11 +108,27 @@ import { StageBackdrop } from './StageBackdrop';
 import type { SongActions } from './SongMenu';
 import { SongSheet } from './SongSheet';
 import { MetadataSheet } from './MetadataSheet';
+import { PartyBoard, PartyScreen, type LastRun } from './PartyScreen';
+import { setMenuAvatars, setMenuRing } from '../render/aurora/menuStage';
+import type { Avatars } from '../render/stage/Stage';
+import type { RingSeat } from '../render/aurora/ring';
+import { BoardsScreen } from './Boards';
+import { AdminScreen } from './ServerAdmin';
+import { decodeRun, encodeRun } from '../net/runs';
+import { replayResults } from '../game/replay';
+import { joinSecret, online, partyId, parseInvite, parseJoinSecret, parseRecovery, type PartyStart } from '../net/client';
+import { partySongs } from '../net/partySongs';
+import { serverSongs, sharedMeta } from '../net/serverSongs';
+import { identity } from '../net/identity';
+import { IdentityDialog } from './IdentityDialog';
+import { PARTY_MAX, type SharedSong, type WireChart } from '../net/protocol';
 import { notify } from './notify';
 import { Notifications } from './Notifications';
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { installUiSounds } from './uiSounds';
 
+/** The identity (its creation time) the player was last asked to back up. */
+const BACKUP_ASKED = 'soundwave.identity-backup-asked';
 type LobbyView = { name: 'lobby'; ids: string[]; from: 'home' | 'library' };
 /** A song open in the track editor; `tested` is how the last test play of its chart went. */
 type EditorView = { name: 'editor'; song: SongMeta; back: View; tested?: Results };
@@ -121,12 +145,44 @@ interface Run {
   lobby: LobbyView;
   /** A chart played from the track editor: where to go back to, and where in the song it starts. */
   test?: { back: EditorView; startAt: number };
+  /** A song played with a party: which of its set, and when it starts (performance.now ms). */
+  /** A party's song: its place in the party's run, when it starts, and the mode it is played in (taken at the start, as the party may change mode before the song is saved). */
+  party?: { songIndex: number; at: number; mode: 'versus' | 'showdown' };
+}
+
+/** A link from outside the game, waiting to be opened (see takeLinkRef in App). */
+interface OutsideLink {
+  kind: 'invite' | 'recover' | 'discord';
+  server: string;
+  open(): void;
+}
+
+/** A server's address as the player knows it: its host name, without the scheme. */
+const hostOf = (server: string) => server.replace(/^https?:\/\//, '');
+
+/** Whether the link the desktop app was started with is new to this window (see the deep links in App). */
+function firstTime(url: string): boolean {
+  try {
+    const taken: string[] = JSON.parse(sessionStorage.getItem('soundwave.linksTaken') ?? '[]');
+    if (taken.includes(url)) return false;
+    sessionStorage.setItem('soundwave.linksTaken', JSON.stringify([...taken, url].slice(-20)));
+  } catch {
+    /* no storage: taken every time, as before */
+  }
+  return true;
 }
 
 type View =
   | { name: 'home' }
-  | { name: 'library' }
+  /** `from`: the party, when its host picks the party's songs here (Back and Ready return there). */
+  | { name: 'library'; from?: 'party' }
   | LobbyView
+  /** Playing together on a server: signing in, the party's lobby and its results. */
+  | { name: 'party' }
+  /** The server's leaderboards and shared replays; `from`: where Back returns to (Play together, unless opened from the main menu). */
+  | { name: 'boards'; from?: 'home' }
+  /** The server's admin page, for its owner and moderators. */
+  | { name: 'admin' }
   | { name: 'settings'; back: View }
   | EditorView
   | { name: 'play'; run: Run; buffer: AudioBuffer; key: number }
@@ -159,6 +215,9 @@ const DEPTH: Record<View['name'], number> = {
   library: 1,
   settings: 1,
   lobby: 2,
+  party: 2,
+  boards: 3,
+  admin: 3,
   editor: 2,
   play: 3,
   replay: 3,
@@ -453,15 +512,59 @@ export function App() {
   }, [known, booted]);
 
   const byId = useMemo(() => new Map(songs.map((s) => [s.id, s])), [songs]);
+  /** The player's own last song in a party, for the stats between a Showdown's songs. */
+  const [lastRun, setLastRun] = useState<LastRun | undefined>();
+  const byIdRef = useRef(byId);
+  byIdRef.current = byId;
+  // The party sees the songs held for it as songs the player has, beside their library.
+  const held = useSyncExternalStore(partySongs.subscribe, partySongs.songs);
+  const server = useSyncExternalStore(serverSongs.subscribe, serverSongs.snapshot);
+  const onlineState = useSyncExternalStore(online.subscribe, online.snapshot);
+  const partyLibrary = useMemo(() => {
+    const ids = Object.keys(held);
+    const streamed = Object.values(server.held);
+    if (!ids.length && !streamed.length) return byId;
+    const all = new Map(byId);
+    for (const id of ids) if (!all.has(id)) all.set(id, held[id].meta);
+    for (const song of streamed) if (!all.has(song.id)) all.set(song.id, song);
+    return all;
+  }, [byId, held, server.held]);
   /** Per song, the parts it hardly has: they are not offered for playing. */
   const thin: ThinParts = useMemo(() => Object.fromEntries(Object.entries(status).map(([id, s]) => [id, s.thin])), [status]);
-  // Songs that were removed leave the setlist with them.
+  // Songs that were removed leave the setlist with them. A server's song stays while the server has
+  // it (streamed, on its way, or kept on this device to stream again); while the server's list has
+  // not come yet, its songs are left alone.
+  const serverWaiting = !!onlineState.server && onlineState.status !== 'off' && onlineState.status !== 'signed-out' && !server.ready;
   useEffect(() => {
-    if (!songs.length) return;
-    const kept = pruneSetlist(setlist, new Set(songs.map((s) => s.id)));
+    if (!songs.length || serverWaiting) return;
+    const onServer = server.list.map((x) => x.id);
+    const kept = pruneSetlist(
+      setlist,
+      new Set([...songs.map((s) => s.id), ...Object.keys(server.held), ...Object.keys(server.coming), ...onServer]),
+    );
     if (kept.length !== setlist.length) setSetlist(kept);
-  }, [songs, setlist, setSetlist]);
-  const setSongs_ = useMemo(() => setlist.map((id) => byId.get(id)).filter((s): s is SongMeta => !!s), [setlist, byId]);
+  }, [songs, setlist, setSetlist, server.held, server.coming, server.list, serverWaiting]);
+  const setSongs_ = useMemo(
+    () =>
+      setlist
+        .map((id) => {
+          const listed = server.list.find((x) => x.id === id);
+          return byId.get(id) ?? server.held[id] ?? server.coming[id]?.meta ?? (listed ? sharedMeta(listed) : undefined);
+        })
+        .filter((s): s is SongMeta => !!s),
+    [setlist, byId, server.held, server.coming, server.list],
+  );
+  // The setlist's songs from a server come in the background (from this device where they are kept),
+  // so they are ready by the time they are played.
+  useEffect(() => {
+    if (!server.ready) return;
+    void serverSongs.ensure(setlist.filter((id) => !byId.has(id)));
+  }, [server.ready, setlist, byId]);
+  useEffect(() => serverSongs.setQuality(settings.streamQuality), [settings.streamQuality]);
+  /** A song the player can play: from the library (analysed, with notes), or streamed from the server. */
+  const playable = (id: string) => (byId.has(id) && canPlay(analysisStatus[id])) || !!server.held[id];
+  const setlistRef = useRef(setlist);
+  setlistRef.current = setlist;
   const played = useMemo(() => new Set(scores.map((s) => s.songId)), [scores]);
 
   /** Adds audio files and .soundwave song files to the library. Resolves to the songs they hold. */
@@ -511,6 +614,86 @@ export function App() {
         setSheet(got[0]);
     });
   useEffect(() => watchOpenedFiles((files) => openedRef.current(files)), []);
+  // Links from outside the game (an invite, a recovery link, a Discord Join). Anyone can send one,
+  // so one that would move the player to another server, or give an account this game's identity,
+  // is asked about first; one that comes during a song waits for the menus.
+  const [linkAsk, setLinkAsk] = useState<OutsideLink | null>(null);
+  const laterLink = useRef<OutsideLink | null>(null);
+  const takeLinkRef = useRef<(link: OutsideLink, asked?: boolean) => void>(() => {});
+  takeLinkRef.current = (link, asked = false) => {
+    if (['play', 'replay', 'export', 'editor'].includes(viewRef.current.name)) {
+      laterLink.current = link;
+      return void notify.info('The link you opened waits until you are back in the menus.');
+    }
+    const now = online.snapshot();
+    if (!asked && (link.kind === 'recover' || (now.account && now.server !== link.server))) return setLinkAsk(link);
+    link.open();
+  };
+  useEffect(() => {
+    if (['play', 'replay', 'export', 'editor'].includes(view.name) || !laterLink.current) return;
+    const link = laterLink.current;
+    laterLink.current = null;
+    takeLinkRef.current(link);
+  }, [view.name]);
+  // Invite links: the desktop app opens soundwave://join links, and the web game is opened with
+  // ?server=…&invite=… by a server's join page. Either lands on Play together, ready to join.
+  const inviteRef = useRef<(text: string) => void>(() => {});
+  inviteRef.current = (text) => {
+    // A recovery link: the account it is for takes this game's identity.
+    const recovery = parseRecovery(text);
+    if (recovery)
+      return takeLinkRef.current({
+        kind: 'recover',
+        server: recovery.server,
+        open: () =>
+          void online.recover(recovery.server, recovery.code).then(
+            () => {
+              notify.success(`Your account on ${online.snapshot().info?.name ?? 'the server'} is back, with this game’s identity.`);
+              if (!['play', 'replay', 'export', 'editor'].includes(viewRef.current.name)) goOnline();
+            },
+            (e: Error) => notify.error(e.message),
+          ),
+      });
+    const invite = parseInvite(text);
+    if (!invite) return;
+    takeLinkRef.current({
+      kind: 'invite',
+      server: invite.server,
+      open: () =>
+        void online.useInvite(invite).then(
+          () => {
+            if (!['play', 'replay', 'export', 'editor'].includes(viewRef.current.name)) setView({ name: 'party' });
+          },
+          (e: Error) => notify.error(e.message),
+        ),
+    });
+  };
+  const invitesWatched = useRef(false);
+  useEffect(() => {
+    if (!booted || invitesWatched.current) return;
+    invitesWatched.current = true;
+    if (!inDesktopApp()) {
+      const here = new URL(location.href);
+      if (!here.searchParams.has('invite') && !here.searchParams.has('recover')) return;
+      inviteRef.current(here.href);
+      // The invite is not left in the address, where a reload or a shared tab would carry it on.
+      here.searchParams.delete('invite');
+      here.searchParams.delete('recover');
+      here.searchParams.delete('server');
+      history.replaceState(history.state, '', here.pathname + here.search + here.hash);
+      return;
+    }
+    let stop = () => {};
+    void import('@tauri-apps/plugin-deep-link')
+      .then(async ({ getCurrent, onOpenUrl }) => {
+        // The link the app was started with is handed over again after every reload of the page
+        // (a library import starts the game again): it is taken once.
+        for (const url of (await getCurrent()) ?? []) if (firstTime(url)) inviteRef.current(url);
+        stop = await onOpenUrl((urls) => urls.forEach((url) => inviteRef.current(url)));
+      })
+      .catch(() => {});
+    return () => stop();
+  }, [booted]);
   const exportSong = useCallback(async (song: SongMeta) => {
     try {
       if (await saveSongFile(await songFile(song.id), soundwaveFileName(song)))
@@ -610,7 +793,7 @@ export function App() {
   }, [takesDrops, importFiles]);
 
   const toggle = (song: SongMeta) => {
-    if (!setlist.includes(song.id) && !canPlay(analysisStatus[song.id]))
+    if (!setlist.includes(song.id) && !playable(song.id))
       return notify.warning('No notes were found in this song, so it cannot go in a set.');
     if (!setlist.includes(song.id) && setlist.length >= SET_MAX)
       return notify.warning(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
@@ -622,7 +805,7 @@ export function App() {
     details: (song) => setSheet(song),
     addToSet: (list) => {
       const next = [...setlist];
-      for (const song of list) if (next.length < SET_MAX && !next.includes(song.id) && canPlay(analysisStatus[song.id])) next.push(song.id);
+      for (const song of list) if (next.length < SET_MAX && !next.includes(song.id) && playable(song.id)) next.push(song.id);
       if (next.length !== setlist.length) setSetlist(next);
       if (list.some((song) => !next.includes(song.id))) notify.warning(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
     },
@@ -719,14 +902,17 @@ export function App() {
       }),
     [],
   );
+  /** Runs watched from a server's board (see watchRun), by their replay id, for a video of them. */
+  const watchedRuns = useRef(new Map<string, ReplayData>());
   /** The replay whose video is being set up (the export dialog is open). */
   const [exportAsk, setExportAsk] = useState<ReplayMeta | null>(null);
   /** Loads a replay with its song, or silence where the song has left the library. */
   const loadReplay = async (meta: ReplayMeta) => {
-    const data = await getReplayData(meta.id);
+    // A run watched from a server's board is not saved here: it is the one fetched to watch it.
+    const data = watchedRuns.current.get(meta.id) ?? (await getReplayData(meta.id));
     if (!data) throw new Error('This replay is no longer saved.');
     let buffer: AudioBuffer | null = null;
-    if (byId.has(meta.songId)) buffer = await loadSongBuffer(meta.songId).catch(() => null);
+    if (byId.has(meta.songId) || serverSongs.snapshot().held[meta.songId]) buffer = await loadSongBuffer(meta.songId).catch(() => null);
     return { data, buffer: buffer ?? silence(Math.max(meta.duration, data.chart.duration)), silent: !buffer };
   };
   /**
@@ -743,7 +929,7 @@ export function App() {
       plan.ext,
     );
     // Back to where the export was asked for: a replay starts over, the list stays as it was.
-    const back: View = view.name === 'replay' ? { ...view, key: Date.now() } : view;
+    const from = view;
     void chooseSaveTarget(fileName, plan.ext === 'mp4' ? 'video-mp4' : 'video-webm')
       .then(async (target) => {
         if (!target) return;
@@ -781,6 +967,7 @@ export function App() {
         menuPulse('launch');
         void wipeTo(async () => {
           const { data, buffer } = await loadReplay(meta);
+          const back: View = from.name === 'replay' ? { ...from, key: Date.now() } : from;
           return { name: 'export', meta, data, buffer, video, plan, target, fileName, back, key: Date.now() };
         });
       })
@@ -827,7 +1014,7 @@ export function App() {
       // song after it is played on that part, or on the first one it has notes on when it has none
       // on that one (the next song's part can be changed between songs). A song without a note on
       // any part sits the set out.
-      const ids = lobby.ids.filter((id) => byId.has(id) && canPlay(analysisStatus[id]));
+      const ids = lobby.ids.filter(playable);
       const found: { song: SongMeta; charts: Map<Part, Chart> }[] = [];
       for (const id of ids) {
         const charts = new Map<Part, Chart>();
@@ -835,7 +1022,7 @@ export function App() {
           const chart = await analysisManager.chart(id, p, pick.difficulty);
           if (chart && chart.notes.length > 0) charts.set(p, chart);
         }
-        if (charts.size) found.push({ song: byId.get(id)!, charts });
+        if (charts.size) found.push({ song: byId.get(id) ?? server.held[id], charts });
       }
       const use: Pick = { ...pick, part: partAmong(pick.part, [...(found[0]?.charts.keys() ?? [])]) ?? pick.part };
       const entries = found.map(({ song, charts }) => {
@@ -889,7 +1076,14 @@ export function App() {
   };
 
   /** Saves a finished song's run as a replay, with every note of the chart it was played on. */
-  const saveReplay = async (song: SongMeta, chart: Chart, results: Results, inputs: ReplayInputs, best: number | undefined) => {
+  const saveReplay = async (
+    song: SongMeta,
+    chart: Chart,
+    results: Results,
+    inputs: ReplayInputs,
+    best: number | undefined,
+    mode: ReplayMode,
+  ) => {
     const date = Date.now();
     const id = newReplayId(date);
     try {
@@ -907,6 +1101,7 @@ export function App() {
             best: results.score > 0 && (best === undefined || results.score > best),
             kept: false,
             duration: song.duration || chart.duration,
+            ...(mode === 'solo' ? {} : { mode }),
           },
           data: { id, chart, inputs },
         },
@@ -918,14 +1113,15 @@ export function App() {
     }
   };
 
-  const finish = async (run: Run, results: Results, inputs?: ReplayInputs) => {
+  /** Keeps a finished song's score, and its replay when replays are kept. Resolves to the best score before it. */
+  const keepScore = async (run: Run, results: Results, inputs?: ReplayInputs) => {
     const song = run.songs[run.index];
     let best: number | undefined;
     try {
       best = await submitScore({
         songId: song.id,
         part: run.charts[run.index].part,
-        difficulty: run.pick.difficulty,
+        difficulty: run.charts[run.index].difficulty,
         score: results.score,
         stars: results.stars,
         accuracy: results.accuracy,
@@ -935,8 +1131,389 @@ export function App() {
     } catch {
       /* scores are best-effort */
     }
-    if (inputs && settingsRef.current.replays) void saveReplay(song, run.charts[run.index], results, inputs, best);
-    setView({ name: 'results', run: withResult(run, { song, results, best }) });
+    // A song held only for a party leaves with it, so its replay could never be watched.
+    if (inputs && settingsRef.current.replays && byIdRef.current.has(song.id))
+      void saveReplay(song, run.charts[run.index], results, inputs, best, run.party?.mode ?? 'solo');
+    if (inputs) void postRun(run, results, inputs);
+    return best;
+  };
+
+  /**
+   * Sends a finished run to the server's leaderboards while signed in (and the player lets it):
+   * the server judges it again from its inputs before it takes the score.
+   */
+  const postRun = async (run: Run, results: Results, inputs: ReplayInputs) => {
+    if (!online.snapshot().account || !settingsRef.current.postScores) return;
+    // A Showdown's runs are shaped by the others' hits: they count in the party, not on the song's boards.
+    if (run.party?.mode === 'showdown') return;
+    const song = run.songs[run.index];
+    try {
+      const r = await online.postScore({
+        songId: song.id,
+        title: song.title,
+        artist: song.artist,
+        chart: run.charts[run.index],
+        ...encodeRun(inputs),
+        result: {
+          score: results.score,
+          stars: results.stars,
+          accuracy: results.accuracy,
+          bestStreak: results.bestStreak,
+          fullCombo: results.fullCombo,
+        },
+      });
+      if (r.best && r.rank) notify.success(`Number ${r.rank} on ${online.snapshot().info?.name ?? 'the server'}’s board for this chart.`);
+    } catch (e) {
+      notify.error(`Your score did not reach the server: ${(e as Error).message}`);
+    }
+  };
+
+  /**
+   * Watches a run from a server's board: with the song's music from the library, else streamed from
+   * the server's library where it keeps the song, else without music.
+   */
+  const watchRun = (scoreId: string) => {
+    menuPulse('launch');
+    const back = view;
+    void wipeTo(async () => {
+      const r = await online.run(scoreId);
+      const chart = cleanChart(r.chart);
+      if (!chart) throw new Error('This run’s chart is damaged.');
+      const inputs = decodeRun(r.ops, r.times);
+      const meta: ReplayMeta = {
+        id: `server-${r.scoreId}`,
+        date: r.at,
+        songId: r.songId,
+        title: r.title,
+        artist: `${r.name}’s run${r.artist ? ` · ${r.artist}` : ''}`,
+        part: chart.part,
+        difficulty: chart.difficulty,
+        results: replayResults(chart, inputs),
+        best: false,
+        kept: false,
+        duration: chart.duration,
+      };
+      let buffer = byId.has(r.songId) || serverSongs.snapshot().held[r.songId] ? await loadSongBuffer(r.songId).catch(() => null) : null;
+      const shared = buffer ? undefined : serverSongs.snapshot().list.find((x) => x.id === r.songId && x.audio);
+      if (shared)
+        buffer = await serverSongs
+          .stream(shared)
+          .then(() => loadSongBuffer(r.songId))
+          .catch(() => null);
+      const data: ReplayData = { id: meta.id, chart, inputs };
+      watchedRuns.current.set(meta.id, data);
+      return {
+        name: 'replay',
+        meta,
+        data,
+        buffer: buffer ?? silence(chart.duration),
+        silent: !buffer,
+        back,
+        key: Date.now(),
+      };
+    });
+  };
+
+  const finish = async (run: Run, results: Results, inputs?: ReplayInputs) => {
+    const best = await keepScore(run, results, inputs);
+    setView({ name: 'results', run: withResult(run, { song: run.songs[run.index], results, best }) });
+  };
+
+  /* Playing together ------------------------------------------------------------------------ */
+
+  // A server played on before is connected to again when the game starts. If it cannot be
+  // reached, the game plays offline and the party screen says so.
+  useEffect(() => {
+    if (booted) online.resume();
+  }, [booted]);
+
+  /**
+   * The host starts song `index` of the party's set. Everyone plays the host's charts (so the notes
+   * are the same for all): each player gets their part at their difficulty, or the first part the
+   * song has notes on there.
+   */
+  const startPartySong = async (index: number) => {
+    const song = online.snapshot().party?.set[index];
+    if (!song) return;
+    if (!byId.has(song.id)) await serverSongs.ensure([song.id]);
+    // The set can change while a song comes (everyone picks): the charts go with the song they are for.
+    const moved = () => online.snapshot().party?.set[index]?.id !== song.id;
+    const party = online.snapshot().party;
+    if (!party || moved()) return notify.warning('The set changed while the song was being readied. Start it again.');
+    if (!(byId.has(song.id) && canPlay(analysisStatus[song.id])) && !serverSongs.snapshot().held[song.id] && !partySongs.songs()[song.id])
+      return notify.warning(`You need "${song.title}" in your library, with notes, to start it: everyone plays your charts.`);
+    try {
+      const made = new Map<string, Chart | null>();
+      const chartFor = async (p: Part, d: Pick['difficulty']) => {
+        const key = `${p}/${d}`;
+        if (!made.has(key)) {
+          const c = await analysisManager.chart(song.id, p, d).catch(() => undefined);
+          made.set(key, c && c.notes.length > 0 ? c : null);
+        }
+        return made.get(key)!;
+      };
+      const charts: WireChart[] = [];
+      const slot = new Map<Chart, number>();
+      const assign: Record<string, number> = {};
+      const own = songParts(song.id, thin);
+      for (const m of party.members) {
+        if (!m.connected || !m.have.includes(song.id)) continue;
+        for (const p of [m.part, ...own.filter((x) => x !== m.part)]) {
+          const c = await chartFor(p, m.difficulty);
+          if (!c) continue;
+          if (!slot.has(c)) slot.set(c, charts.push(c) - 1);
+          assign[m.id] = slot.get(c)!;
+          break;
+        }
+      }
+      if (!Object.keys(assign).length) return notify.warning(`No notes were found in "${song.title}" at the difficulties picked.`);
+      if (moved()) return notify.warning('The set changed while the song was being readied. Start it again.');
+      playSfx('launch');
+      menuPulse('launch');
+      online.start(index, charts, assign);
+    } catch (e) {
+      notify.error((e as Error).message);
+    }
+  };
+
+  // The party starts a song: every player with a chart goes into it, timed to start together.
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const partyStartRef = useRef<(s: PartyStart) => void>(() => {});
+  partyStartRef.current = (start) => {
+    const song = online.snapshot().party?.set[start.songIndex];
+    if (!start.chart || !song) return;
+    const meta = byId.get(song.id) ?? partySongs.songs()[song.id]?.meta ?? serverSongs.snapshot().held[song.id];
+    const chart = cleanChart(start.chart);
+    // A party song still open from before (the party moved on without this player) gives way to the new one.
+    const v = viewRef.current;
+    const stale = v.name === 'play' && !!v.run.party && v.run.party.songIndex !== start.songIndex;
+    const busy = !stale && ['play', 'replay', 'export', 'editor'].includes(v.name);
+    if (!meta || !chart || busy) {
+      online.quit(start.songIndex);
+      return notify.warning(
+        busy
+          ? `The party started "${song.title}" while you were busy here, so you sit it out. You can join the next song.`
+          : `"${song.title}" could not be played here, so you sit it out.`,
+      );
+    }
+    setSheet(null);
+    const run: Run = {
+      songs: [meta],
+      charts: [chart],
+      index: 0,
+      results: [],
+      pick: { part: chart.part, difficulty: chart.difficulty },
+      lobby: { name: 'lobby', ids: [], from: 'home' },
+      party: { songIndex: start.songIndex, at: start.at, mode: online.snapshot().party?.showdown ? 'showdown' : 'versus' },
+    };
+    void wipeTo(async () => {
+      try {
+        return { name: 'play', run, buffer: await loadSongBuffer(meta.id), key: Date.now() };
+      } catch (e) {
+        online.quit(start.songIndex);
+        throw e;
+      }
+    }, true);
+  };
+  useEffect(() => online.onStart((s) => partyStartRef.current(s)), []);
+  // The server decides where the party is. A party song still playing here once the party is
+  // elsewhere (the song was ended without this player, after a dropped connection, or the party
+  // is gone) is left for the party's own screen, which follows its phase.
+  const partyAt = onlineState.party ? `${onlineState.party.code}:${onlineState.party.phase}:${onlineState.party.songIndex}` : null;
+  const playingParty = view.name === 'play' ? view.run.party : undefined;
+  const leaveStale = useRef(() => {});
+  leaveStale.current = () => {
+    const party = online.snapshot().party;
+    if (party) setView({ name: 'party' });
+    else goOnline();
+    notify.info(party ? 'The party moved on without you, so you are back with it.' : 'The party is over.');
+  };
+  useEffect(() => {
+    if (!playingParty || onlineState.status !== 'online') return;
+    const party = online.snapshot().party;
+    if (party && party.phase === 'playing' && party.songIndex === playingParty.songIndex) return;
+    leaveStale.current();
+  }, [partyAt, playingParty, onlineState.status]);
+  // The party's next song is loaded ahead, so it starts on time.
+  const partyNext = onlineState.party ? onlineState.party.set[onlineState.party.songIndex + 1]?.id : undefined;
+  useEffect(() => {
+    if (partyNext && (byId.has(partyNext) || partySongs.songs()[partyNext])) void loadSongBuffer(partyNext).catch(() => {});
+  }, [partyNext, byId, held]);
+
+  /**
+   * The band on stage dressed as the players: in a party each member at their part, else the
+   * signed-in player at `part` (the part they play, or would).
+   */
+  const avatarsFor = (part: Part): Avatars => {
+    const out: Avatars = {};
+    const party = onlineState.party;
+    if (party)
+      for (const m of party.members) {
+        const at = m.id === onlineState.account?.id ? part : m.part;
+        if (m.avatar && !out[at]) out[at] = m.avatar;
+      }
+    else if (onlineState.account && onlineState.avatar) out[part] = onlineState.avatar;
+    return out;
+  };
+  /** A Showdown song's players for the stage's ring: everyone still in who has the song, this player on `part`. */
+  const ringFor = (songIndex: number, part: Part): RingSeat[] => {
+    const party = onlineState.party;
+    const me = onlineState.account?.id;
+    const song = party?.set[songIndex]?.id ?? '';
+    return (party?.members ?? [])
+      .filter((m) => !m.eliminated && (m.id === me || m.have.includes(song)))
+      .map((m) =>
+        m.id === me ? { id: m.id, part, avatar: onlineState.avatar ?? m.avatar, me: true } : { id: m.id, part: m.part, avatar: m.avatar },
+      );
+  };
+  const menuLook = JSON.stringify(avatarsFor(pick.part));
+  // The menu's band is dressed the same way.
+  useEffect(() => setMenuAvatars(JSON.parse(menuLook) as Avatars), [menuLook]);
+  // A Showdown's lobby, and the time between its songs, stand the players still in on the ring behind the screen.
+  const lobbyParty = view.name === 'party' && onlineState.party?.mode === 'showdown' ? onlineState.party : null;
+  const lobbyRing = JSON.stringify(
+    lobbyParty && lobbyParty.phase !== 'playing'
+      ? lobbyParty.members
+          .filter((m) => !m.eliminated)
+          .map((m): RingSeat => {
+            const me = m.id === onlineState.account?.id;
+            const avatar = me ? (onlineState.avatar ?? m.avatar) : m.avatar;
+            return { id: m.id, part: m.part, ...(avatar ? { avatar } : {}), ...(me ? { me } : {}) };
+          })
+      : null,
+  );
+  useEffect(() => setMenuRing(JSON.parse(lobbyRing) as RingSeat[] | null), [lobbyRing]);
+
+  /* Shared songs ---------------------------------------------------------------------------- */
+
+  // The server's songs: in the library to stream or download, and the player's own shared to it
+  // when they chose to (src/net/serverSongs.ts).
+  useEffect(() => serverSongs.connect(onlineState.account ? onlineState.server : null), [onlineState.account, onlineState.server]);
+  const serverSharing = onlineState.account && onlineState.info && onlineState.info.sharing !== 'off';
+  useEffect(() => {
+    if (!serverSharing || !settings.shareLibrary || !server.ready) return;
+    // Only songs with their charts: one shared before its analysis would have no notes for anyone.
+    void serverSongs.share(
+      songs.filter((x) => canPlay(analysisStatus[x.id])),
+      (id) => songFile(id),
+      (message) => notify.error(`Your songs could not all be shared: ${message}`),
+    );
+  }, [serverSharing, settings.shareLibrary, server.ready, songs, analysisStatus]);
+  const origin = (song: SharedSong) => ({ url: serverSongs.url ?? '', uid: song.uid, hash: song.hash });
+  // The server is the single point of truth for songs downloaded from it: one whose copy there
+  // changed (its hash) takes the server's details over.
+  useEffect(() => {
+    if (!server.ready) return;
+    void serverSongs.syncCopies(songs, async (song, file) => {
+      const pkg = await readSongPackage(file, file.name);
+      if (pkg.meta.id !== song.id) return;
+      await updateSongMeta(song.id, {
+        title: pkg.meta.title,
+        artist: pkg.meta.artist,
+        album: pkg.meta.album,
+        cover: pkg.meta.cover ?? null,
+        server: origin(song),
+      });
+      await refresh();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [server.ready, server.list, songs]);
+  /**
+   * A server song pressed in the library: streamed and put in the setlist (pressed again, taken out),
+   * or downloaded into the library, as the player chose. Either way the player stays where they are,
+   * picking songs, whether for themselves or for a party.
+   */
+  const playServerSong = async (song: SharedSong) => {
+    try {
+      if (setlistRef.current.includes(song.id)) return setSetlist(setlistRef.current.filter((id) => id !== song.id));
+      if (settingsRef.current.serverSongs === 'download') {
+        const got = await importFiles([await serverSongs.download(song)]);
+        if (!got.length) return;
+        // It remembers where it came from, so it follows the server's copy from now on.
+        await updateSongMeta(got[0].id, { title: got[0].title, artist: got[0].artist, album: got[0].album, server: origin(song) });
+        await refresh();
+        notify.success(`"${got[0].title}" is in your library.`);
+        return;
+      }
+      if (setlistRef.current.length >= SET_MAX) return notify.warning(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
+      // In the setlist at once; it comes in the background, its progress on it.
+      setSetlist([...setlistRef.current, song.id]);
+      await serverSongs.stream(song).catch((e: Error) => {
+        setSetlist(setlistRef.current.filter((id) => id !== song.id));
+        throw new Error(`"${song.title}" could not be streamed: ${e.message}`);
+      });
+    } catch (e) {
+      notify.error((e as Error).message);
+    }
+  };
+  /**
+   * Ready from the library: on to the party, or to the set's lobby. Setlist songs still coming from
+   * the server are waited for first (the Ready button shows how far they are), then it goes on by itself.
+   */
+  const [waitingFor, setWaitingFor] = useState<string[] | null>(null);
+  const gathering = useMemo(() => {
+    if (!waitingFor) return null;
+    const parts = waitingFor.map((id) => (server.held[id] ? 1 : (server.coming[id]?.progress ?? 0)));
+    return parts.reduce((a, b) => a + b, 0) / Math.max(1, parts.length);
+  }, [waitingFor, server.held, server.coming]);
+  const readyFromLibrary = () => {
+    if (view.name === 'library' && view.from === 'party') return setView({ name: 'party' });
+    const missing = setlistRef.current.filter((id) => !byId.has(id) && !serverSongs.snapshot().held[id]);
+    if (!missing.length) return setView({ name: 'lobby', ids: setlistRef.current, from: 'library' });
+    setWaitingFor(missing);
+    void serverSongs.ensure(missing).finally(() => {
+      setWaitingFor(null);
+      if (viewRef.current.name === 'library') setView({ name: 'lobby', ids: setlistRef.current, from: 'library' });
+    });
+  };
+
+  // The smaller copies a slow connection streams (src/net/streamQuality.ts) are made by the game of
+  // whoever shared a song, or of an admin or moderator, in the background, never while a song plays.
+  useEffect(() => {
+    const me = onlineState.account;
+    if (!server.ready || !me) return;
+    void serverSongs.makeCopies(
+      { name: me.name, curator: me.role === 'owner' || me.role === 'moderator' },
+      (id) => (byIdRef.current.has(id) ? songFile(id) : null),
+      () => !['play', 'replay', 'export', 'editor'].includes(viewRef.current.name),
+    );
+  }, [server.ready, server.list, onlineState.account]);
+  // A party's songs reach every player by themselves: the host's game sends a song someone lacks,
+  // and the games without it download it from the server, held for the party or kept in the
+  // library (src/net/partySongs.ts).
+  const partyAdd = useRef(async (_: File) => {});
+  partyAdd.current = async (file) => {
+    const got = await importFiles([file]);
+    if (!got.length) throw new Error(`"${file.name.replace(/\.soundwave$/, '')}" could not be added.`);
+    notify.success(`"${got[0].title}" is in your library.`);
+  };
+  useEffect(() => {
+    partySongs.update({
+      party: onlineState.party,
+      me: onlineState.account?.id,
+      serverOn: !!onlineState.info?.partySongs,
+      share: settings.shareSongs,
+      keep: settings.serverSongs === 'download',
+      has: (id) => byId.has(id) || !!serverSongs.snapshot().held[id],
+      file: (id) => songFile(id),
+      add: (file) => partyAdd.current(file),
+    });
+  }, [onlineState.party, onlineState.account, onlineState.info, settings.shareSongs, settings.serverSongs, byId, server.held]);
+
+  /** A party's song is over: the score is kept here as any other, and the party gets it. */
+  const finishPartySong = (run: Run, results: Results, inputs?: ReplayInputs) => {
+    void keepScore(run, results, inputs);
+    const chart = run.charts[run.index];
+    setLastRun({ songIndex: run.party!.songIndex, results, part: chart.part, difficulty: chart.difficulty });
+    online.finish(run.party!.songIndex, {
+      score: results.score,
+      stars: results.stars,
+      accuracy: results.accuracy,
+      bestStreak: results.bestStreak,
+      fullCombo: results.fullCombo,
+    });
+    setView({ name: 'party' });
   };
 
   /** Every song of the run with its result so far; songs not reached count as skipped. */
@@ -945,6 +1522,38 @@ export function App() {
     setSeed(Date.now());
     setView({ name: 'home' });
   };
+  /** Back to the main menu's Online tab (from a screen it opened, or a party that ended). */
+  // The identity is loaded as the game starts, so a server played on signs in with it by itself.
+  const me = useSyncExternalStore(identity.subscribe, identity.snapshot);
+  useEffect(
+    () =>
+      void identity.load().then(
+        (had) => had && online.resume(),
+        (e: Error) => notify.error(e.message),
+      ),
+    [],
+  );
+  /**
+   * Signed in with an identity that has no backup: asked once (per identity) to back it up, since a
+   * lost device or cleared browser data would otherwise lose every account.
+   */
+  const [askBackup, setAskBackup] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
+  useEffect(() => {
+    if (!onlineState.account || !me || me.backedUp) return;
+    try {
+      if (localStorage.getItem(BACKUP_ASKED) === String(me.created)) return;
+      localStorage.setItem(BACKUP_ASKED, String(me.created));
+    } catch {
+      return;
+    }
+    setAskBackup(true);
+  }, [onlineState.account, me]);
+
+  const goOnline = useCallback(() => {
+    showOnlineTab();
+    setView({ name: 'home' });
+  }, []);
   const advance = (run: Run) => {
     if (run.index + 1 < run.songs.length) void playAt(run, run.index + 1);
     else if (run.songs.length > 1) setView({ name: 'summary', run: filled(run) });
@@ -1026,6 +1635,11 @@ export function App() {
     };
   }, [sceneKey, view.name, booted]);
 
+  // The settings over a song close with it: a party's song plays on under them and can end there,
+  // and the next song must not start under settings left open.
+  useEffect(() => {
+    if (view.name !== 'play') setSongSettings(false);
+  }, [view.name]);
   // The settings over a paused song take focus as they open (the pause menu takes it back, see PlayScreen).
   useEffect(() => {
     if (!songSettings) return;
@@ -1071,6 +1685,87 @@ export function App() {
 
   // The player's Discord profile shows where they are and what they play (desktop app; src/app/discord.ts).
   useEffect(() => setDiscordEnabled(settings.discordStatus), [settings.discordStatus]);
+  // Friends can join the party from Discord: only when the player lets them and it is not private.
+  const joinable = settings.discordJoin && !!onlineState.party && !onlineState.party.private && !!onlineState.server;
+  const partyCode = onlineState.party?.code;
+  const partySize = onlineState.party?.members.length ?? 0;
+  useEffect(() => {
+    if (!joinable || !partyCode || !onlineState.server) return setDiscordJoin(undefined);
+    const secret = joinSecret(onlineState.server, partyCode);
+    // Discord refuses a status whose party id is its join secret: the id only names the party.
+    setDiscordJoin({ secret, id: partyId(onlineState.server, partyCode), size: partySize, max: PARTY_MAX });
+  }, [joinable, partyCode, partySize, onlineState.server]);
+  // A friend's party, joined from their Discord status: Play together opens, signed in or to sign in.
+  useEffect(
+    () =>
+      onDiscordJoin((secret) => {
+        const party = parseJoinSecret(secret);
+        if (!party) return notify.error('Discord sent a party this game cannot read. Update Soundwave, or join with the party’s code.');
+        takeLinkRef.current({
+          kind: 'discord',
+          server: party.server,
+          open: () => {
+            // The party screen opens once the party is there (signing in to its server may come first).
+            joiningRef.current = party.code;
+            online.joinFrom(party.server, party.code);
+            if (!online.snapshot().account && !['play', 'replay', 'export', 'editor'].includes(viewRef.current.name))
+              setView({ name: 'party' });
+          },
+        });
+      }),
+    [],
+  );
+  // What the server says went wrong shows on the party screen; anywhere else (the library, picking
+  // the party's songs) it comes as a notification, so it is not first seen later, out of date.
+  useEffect(() => online.onServerError((message) => viewRef.current.name !== 'party' && notify.error(message)), []);
+  // A party joined from Discord: its lobby opens as soon as the server has let this player in.
+  const joiningRef = useRef<string | null>(null);
+  useEffect(() => {
+    const code = onlineState.party?.code;
+    if (!code || code !== joiningRef.current) return;
+    joiningRef.current = null;
+    if (!['play', 'replay', 'export', 'editor'].includes(viewRef.current.name)) setView({ name: 'party' });
+  }, [onlineState.party?.code]);
+  // A friend asks on Discord to join: the player lets them in or not, outside a song. While the
+  // party cannot be joined from Discord (none, or private), the ask is turned down by itself.
+  const [joinAsks, setJoinAsks] = useState<JoinRequest[]>([]);
+  const joinableRef = useRef(joinable);
+  joinableRef.current = joinable;
+  useEffect(
+    () =>
+      onDiscordJoinRequest((r) => {
+        if (!joinableRef.current) return void answerDiscordJoin(r.id, false).catch(() => {});
+        setJoinAsks((asks) => [...asks.filter((a) => a.id !== r.id), r]);
+      }),
+    [],
+  );
+  const answerAsk = (ask: JoinRequest, accept: boolean) => {
+    setJoinAsks((asks) => asks.filter((a) => a.id !== ask.id));
+    void answerDiscordJoin(ask.id, accept && joinableRef.current).then(
+      () => accept && notify.success(`${ask.name} is on their way. Their game opens and joins your party.`),
+      (e: Error) => {
+        notify.error(`${ask.name} could not be let in: ${e.message}`);
+        // Letting them in failed: the ask stays, to try again.
+        if (accept) setJoinAsks((asks) => (asks.some((a) => a.id === ask.id) ? asks : [ask, ...asks]));
+      },
+    );
+  };
+  const joinAsk = !['play', 'replay', 'export', 'editor'].includes(view.name) ? joinAsks[0] : undefined;
+
+  // The server's other players see the same line in their menus (only while signed in).
+  useEffect(() => {
+    const what =
+      view.name === 'play'
+        ? `Playing ${view.run.songs[view.run.index].title} · ${PART_LABEL[view.run.charts[view.run.index].part]}`
+        : view.name === 'party'
+          ? 'In a party lobby'
+          : view.name === 'editor'
+            ? 'Editing a chart'
+            : view.name === 'replay'
+              ? 'Watching a replay'
+              : 'In the menus';
+    if (onlineState.status === 'online') online.setStatus(what);
+  }, [view, onlineState.status]);
   useEffect(() => {
     const named = (s: SongMeta) => (s.artist ? `${s.title} — ${s.artist}` : s.title);
     const count = (n: number) => `${n} ${n === 1 ? 'song' : 'songs'}`;
@@ -1083,6 +1778,12 @@ export function App() {
         return showScene({ details: 'In the settings' });
       case 'lobby':
         return showScene({ details: 'Getting a set ready', state: count(view.ids.length) });
+      case 'party':
+        return showScene({ details: 'Playing together' });
+      case 'boards':
+        return showScene({ details: 'Looking at the leaderboards' });
+      case 'admin':
+        return showScene({ details: 'Running a server' });
       case 'editor':
         return showScene({ details: named(view.song), state: 'Editing the chart' });
       case 'play': {
@@ -1090,7 +1791,14 @@ export function App() {
         const part = run.charts[run.index].part;
         const what = `${PART_LABEL[part]} · ${DIFFICULTY_LABEL[run.pick.difficulty]}`;
         const where = run.test ? 'Test play' : run.songs.length > 1 ? `Song ${run.index + 1} of ${run.songs.length}` : '';
-        return showScene({ details: named(run.songs[run.index]), state: where ? `${what} · ${where}` : what, part, partText: what });
+        return showScene({
+          details: named(run.songs[run.index]),
+          state: where ? `${what} · ${where}` : what,
+          part,
+          partText: what,
+          // The song's cover, where a server shares it publicly; the game's icon otherwise.
+          cover: online.coverUrl(run.songs[run.index].id),
+        });
       }
       case 'results': {
         const { song, results } = view.run.results[view.run.index] ?? { song: view.run.songs[view.run.index], results: null };
@@ -1148,14 +1856,15 @@ export function App() {
   } else if (view.name === 'play') {
     const { run } = view;
     const song = run.songs[run.index];
-    const more = run.index + 1 < run.songs.length;
+    const more = !run.party && run.index + 1 < run.songs.length;
+    const partyRun = run.party;
     content = (
       <PlayScreen
         key={view.key}
         title={song.title}
         artist={song.artist}
-        position={run.index + 1}
-        total={run.songs.length}
+        position={partyRun ? partyRun.songIndex + 1 : run.index + 1}
+        total={partyRun ? (onlineState.party?.set.length ?? 1) : run.songs.length}
         buffer={view.buffer}
         chart={run.charts[run.index]}
         startAt={run.test?.startAt}
@@ -1164,11 +1873,34 @@ export function App() {
         settingsOpen={songSettings}
         onQuit={() => {
           setSongSettings(false);
-          setView(run.test ? run.test.back : run.lobby);
+          if (partyRun) online.quit(partyRun.songIndex);
+          setView(partyRun ? { name: 'party' } : run.test ? run.test.back : run.lobby);
         }}
         onSkip={more ? () => void playAt(withResult(run, { song, results: null }), run.index + 1) : undefined}
         // A test play keeps no score: it goes back to the editor with how it went.
-        onFinish={(r, inputs) => (run.test ? setView({ ...run.test.back, tested: r }) : void finish(run, r, inputs))}
+        onFinish={(r, inputs) =>
+          partyRun ? finishPartySong(run, r, inputs) : run.test ? setView({ ...run.test.back, tested: r }) : void finish(run, r, inputs)
+        }
+        avatars={avatarsFor(run.charts[run.index].part)}
+        together={
+          partyRun
+            ? {
+                at: partyRun.at,
+                board: <PartyBoard me={onlineState.account?.id ?? ''} />,
+                onProgress: (score, streak, stars) => online.progress(partyRun.songIndex, score, streak, stars),
+                showdown: onlineState.party?.showdown
+                  ? {
+                      songIndex: partyRun.songIndex,
+                      hits: onlineState.party.showdown.hits,
+                      me: onlineState.account?.id ?? '',
+                      cut: onlineState.party.cut ?? onlineState.party.members.length,
+                      final: partyRun.songIndex + 1 >= onlineState.party.set.length,
+                      ring: ringFor(partyRun.songIndex, run.charts[run.index].part),
+                    }
+                  : undefined,
+              }
+            : undefined
+        }
       />
     );
   } else {
@@ -1198,6 +1930,7 @@ export function App() {
     } else if (view.name === 'library') {
       screen = (
         <LibraryScreen
+          forParty={view.name === 'library' && view.from === 'party'}
           songs={songs}
           status={status}
           setlist={setlist}
@@ -1208,15 +1941,35 @@ export function App() {
           onCurrent={setHighlight}
           onToggle={toggle}
           onDetails={setSheet}
-          onReady={() => setView({ name: 'lobby', ids: setlist, from: 'library' })}
-          onBack={goHome}
+          onReady={readyFromLibrary}
+          gathering={gathering}
+          onBack={view.from === 'party' ? () => setView({ name: 'party' }) : goHome}
           onAdd={addSongs}
           actions={songActions}
+          server={
+            onlineState.account && (serverSharing || server.list.length > 0)
+              ? {
+                  songs: server.list.filter((x) => !byId.has(x.id)),
+                  coming: server.coming,
+                  held: server.held,
+                  failed: server.failed,
+                  known: (id) => serverSongs.known(id),
+                  onRest: (x) => settings.serverSongs === 'stream' && serverSongs.prefetch(x),
+                  stream: settings.serverSongs === 'stream',
+                  sharing: settings.shareLibrary,
+                  canShare: !!serverSharing,
+                  left: server.sharing,
+                  name: onlineState.info?.name ?? 'the server',
+                  onPlay: (x) => void playServerSong(x),
+                  onShare: () => updateSettings({ ...settingsRef.current, shareLibrary: !settingsRef.current.shareLibrary }),
+                }
+              : undefined
+          }
         />
       );
     } else if (view.name === 'lobby') {
       // A song without a note on any part cannot be played, so it is not in the set.
-      const list = view.ids.map((id) => byId.get(id)).filter((s): s is SongMeta => !!s && canPlay(analysisStatus[s.id]));
+      const list = view.ids.map((id) => byId.get(id) ?? server.held[id]).filter((s): s is SongMeta => !!s && playable(s.id));
       screen = (
         <LobbyScreen
           songs={list}
@@ -1227,6 +1980,40 @@ export function App() {
           onPick={setPick}
           onStart={() => void start(view)}
           onBack={() => (view.from === 'library' ? setView({ name: 'library' }) : goHome())}
+        />
+      );
+    } else if (view.name === 'party') {
+      screen = (
+        <PartyScreen
+          library={partyLibrary}
+          // The host starts songs streamed from the server or held for the party too, as startPartySong does.
+          playable={(id) => playable(id) || !!partySongs.songs()[id]}
+          setlist={setSongs_}
+          pick={pick}
+          onPick={setPick}
+          onStartSong={(i) => void startPartySong(i)}
+          settings={settings}
+          onBack={goHome}
+          onLeft={goOnline}
+          lastRun={lastRun}
+          partsOf={(id) => songParts(id, thin)}
+          onPickSongs={() => setView({ name: 'library', from: 'party' })}
+          onSettings={(patch) => updateSettings({ ...settings, ...patch })}
+        />
+      );
+    } else if (view.name === 'admin') {
+      screen = <AdminScreen setlist={setSongs_} library={songs} settings={settings} onBack={goOnline} />;
+    } else if (view.name === 'boards') {
+      screen = (
+        <BoardsScreen
+          library={songs}
+          playable={(id) => canPlay(analysisStatus[id])}
+          setlist={setSongs_}
+          pick={pick}
+          thin={thin}
+          settings={settings}
+          onWatch={watchRun}
+          onBack={goOnline}
         />
       );
     } else if (view.name === 'results') {
@@ -1267,6 +2054,13 @@ export function App() {
           empty={songs.length === 0}
           onLibrary={() => setView({ name: 'library' })}
           onSet={(ids) => setView({ name: 'lobby', ids, from: 'home' })}
+          online={{
+            onParty: () => setView({ name: 'party' }),
+            onBoards: () => setView({ name: 'boards' }),
+            onAdmin: () => setView({ name: 'admin' }),
+            part: pick.part,
+          }}
+          inParty={!!onlineState.party}
           onAdd={addSongs}
           tracks={{
             device,
@@ -1324,6 +2118,61 @@ export function App() {
           onClose={() => setSheet(null)}
         />
       )}
+      {askBackup && (
+        <Dialog title="Back up your identity" variant="card" closeLabel="Later" onClose={() => setAskBackup(false)}>
+          {(close) => (
+            <div className="pause-card">
+              <h2 className="display">Back up your identity?</h2>
+              <p className="hint">
+                It signs you in to {onlineState.info?.name ?? 'this server'} and every server you join, with no password. If this device is
+                lost or the game’s data cleared, a backup is the way back to your accounts. You can do it any time under Settings → Online.
+              </p>
+              <button type="button" className="btn wide" data-sfx="back" onClick={close}>
+                Later
+              </button>
+              <button type="button" className="btn primary wide" data-autofocus onClick={() => (close(), setBackingUp(true))}>
+                Back it up now
+              </button>
+            </div>
+          )}
+        </Dialog>
+      )}
+      {linkAsk && (
+        <Dialog title="Open this link?" variant="card" closeLabel="Not now" outsideCloses={false} onClose={() => setLinkAsk(null)}>
+          {(close) => {
+            const there = hostOf(linkAsk.server);
+            const here = onlineState.account && onlineState.server !== linkAsk.server ? hostOf(onlineState.server!) : null;
+            return (
+              <div className="pause-card">
+                <h2 className="display">{linkAsk.kind === 'recover' ? 'Use this recovery link?' : `Go to ${there}?`}</h2>
+                <p className="hint">
+                  {linkAsk.kind === 'recover'
+                    ? `It is for an account on ${there}: that account signs in with this game’s identity from now on. Open it only if an admin of ${there} sent it to you.`
+                    : linkAsk.kind === 'discord'
+                      ? `The party you joined from Discord plays on ${there}.`
+                      : `The invite you opened is for ${there}.`}
+                  {here && ` You are signed out of ${here}; your account there stays, to go back to any time.`}
+                </p>
+                <button type="button" className="btn wide" data-autofocus data-sfx="back" onClick={close}>
+                  Not now
+                </button>
+                <button
+                  type="button"
+                  className="btn primary wide"
+                  onClick={() => {
+                    const link = linkAsk;
+                    close();
+                    takeLinkRef.current(link, true);
+                  }}
+                >
+                  {linkAsk.kind === 'recover' ? 'Use it' : 'Go there'}
+                </button>
+              </div>
+            );
+          }}
+        </Dialog>
+      )}
+      {backingUp && <IdentityDialog kind="export" onClose={() => setBackingUp(false)} onDone={(m) => notify.success(m)} />}
       {metaSong && (
         <MetadataSheet
           song={byId.get(metaSong.id) ?? metaSong}
@@ -1360,6 +2209,49 @@ export function App() {
           onClose={() => setExportAsk(null)}
         />
       )}
+      {/* Once per server that takes songs: whether to share the player's own (Settings → Online changes it).
+          It waits for the identity's backup question, so one question is asked at a time. */}
+      {serverSharing &&
+        !askBackup &&
+        !backingUp &&
+        !settings.shareLibrary &&
+        onlineState.server &&
+        !settings.shareAsked.includes(onlineState.server) &&
+        ['home', 'library', 'party'].includes(view.name) &&
+        launch === null && (
+          <Dialog
+            title="Share your songs?"
+            variant="card"
+            closeLabel="Not now"
+            onClose={() => updateSettings({ ...settingsRef.current, shareAsked: [...settingsRef.current.shareAsked, onlineState.server!] })}
+          >
+            {(close) => (
+              <div className="pause-card">
+                <h2 className="display">Share your songs?</h2>
+                <p className="hint">
+                  {onlineState.info?.name ?? 'This server'} takes songs. Shared, yours show up in the library of everyone on it, to stream
+                  or download, and theirs in yours either way. You can change it any time in the library or in Settings → Online.
+                </p>
+                <button type="button" className="btn wide" data-autofocus data-sfx="back" onClick={close}>
+                  Not now
+                </button>
+                <button
+                  type="button"
+                  className="btn primary wide"
+                  onClick={() =>
+                    updateSettings({
+                      ...settingsRef.current,
+                      shareLibrary: true,
+                      shareAsked: [...settingsRef.current.shareAsked, onlineState.server!],
+                    })
+                  }
+                >
+                  Share my songs
+                </button>
+              </div>
+            )}
+          </Dialog>
+        )}
       {exitAsk && (
         <Dialog title="Close the game" variant="card" closeLabel="Stay" onClose={() => setExitAsk(false)}>
           {(close) => (
@@ -1371,6 +2263,29 @@ export function App() {
               </button>
               <button type="button" className="btn primary wide" onClick={() => void exitApp()}>
                 Close the game
+              </button>
+            </div>
+          )}
+        </Dialog>
+      )}
+      {joinAsk && !exitAsk && (
+        <Dialog
+          key={joinAsk.id}
+          title="Asks to join"
+          variant="card"
+          closeLabel="Not now"
+          outsideCloses={false}
+          onClose={() => answerAsk(joinAsk, false)}
+        >
+          {() => (
+            <div className="pause-card">
+              <h2 className="display">{joinAsk.name} asks to join</h2>
+              <p className="hint">They asked on Discord to join your party. Let them in, and their game joins it.</p>
+              <button type="button" className="btn wide" data-sfx="back" onClick={() => answerAsk(joinAsk, false)}>
+                Not now
+              </button>
+              <button type="button" className="btn primary wide" data-autofocus onClick={() => answerAsk(joinAsk, true)}>
+                Let them in
               </button>
             </div>
           )}

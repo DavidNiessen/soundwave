@@ -2,19 +2,22 @@ import type { Chart } from '../chart/types';
 import { AudioEngine } from '../audio/AudioEngine';
 import { Highway } from '../render/Highway';
 import { StageView } from '../render/stage/StageView';
+import type { Avatars } from '../render/stage/Stage';
+import type { RingPlace, RingSeat } from '../render/aurora/ring';
 import { resolveGraphics } from './graphics';
-import { GameSession, type Results } from './GameSession';
-import { ReplayPlayback, ReplayRecorder, type ReplayInputs } from './replay';
+import { GameSession, PHRASE_REWARD, type Results } from './GameSession';
+import { ReplayPlayback, ReplayRecorder, replayResults, showdownMarks, type ReplayInputs, type ShowdownMarks } from './replay';
 import { feedbackFor, ShowPulse } from './showPulse';
 import { FINALE_SECONDS, REPLAY_START } from './timing';
 import { BufferAnalyser } from '../audio/bufferAnalyser';
 import { LightShow } from '../input/lightbar';
 import { Rumbler } from '../input/rumble';
-import { barsLeft, findBreaks, type Break } from './breaks';
+import { barsLeft, findBreaks, highwayAway, interludes, type Break } from './breaks';
 import { GamepadInput, KeyboardInput, TouchInput, type InputHandlers } from './input';
 import { WINDOWS } from './judge';
 import { GOLD_STARS, MAX_MULTIPLIER, multiplierFor, STREAK_PER_MULTIPLIER } from './scoring';
 import { highwaySpeed, type Settings } from './settings';
+import { DRAIN_RULE } from '../net/protocol';
 import { stageVenue } from './stages';
 import type { VenueId } from '../render/venues/catalog';
 
@@ -41,6 +44,14 @@ export interface HudRefs {
   breakTimer: HTMLElement;
   breakNumber: HTMLElement;
   breakRing: SVGCircleElement;
+}
+
+/** Something playing together does to a run for a while (see PlayController.effects). */
+interface Effect {
+  from: number;
+  to: number;
+  kind: 'drain' | 'fog';
+  state: 0 | 1 | 2;
 }
 
 export type PlayPhase = 'countdown' | 'playing' | 'paused' | 'finished';
@@ -115,8 +126,24 @@ export class PlayController {
   private raf = 0;
   private phase: PlayPhase = 'countdown';
   /** When the latest beat landed (performance.now ms), for the highway's swell of light. */
-  private hudCache = { score: -1, mult: -1, streak: -1, od: -1, stars: -1, starP: -1, odActive: false, breakSec: -1, songP: -1, left: -1 };
+  private hudCache = {
+    score: -1,
+    mult: -1,
+    streak: -1,
+    od: -1,
+    stars: -1,
+    starP: -1,
+    odActive: false,
+    breakSec: -1,
+    songP: -1,
+    left: -1,
+    scoreLen: -1,
+  };
   private readonly breaks: Break[];
+  /** The long breaks, during which the highway leaves the screen (see breaks.highwayAway). */
+  private readonly interludes: Break[];
+  /** How far the highway is gone now (0..1), for a video to lay it with the same alpha. */
+  away = 0;
   /** A beat fell in the frame being drawn, and how much bass there is right now (0..1). */
   private feedbackTimer = 0;
   private disposed = false;
@@ -128,6 +155,14 @@ export class PlayController {
 
   /** Keeps the song paused whatever is pressed (while the settings are open over the pause menu). */
   holdPause = false;
+  /**
+   * A party's song is played live with everyone, so it never stops: pausing only opens the menu
+   * over it (`menuOpen`), while the music, the notes and the hits carry on underneath.
+   */
+  private live = false;
+  private menu = false;
+  /** The menu over a live song opened or closed (a live song's phase never becomes paused). */
+  onMenu: (open: boolean) => void = () => {};
   private isFrozen = false;
   private frozenFrame = 0;
 
@@ -173,9 +208,32 @@ export class PlayController {
     return this.phase;
   }
 
+  /** The menu is open over a live (party) song. */
+  get menuOpen() {
+    return this.menu;
+  }
+
   onPhase: (p: PlayPhase, countdown?: number) => void = () => {};
   /** The song is over: how it went, and the run as recorded (absent in a replay). */
   onFinish: (r: Results, inputs?: ReplayInputs) => void = () => {};
+  /**
+   * Showdown: asked when the overdrive button is pressed with charge to spend. True: the press is a
+   * Strike, sent off to be aimed (`spendCharge` or `overdriveNow` follows the answer). False: it is
+   * an overdrive, as in any song.
+   */
+  strike: ((charge: number) => boolean) | null = null;
+  private readonly avatars: Avatars | undefined;
+  /** A Showdown's players on the stage's ring, and the board's places as last heard. */
+  private readonly ring: RingSeat[] | undefined;
+  private places: RingPlace[] | null = null;
+  /**
+   * What playing together does to this run for a while, in song time: Showdown's Drain caps the
+   * multiplier and its Fog hazes the far highway.
+   * `state`: 0 before it starts, 1 while it lasts, 2 once over.
+   */
+  private effects: Effect[] = [];
+  /** The multiplier rule last recorded (GameSession's RULE). */
+  private ruleNow = 0;
 
   constructor(
     private readonly engine: AudioEngine,
@@ -187,10 +245,16 @@ export class PlayController {
     stageHost?: HTMLElement,
     /** A recorded run to play back instead of taking input. */
     replay?: ReplayInputs,
-    /** `graphClock`: follow the audio graph's clock instead of what the speakers play (recording a video). */
-    options: { graphClock?: boolean } = {},
+    /**
+     * `graphClock`: follow the audio graph's clock instead of what the speakers play (recording a
+     * video). `avatars`: the players' looks for the band on stage. `ring`: a Showdown's players,
+     * on a ring of podiums in place of the band.
+     */
+    options: { graphClock?: boolean; avatars?: Avatars; ring?: RingSeat[] } = {},
   ) {
     this.graphClock = !!options.graphClock;
+    this.avatars = options.avatars;
+    this.ring = options.ring;
     engine.load(buffer);
     engine.offset = settings.offsetMs / 1000;
     engine.volume = settings.volume;
@@ -200,6 +264,7 @@ export class PlayController {
     if (replay) {
       this.playback = new ReplayPlayback(chart, replay);
       this.session = this.playback.session;
+      this.marks = showdownMarks(replay);
     } else {
       this.session = new GameSession(chart);
       this.recorder = new ReplayRecorder(this.session);
@@ -209,6 +274,7 @@ export class PlayController {
     this.highway = new Highway(highwayCanvas, chart);
     this.highway.speed = highwaySpeed(settings.trackSpeed);
     this.breaks = findBreaks(chart);
+    this.interludes = interludes(this.breaks);
     this.show.meter.setAnalyser(engine.analyser);
     this.graphicsKey = JSON.stringify(resolveGraphics(settings.graphics));
     const stageDrawn = stageHost ? new Promise<void>((resolve) => (this.stageSettled = resolve)) : Promise.resolve();
@@ -242,22 +308,23 @@ export class PlayController {
     const keys = chart.lanes === 5 ? settings.keys5 : settings.keys4;
     const handlers: InputHandlers = {
       press: (lane, ts) => {
-        // The light flashes for every press, a note there or not, from the countdown on.
-        if (this.phase === 'playing' || this.phase === 'countdown') this.light?.press(lane, this.clock);
-        if (this.phase !== 'playing') return;
+        // The light flashes for every press, a note there or not, from the countdown on (not under
+        // the menu a party song's pause opens over the live song).
+        if ((this.phase === 'playing' || this.phase === 'countdown') && !this.menu) {
+          this.light?.press(lane, this.clock);
+        }
+        if (this.phase !== 'playing' || this.menu) return;
         recorder.press(lane, this.engine.time(ts));
       },
       release: (lane, ts) => {
         if (this.phase !== 'playing') return;
         recorder.release(lane, this.engine.time(ts));
       },
-      overdrive: () => {
-        if (this.phase === 'playing') recorder.overdrive(this.engine.time());
-      },
+      overdrive: () => this.pressOverdrive(),
       pause: () => {
         // With the settings open over the pause menu, Esc and the pause button belong to them.
         if (this.holdPause) return;
-        void (this.phase === 'paused' ? this.resume() : this.pause());
+        void (this.phase === 'paused' || this.menu ? this.resume() : this.pause());
       },
     };
     this.input = new KeyboardInput(keys, settings.overdriveKey, handlers);
@@ -266,7 +333,7 @@ export class PlayController {
       padBindings,
       settings.padOverdrive,
       handlers,
-      () => this.phase === 'playing' || this.phase === 'countdown',
+      () => (this.phase === 'playing' || this.phase === 'countdown') && !this.menu,
     );
 
     // Touch: a finger anywhere in a lane's column plays that lane (the highway lights the lane).
@@ -316,12 +383,132 @@ export class PlayController {
   private readonly resize = () => {
     this.highway.resize();
     this.placeKeys();
+    this.fitScore();
   };
+
+  /**
+   * Sets the score smaller when it would not fit beside its label in the panel (a long score, a
+   * small window): measured when it gains a digit and when the window changes size.
+   */
+  private fitScore() {
+    const el = this.hud.score;
+    const panel = el.parentElement;
+    const label = panel?.querySelector('.hud-part');
+    if (!panel || !label) return;
+    el.style.removeProperty('--fit');
+    const edge = panel.getBoundingClientRect().right - parseFloat(getComputedStyle(panel).paddingRight);
+    const room = edge - label.getBoundingClientRect().right - parseFloat(getComputedStyle(panel).columnGap || '0');
+    const width = el.getBoundingClientRect().width;
+    if (room > 0 && width > room) el.style.setProperty('--fit', (room / width).toFixed(3));
+  }
 
   private readonly overdrivePress = (e: Event) => {
     e.preventDefault();
-    if (this.phase === 'playing') this.recorder?.overdrive(this.engine.time());
+    this.pressOverdrive();
   };
+
+  /** The overdrive button: overdrive, and in a Showdown a Strike too when there is someone to strike. */
+  private pressOverdrive() {
+    if (this.phase !== 'playing' || !this.recorder || this.menu) return;
+    const s = this.session;
+    if (this.strike && !s.overdriveActive && s.overdrive >= PHRASE_REWARD && this.strike(s.overdrive)) return;
+    this.recorder.overdrive(this.engine.time());
+  }
+
+  /**
+   * Showdown: the Strike found its target. The charge goes into overdrive as any press's would, so a
+   * Strike boosts the striker too; the Strike is marked on the run after it (a no-op for the score
+   * once overdrive is on, kept for the replay's marks).
+   */
+  spendCharge() {
+    if (this.phase !== 'playing' || !this.recorder) return;
+    const t = this.engine.time();
+    this.recorder.overdrive(t);
+    this.recorder.strike(t);
+  }
+
+  /** Showdown: nobody could be struck, so the press was an overdrive after all. */
+  overdriveNow() {
+    if (this.phase === 'playing') this.recorder?.overdrive(this.engine.time());
+  }
+
+  /**
+   * Showdown: a hit on this player from `at` (performance.now ms) for `ms`. Every hit is both: Fog
+   * hazes the far highway and Drain halves the streak's multiplier, for as long as it lasts.
+   */
+  hit(at: number, ms: number) {
+    this.addEffect(at, ms, 'fog');
+    this.addEffect(at, ms, 'drain');
+  }
+
+  /** Showdown: the board as it stands, for the stage's ring (sent on only when it changed). */
+  setPlaces(places: RingPlace[]) {
+    if (!this.ring || JSON.stringify(places) === JSON.stringify(this.places)) return;
+    this.places = places;
+    this.stage?.setPlaces(places);
+    if (this.shownStage !== this.stage) this.shownStage?.setPlaces(places);
+  }
+
+  /** Showdown: a Strike between two players, drawn on the stage's ring; it lands at `at` (performance.now ms). */
+  showStrike(from: string, to: string, at: number) {
+    const ms = Math.max(0, at - performance.now());
+    this.stage?.strike(from, to, ms);
+    if (this.shownStage !== this.stage) this.shownStage?.strike(from, to, ms);
+  }
+
+  private addEffect(at: number, ms: number, kind: 'drain' | 'fog') {
+    if (this.playback) return;
+    const from = this.engine.time(at);
+    this.effects.push({ from, to: from + (ms / 1000) * this.engine.playbackRate, kind, state: 0 });
+  }
+
+  /**
+   * Starts and ends the effects that fall due by song time t, each at its own time and in order, so
+   * the run records the multiplier's rule as it changed.
+   */
+  private applyEffects(t: number) {
+    const due: { at: number; e: Effect; next: 1 | 2 }[] = [];
+    for (const e of this.effects) {
+      if (e.state === 0 && t >= e.from) due.push({ at: e.from, e, next: 1 });
+      if (e.state !== 2 && t >= e.to) due.push({ at: e.to, e, next: 2 });
+    }
+    due.sort((a, b) => a.at - b.at);
+    for (const d of due) {
+      d.e.state = d.next;
+      this.recordRule(d.at);
+    }
+    this.effects = this.effects.filter((e) => e.state !== 2);
+    this.highway.fog = this.effects.some((e) => e.state === 1 && e.kind === 'fog') ? 1 : 0;
+    // The dial shows a Drain holding the multiplier down (see .hud.drained).
+    this.hud.root.classList.toggle('drained', this.ruleNow !== 0);
+  }
+
+  /** Records the multiplier's rule at song time `at`, if it changed. */
+  private recordRule(at: number) {
+    const on = (kind: string) => this.effects.some((e) => e.state === 1 && e.kind === kind);
+    const rule = on('drain') ? DRAIN_RULE : 0;
+    if (rule === this.ruleNow) return;
+    this.ruleNow = rule;
+    this.recorder?.rule(rule, at);
+  }
+
+  /** A replayed Showdown: the player's Strikes and the hits on them, found in the run (see showdownMarks). */
+  private marks: ShowdownMarks = { strikes: [], hits: [] };
+  /** Song time the replay's Showdown marks were last looked at, to tell which were passed since. */
+  private markAt = -Infinity;
+  /** A replay passed a Strike the player made, or the start of a hit on them. */
+  onReplayMark: ((kind: 'strike' | 'hit') => void) | null = null;
+
+  /** A replay shows a Showdown as it was: the haze through each hit, and a word for each Strike and hit. */
+  private replayShowdown(t: number) {
+    const { strikes, hits } = this.marks;
+    if (!strikes.length && !hits.length) return;
+    const from = this.markAt;
+    this.markAt = t;
+    for (const s of strikes) if (s > from && s <= t) this.onReplayMark?.('strike');
+    for (const [h] of hits) if (h > from && h <= t) this.onReplayMark?.('hit');
+    this.highway.fog = hits.some(([a, b]) => t >= a && t < b) ? 1 : 0;
+  }
 
   /** Lays the highway out again after the layout changed without the canvas changing size (another input in use). */
   relayout() {
@@ -382,7 +569,14 @@ export class PlayController {
   private buildStage() {
     const pending = this.stage !== this.shownStage ? this.stage : null;
     pending?.dispose();
-    const stage = new StageView(this.stageHost!, JSON.parse(this.graphicsKey), { mode: 'play', part: this.chart.part, venue: this.venue });
+    const stage = new StageView(this.stageHost!, JSON.parse(this.graphicsKey), {
+      mode: 'play',
+      part: this.chart.part,
+      venue: this.venue,
+      avatars: this.avatars,
+      ring: this.ring,
+    });
+    if (this.places) stage.setPlaces(this.places);
     if (this.isFrozen) stage.setRate('frozen');
     this.stage = stage;
     if (this.stageTaker) stage.capture(this.stageTaker);
@@ -420,8 +614,38 @@ export class PlayController {
     this.loop();
   }
 
+  /**
+   * Starts a party's song so that its countdown begins at `at` (performance.now ms): every player
+   * hears the first note at the same moment. A player whose song loaded late starts as far in as
+   * the others already are.
+   */
+  async startTogether(at: number) {
+    if (this.playback) return this.start();
+    this.live = true;
+    if (this.engine.ctx.state !== 'running') await this.engine.ctx.resume();
+    // Lined up at the speakers: a player whose sound comes out later (Bluetooth, the desktop app's
+    // own output) starts it that much earlier.
+    const wait = (at - performance.now()) / 1000 - this.engine.heardLag();
+    const from = -LEAD_IN + Math.max(0, -wait);
+    this.startAt = 0;
+    this.show.from(from);
+    this.setPhase(from < 0 ? 'countdown' : 'playing');
+    await this.engine.play(from, Math.max(0.02, wait));
+    this.loop();
+  }
+
   pause() {
     if (this.phase !== 'playing' && this.phase !== 'countdown') return;
+    if (this.live) {
+      if (this.menu) return;
+      this.menu = true;
+      // The song plays on, but the lanes are let go: under the menu no input reaches the song (a
+      // controller's releases neither), and a hold would otherwise go on scoring to its end.
+      if (this.phase === 'playing') this.recorder?.dropHolds(this.engine.time());
+      for (let l = 0; l < this.chart.lanes; l++) this.rumble.sustainEnd(l);
+      this.onMenu(true);
+      return;
+    }
     this.engine.pause(this.now());
     for (let l = 0; l < this.chart.lanes; l++) this.rumble.sustainEnd(l);
     this.rumble.overdriveEnd(true);
@@ -436,10 +660,17 @@ export class PlayController {
       await this.engine.play(this.now(), 0.05, this.rate);
       return;
     }
+    if (this.live) {
+      if (!this.menu) return;
+      this.menu = false;
+      this.onMenu(false);
+      return;
+    }
     if (this.phase !== 'paused') return;
     // Rewind slightly so the player can re-enter the groove.
     const at = Math.max(this.startAt - LEAD_IN, this.engine.time() - 1.5);
     this.recorder!.dropHolds(this.engine.time());
+    this.recorder!.rewind(at);
     await this.engine.play(at, 0.05);
     this.highway.reset();
     this.lastCount = -1;
@@ -470,6 +701,9 @@ export class PlayController {
   /** Puts the replay's session, the highway and the HUD where they stand at song time `t`. */
   private seekTo(t: number): number {
     const at = Math.max(REPLAY_START, Math.min(this.playback!.end, t));
+    // A jump says nothing of the Strikes and hits it skips; the haze is as it stands at `at`.
+    this.markAt = at;
+    this.highway.fog = this.marks.hits.some(([from, to]) => at >= from && at < to) ? 1 : 0;
     this.session = this.playback!.seek(at);
     this.wire();
     this.highway.reset();
@@ -512,10 +746,14 @@ export class PlayController {
   private finish() {
     if (this.phase === 'finished') return;
     if (this.playback) this.playback.finish();
-    else this.recorder!.update(Number.POSITIVE_INFINITY);
+    else this.recorder!.end();
     this.setPhase('finished');
     this.stage?.finale(FINALE_SECONDS);
-    this.onFinish(this.session.results(), this.recorder?.take());
+    // The score of record is the run judged again from its inputs alone. Live, an input can reach
+    // the session after a frame has already moved past its time, and be judged a few milliseconds
+    // off; judged again, every input is taken at its own time, as a replay or a server would.
+    const inputs = this.recorder?.take();
+    this.onFinish(inputs ? replayResults(this.chart, inputs) : this.session.results(), inputs);
   }
 
   private loop = () => {
@@ -544,6 +782,14 @@ export class PlayController {
    */
   private advance(t: number, now: number) {
     this.clock = now;
+    // An interlude: the highway leaves, and the deck's controls with it (see .hud.interlude).
+    const away = this.phase === 'playing' || this.phase === 'paused' ? highwayAway(t, this.interludes) : 0;
+    if (away !== this.away) {
+      if (away > 0.5 !== this.away > 0.5) this.hud.root.classList.toggle('interlude', away > 0.5);
+      this.away = away;
+    }
+    this.highway.away = away;
+    this.highway.awaySlide = !reducedMotion();
     if (this.phase === 'countdown') {
       const n = Math.ceil(this.startAt - t);
       if (t >= this.startAt) this.setPhase('playing');
@@ -553,8 +799,16 @@ export class PlayController {
       }
     }
     if (this.phase === 'playing') {
-      if (this.playback) this.playback.advance(t);
-      else this.recorder!.update(t);
+      if (this.playback) {
+        this.playback.advance(t);
+        this.replayShowdown(t);
+        if (this.effects.length) this.applyEffects(t);
+      } else {
+        // A hit's Drain is recorded at its own time before the frame moves the run on to `t`, so the
+        // score shown live is the score the run is judged again to.
+        if (this.effects.length) this.applyEffects(t);
+        this.recorder!.update(t);
+      }
       if (t > this.chart.duration + 0.5 && t > this.engine.duration) this.finish();
     }
 
@@ -649,7 +903,14 @@ export class PlayController {
     const s = this.session;
     const c = this.hudCache;
     const score = Math.round(s.score);
-    if (score !== c.score) this.hud.score.textContent = score.toLocaleString();
+    if (score !== c.score) {
+      const text = score.toLocaleString();
+      this.hud.score.textContent = text;
+      if (text.length !== c.scoreLen) {
+        c.scoreLen = text.length;
+        this.fitScore();
+      }
+    }
     const mult = s.multiplier;
     if (mult !== c.mult) {
       this.hud.multiplier.textContent = `×${mult}`;
@@ -669,8 +930,13 @@ export class PlayController {
       // (--od itself is the overdrive colour.)
       this.hud.root.style.setProperty('--od-level', (od / 100).toFixed(2));
       this.hud.root.classList.toggle('od-ready', od >= 25 && !s.overdriveActive);
+      // In a Showdown the meter is the Strike's charge too: a quarter of it is a Strike ready.
+      this.hud.root.classList.toggle('strike-ready', !!this.strike && od >= 25 && !s.overdriveActive);
     }
-    if (s.overdriveActive !== c.odActive) this.hud.root.classList.toggle('overdrive', s.overdriveActive);
+    if (s.overdriveActive !== c.odActive) {
+      this.hud.root.classList.toggle('overdrive', s.overdriveActive);
+      this.hud.root.classList.toggle('strike-ready', !!this.strike && od >= 25 && !s.overdriveActive);
+    }
     const stars = s.progressStars;
     if (stars !== c.stars) {
       this.hud.stars.dataset.count = String(stars);

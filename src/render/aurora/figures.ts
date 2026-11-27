@@ -29,6 +29,8 @@ export interface Person {
   /** Recolour for the top and the bottom garment, and how much of it to apply (0 keeps the original). */
   top?: THREE.ColorRepresentation;
   bottom?: THREE.ColorRepresentation;
+  /** Recolour for the instrument's painted body (a player's avatar), applied by the same amount. */
+  finish?: THREE.ColorRepresentation;
   recolor?: number;
   /** Lit by the front spots (the band): 1 for a band member, more for the one picked out. */
   spot?: number;
@@ -119,6 +121,7 @@ uniform vec3 uBase;
 uniform float uGloss;
 uniform float uGlow;
 uniform float uMetal;
+uniform float uPaint;
 varying vec3 vWPos; varying vec3 vWNorm; varying vec2 vUv; varying vec4 vCol;
 varying vec3 vTop; varying vec3 vBottom; varying vec2 vLook; varying float vFoot;
 void main() {
@@ -131,7 +134,8 @@ void main() {
     base *= tex.rgb;
   #endif
   // Recolour the garments the build marked (alpha 1 = top, 0.7 = bottom), keeping their shading.
-  float top = step(0.85, vCol.a);
+  // An instrument's painted body takes the player's finish, which its draw carries in aTop.
+  float top = max(step(0.85, vCol.a), uPaint);
   float bottom = step(0.5, vCol.a) * (1.0 - top);
   float lum = dot(base, vec3(0.3, 0.6, 0.1));
   base = mix(base, vTop * (0.25 + 1.7 * lum), top * vLook.x);
@@ -186,8 +190,9 @@ interface Columns {
   vary: Float32Array;
   top: Float32Array;
   bottom: Float32Array;
+  finish: Float32Array;
 }
-const WIDTH: Record<keyof Columns, number> = { matrix: 16, clipA: 3, clipB: 3, clipC: 3, vary: 4, top: 3, bottom: 3 };
+const WIDTH: Record<keyof Columns, number> = { matrix: 16, clipA: 3, clipB: 3, clipC: 3, vary: 4, top: 3, bottom: 3, finish: 3 };
 
 /** One character's people that can be drawn either way, and the two draws that share them out. */
 interface Switchable {
@@ -290,6 +295,7 @@ export class Figures {
       out.vary.set([p.phase, p.threshold, p.recolor ?? 0, p.spot ?? 0], i * 4);
       out.top.set(c.set(p.top ?? '#ffffff').toArray(), i * 3);
       out.bottom.set(c.set(p.bottom ?? '#ffffff').toArray(), i * 3);
+      out.finish.set(c.set(p.finish ?? '#ffffff').toArray(), i * 3);
       m.compose(pos.set(...p.pos), q.setFromAxisAngle(UP, p.yaw), scl.setScalar(p.scale)).toArray(out.matrix, i * 16);
     });
     return out;
@@ -307,7 +313,9 @@ export class Figures {
       geo.setAttribute('aClipB', inst(data.clipB, 3));
       geo.setAttribute('aClipC', inst(data.clipC, 3));
       geo.setAttribute('aVar', inst(data.vary, 4));
-      geo.setAttribute('aTop', inst(data.top, 3));
+      // The instrument's paint is recoloured like a top, to the finish: one attribute fewer (the
+      // crowd's shader is at the limit).
+      geo.setAttribute('aTop', inst(isPaint(part) ? data.finish : data.top, 3));
       geo.setAttribute('aBottom', inst(data.bottom, 3));
       const mesh = new THREE.InstancedMesh(geo, this.materialFor(part, far), n);
       (mesh.instanceMatrix.array as Float32Array).set(data.matrix);
@@ -346,10 +354,37 @@ export class Figures {
     }
   }
 
+  /** Draws a movable person in their colours again, after `top`, `bottom`, `finish` or `recolor` changed. */
+  restyle(person: Person) {
+    const c = new THREE.Color();
+    for (const at of this.placed.get(person) ?? []) {
+      const g = at.mesh.geometry;
+      const set = (name: string, value: THREE.ColorRepresentation | undefined) => {
+        const a = g.getAttribute(name) as THREE.InstancedBufferAttribute;
+        c.set(value ?? '#ffffff');
+        a.setXYZ(at.index, c.r, c.g, c.b);
+        a.needsUpdate = true;
+      };
+      set('aTop', isPaint(at.mesh) ? person.finish : person.top);
+      set('aBottom', person.bottom);
+      const vary = g.getAttribute('aVar') as THREE.InstancedBufferAttribute;
+      vary.setZ(at.index, person.recolor ?? 0);
+      vary.needsUpdate = true;
+    }
+  }
+
   /** Stands a movable person at another height. */
   setHeight(person: Person, y: number) {
+    const [x, , z] = person.pos;
+    this.moveTo(person, x, y, z);
+  }
+
+  /** Stands a movable person somewhere else, turned the way they were (shaken by a hit, say). */
+  moveTo(person: Person, x: number, y: number, z: number) {
     for (const at of this.placed.get(person) ?? []) {
+      at.matrix.elements[12] = x;
       at.matrix.elements[13] = y;
+      at.matrix.elements[14] = z;
       at.mesh.setMatrixAt(at.index, at.matrix);
       at.mesh.instanceMatrix.needsUpdate = true;
     }
@@ -378,6 +413,7 @@ export class Figures {
         uBase: { value: textured ? new THREE.Color(1, 1, 1) : src.color.clone() },
         uGloss: { value: /^Prop(Body|Paint|Metal|Glow)/.test(src.name) ? 1 : 0 },
         uMetal: { value: src.name.startsWith('PropMetal') ? 1 : 0 },
+        uPaint: { value: isPaint(part) ? 1 : 0 },
         uGlow: { value: src.name.startsWith('PropGlow') ? 1 : 0 },
       },
       defines,
@@ -399,7 +435,10 @@ export class Figures {
 
 const UP = new THREE.Vector3(0, 1, 0);
 
-const ATTRIBUTES: [Exclude<keyof Columns, 'matrix'>, string][] = [
+/** A mesh part that is an instrument's painted body (its material, from the build, says so). */
+const isPaint = (mesh: THREE.Mesh) => (mesh.material as THREE.Material).name.startsWith('PropPaint');
+
+const ATTRIBUTES: [Exclude<keyof Columns, 'matrix' | 'finish'>, string][] = [
   ['clipA', 'aClipA'],
   ['clipB', 'aClipB'],
   ['clipC', 'aClipC'],

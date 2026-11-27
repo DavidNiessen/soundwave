@@ -36,5 +36,5 @@ export default defineConfig({
   optimizeDeps: { entries: ['index.html'], include: ['fft.js'], exclude: ['onnxruntime-web'] },
   worker: { format: 'es' },
   build: { target: 'es2023', chunkSizeWarningLimit: 4000 },
-  test: { environment: 'node', include: ['tests/**/*.test.ts'] },
+  test: { environment: 'node', include: ['tests/**/*.test.ts', 'server/tests/**/*.test.ts'] },
 });

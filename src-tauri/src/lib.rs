@@ -1,6 +1,8 @@
 mod audio_out;
+mod browser;
 mod discord;
 mod haptics;
+mod identity;
 mod lightbar;
 #[cfg(target_os = "macos")]
 mod mac_menu;
@@ -43,9 +45,13 @@ fn exit_app(app: tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default();
-    // One game at a time: opening a song file while it runs hands the file to the running game
-    // instead of starting another. Not in development builds, so a second dev build can run beside one.
-    if !cfg!(debug_assertions) {
+    // One game at a time: opening a song file or a link (a soundwave:// link, a browser sign-in
+    // coming back, Discord's Join) while it runs hands it to the running game instead of starting
+    // another. A development build can be run beside one on purpose, to play two players on one
+    // computer, with SOUNDWAVE_SECOND_INSTANCE=1.
+    let second = cfg!(debug_assertions)
+        && std::env::var("SOUNDWAVE_SECOND_INSTANCE").is_ok_and(|v| v == "1");
+    if !second {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             song_files::open(
                 app,
@@ -54,6 +60,9 @@ pub fn run() {
             song_files::focus(app);
         }));
     }
+    // soundwave:// links (the invite links a Soundwave server makes) open the game. Registered after
+    // the single-instance plugin, which hands a link clicked while the game runs to the running game.
+    builder = builder.plugin(tauri_plugin_deep_link::init());
     // Updates: the app asks GitHub for the newest full release, checks its signature against the
     // public key in tauri.conf.json, installs it and restarts (src/app/updates.ts).
     #[cfg(desktop)]
@@ -112,6 +121,11 @@ pub fn run() {
             audio_out::audio_devices,
             audio_out::audio_set_device,
             discord::discord_presence,
+            discord::discord_take_join,
+            discord::discord_answer,
+            browser::open_in_browser,
+            identity::identity_load,
+            identity::identity_save,
             haptics::haptics_available,
             haptics::haptics_play,
             haptics::haptics_update,
@@ -127,9 +141,25 @@ pub fn run() {
             song_files::save_file_end
         ])
         .setup(|app| {
+            // Friends joining from Discord are listened for from the start (see discord.rs).
+            app.state::<discord::Discord>().listen(app.handle());
             // A song file double-clicked in Explorer starts the game with its path.
             let cwd = std::env::current_dir().unwrap_or_default();
             song_files::open(app.handle(), song_files::song_files(std::env::args(), &cwd));
+            // The installers register the scheme; a development build or an AppImage registers it here.
+            #[cfg(any(windows, target_os = "linux"))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                if let Err(e) = app.deep_link().register_all() {
+                    log::warn!("soundwave:// links could not be registered: {e}");
+                }
+                // Discord starts the game for a friend's Join through its own scheme.
+                if let Some(scheme) = discord::launch_scheme()
+                    && let Err(e) = app.deep_link().register(&scheme)
+                {
+                    log::warn!("{scheme}:// could not be registered: {e}");
+                }
+            }
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()

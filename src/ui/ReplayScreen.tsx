@@ -4,14 +4,15 @@ import { getEngine } from '../audio/engine';
 import { playSfx } from '../audio/sfx';
 import type { Chart } from '../chart/types';
 import { PlayController, REPLAY_START, timelineShape, type PlayPhase } from '../game/PlayController';
-import { replayMisses, type ReplayInputs } from '../game/replay';
+import { replayMisses, replayResults, type ReplayInputs } from '../game/replay';
 import type { Settings } from '../game/settings';
 import { keysOf } from '../input/bindings';
 import { useInputMode } from '../input/inputMode';
 import { NAV_EVENT, TAB_EVENT, type Dir } from '../input/menuNav';
 import { backInput, confirmInput, pads, PAUSE_INPUT } from '../input/pads';
 import { menuPulse } from '../input/rumble';
-import type { ReplayMeta } from '../storage/replays';
+import { MODE_LABEL, type ReplayMeta } from '../storage/replays';
+import { playShowdownSfx } from '../audio/showdownSfx';
 import { Hint, useActions, useHints } from './actions';
 import { Dialog } from './Dialog';
 import { DIFFICULTY_LABEL, ICON_STROKE, PART_LABEL, Stars } from './icons';
@@ -93,6 +94,13 @@ export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, 
   awayRef.current = away;
   const duration = Math.max(chart.duration, buffer.duration);
 
+  /** The last Showdown Strike or hit the replay passed, said over the highway for a moment. */
+  const [mark, setMark] = useState<{ kind: 'strike' | 'hit'; key: number } | null>(null);
+  useEffect(() => {
+    if (!mark) return;
+    const t = window.setTimeout(() => setMark(null), 2200);
+    return () => clearTimeout(t);
+  }, [mark]);
   const wake = useCallback(() => setAwake(true), []);
   const sleep = () => setAwake(false);
 
@@ -112,6 +120,11 @@ export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, 
       if (p === 'finished') setEnded(true);
     };
     ctrl.onFinish = () => playSfx('finale');
+    // A Showdown replay says each Strike the player made and each hit on them, as it happened.
+    ctrl.onReplayMark = (kind) => {
+      playShowdownSfx(kind === 'strike' ? 'strike' : 'impact');
+      setMark({ kind, key: performance.now() });
+    };
     ctrlRef.current = ctrl;
     void ctrl.start();
     // A replay that loses the window pauses, as a song does.
@@ -316,7 +329,9 @@ export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, 
     return [...at].filter((p) => p >= 0 && p <= 1);
   }, [chart, inputs, duration]);
   const shape = useMemo(() => timelineShape(chart, duration), [chart, duration]);
-  const r = replay.results;
+  // The run judged again, as the highway shows it: a replay recorded before judging went by time
+  // (format 1) can come out a point or two off the result stored with it.
+  const r = useMemo(() => replayResults(chart, inputs), [chart, inputs]);
   const what = `${PART_LABEL[replay.part]} · ${DIFFICULTY_LABEL[replay.difficulty]}`;
   const prev = keysOf('menus.tabPrev');
   const next = keysOf('menus.tabNext');
@@ -333,7 +348,13 @@ export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, 
       <div className="replay-badge" aria-hidden>
         <CircleDot strokeWidth={ICON_STROKE} />
         Replay
+        {replay.mode && <span className={`mode-tag ${replay.mode}`}>{MODE_LABEL[replay.mode]}</span>}
       </div>
+      {mark && (
+        <p className={`showdown-note replay-mark ${mark.kind}`} key={mark.key} role="status">
+          {mark.kind === 'strike' ? 'Strike!' : 'Struck: fog, and the multiplier halved'}
+        </p>
+      )}
 
       <div className="replay-stack">
         <ExportBox replayId={replay.id} />

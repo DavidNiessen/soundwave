@@ -1,0 +1,1045 @@
+/**
+ * The game's connection to a Soundwave server (docs/specs/online-play.md, level 2): signing in,
+ * staying signed in, the WebSocket parties run over, and the clock every player starts songs by.
+ *
+ * Nothing is sent anywhere until the player connects to a server. The server's address and the
+ * sign-in that keeps them signed in (a refresh token) are kept in this browser's storage, apart
+ * from the settings, so a settings backup never carries them.
+ *
+ * React follows it through `online.subscribe` / `online.snapshot` (useSyncExternalStore).
+ */
+import {
+  PROTOCOL_VERSION,
+  TOPICS,
+  type Account,
+  type ApiError,
+  type Avatar,
+  type Board,
+  type BoardLine,
+  type RankLine,
+  type Run,
+  type ScoreSubmission,
+  type SharedSong,
+  type UserEntry,
+  type Online,
+  type ClientMessage,
+  type Difficulty,
+  type DuplicatePair,
+  type Invite,
+  type Part,
+  type PartyMode,
+  type PartyState,
+  type Recovery,
+  type ServerInfo,
+  type ServerMessage,
+  type Session,
+  type SetSong,
+  type ShowdownOptions,
+  type SignUp,
+  type SongScore,
+  type StreamQuality,
+  type Topic,
+  type WireChart,
+} from './protocol';
+import type { SoundwaveAnalysis, SoundwaveEdits, SoundwaveMeta } from '../storage/soundwaveFile';
+import { identity } from './identity';
+import { wellFormed } from './check';
+
+/** A refusal from the server, with its status (404: an identity with no account there yet, say). */
+export class ServerRefusal extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+const STORE_KEY = 'soundwave.online';
+/** Clock sync: rounds per measurement, and how often it is measured again (ms). */
+const SYNC_ROUNDS = 6;
+const SYNC_EVERY_MS = 30_000;
+/** How long a request (other than a file) may take before it counts as not reaching the server. */
+const REQUEST_TIMEOUT_MS = 15_000;
+
+export type Status =
+  /** No server chosen. */
+  | 'off'
+  /** A server is chosen, but nobody is signed in to it. */
+  | 'signed-out'
+  | 'connecting'
+  | 'online'
+  /** Signed in, but the connection is gone: it is tried again in the background. */
+  | 'reconnecting';
+
+export interface OnlineState {
+  status: Status;
+  /** The server's address (https://…), once one is chosen. */
+  server: string | null;
+  info: ServerInfo | null;
+  account: Account | null;
+  party: PartyState | null;
+  /** The last thing that went wrong, in a sentence for the player. */
+  error: string | null;
+  /** An invite's code, from a link the player opened or pasted, waiting for the sign-up it lets in. */
+  invite: string | null;
+  /** The signed-in player's look on the stage, once loaded (null: they have none). */
+  avatar: Avatar | null;
+  /** The player signed out: the identity waits for them to sign in again, rather than signing in by itself. */
+  signedOut: boolean;
+}
+
+/**
+ * What happens to a player during a party's song: a Showdown Strike's answer or a hit coming, or a
+ * cheer. Times (`at`) are this machine's performance.now.
+ */
+export type PlayEvent = Extract<ServerMessage, { type: 'struck' | 'hit' | 'strikeFired' | 'cheer' }>;
+
+/** A song the party starts: when (performance.now ms on this machine) and on which chart (null: sit it out). */
+export interface PartyStart {
+  songIndex: number;
+  at: number;
+  chart: WireChart | null;
+}
+
+interface Stored {
+  server: string;
+  refresh?: string;
+  /** The player signed out: the identity does not sign them in again by itself until they sign in. */
+  out?: true;
+}
+
+const isLocal = (host: string) =>
+  host === 'localhost' ||
+  host === '[::1]' ||
+  host.endsWith('.local') ||
+  host.startsWith('127.') ||
+  host.startsWith('10.') ||
+  host.startsWith('192.168.') ||
+  /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+
+/**
+ * Whether this page cannot reach `server` at all: a page served over HTTPS (the web game) may not
+ * fetch from plain HTTP, except from this machine itself. The desktop app's page is not HTTPS.
+ */
+function blockedHere(server: string): boolean {
+  if (typeof location === 'undefined' || location.protocol !== 'https:' || !server.startsWith('http:')) return false;
+  const host = new URL(server).hostname;
+  return !(host === 'localhost' || host === '[::1]' || host.startsWith('127.'));
+}
+
+/**
+ * A server's address as the player typed it, made whole: HTTPS unless it is on this machine or
+ * this network (where a home server has no certificate). Throws a sentence for the player.
+ */
+export function serverAddress(typed: string): string {
+  let s = typed.trim();
+  if (!s) throw new Error('Enter the server’s address.');
+  if (!/^[a-z]+:\/\//i.test(s)) s = (isLocal(s.split(/[:/]/)[0]) ? 'http://' : 'https://') + s;
+  let url: URL;
+  try {
+    url = new URL(s);
+  } catch {
+    throw new Error('That is not a server address. It looks like play.example.com.');
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('A server address starts with https://.');
+  if (url.protocol === 'http:' && !isLocal(url.hostname))
+    throw new Error('Servers outside your own network need HTTPS (https://), so what you send them stays private.');
+  return url.origin;
+}
+
+/**
+ * A party's join secret on Discord (spec 5.4): its code and its server, which a friend's game is
+ * handed when they press Join. Discord takes up to 128 characters.
+ */
+export const joinSecret = (server: string, code: string) => `${code} ${server}`;
+/** Names a party for Discord (which wants it different from the join secret): its code and a hash of its server. */
+export function partyId(server: string, code: string) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < server.length; i++) h = Math.imul(h ^ server.charCodeAt(i), 0x01000193);
+  return `${code}-${(h >>> 0).toString(36)}`;
+}
+
+/** The party a join secret names, or null when it names none. */
+export function parseJoinSecret(secret: string): { server: string; code: string } | null {
+  const [code, server, ...rest] = secret.trim().split(' ');
+  // A party's code as the server makes it (five letters and digits, server/src/parties.ts).
+  if (!code || !server || rest.length || !/^[A-Z0-9]{4,12}$/.test(code)) return null;
+  try {
+    return { server: serverAddress(server), code };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * An invite in any of the shapes it reaches the game: a server's join page
+ * (https://play.example.com/join?invite=…), a soundwave://join?server=…&invite=… link, or the
+ * web game's own address with ?server=…&invite=…. Null when the text is none of them.
+ */
+export function parseInvite(text: string): { server: string; invite: string } | null {
+  const found = parseJoinLink(text, 'invite');
+  return found && { server: found.server, invite: found.code };
+}
+
+/**
+ * A recovery link an admin made for a player who lost their identity (`…/join?recover=…`, or the
+ * soundwave:// and web game forms of it, as an invite has): its server and code, or null.
+ */
+export function parseRecovery(text: string): { server: string; code: string } | null {
+  return parseJoinLink(text, 'recover');
+}
+
+function parseJoinLink(text: string, kind: 'invite' | 'recover'): { server: string; code: string } | null {
+  let url: URL;
+  try {
+    url = new URL(text.trim());
+  } catch {
+    return null;
+  }
+  const code = url.searchParams.get(kind);
+  if (!code) return null;
+  const named = url.searchParams.get('server');
+  try {
+    if (named) return { server: serverAddress(named), code };
+    if (url.pathname.replace(/\/+$/, '') === '/join' && (url.protocol === 'https:' || url.protocol === 'http:'))
+      return { server: serverAddress(url.origin), code };
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+class OnlineClient {
+  private state: OnlineState = {
+    status: 'off',
+    server: null,
+    info: null,
+    account: null,
+    party: null,
+    error: null,
+    invite: null,
+    avatar: null,
+    signedOut: false,
+  };
+  private readonly listeners = new Set<() => void>();
+  /**
+   * The live board of the song the party plays. Apart from the rest, as it changes ten times a
+   * second: only the board itself redraws, never the screens around it.
+   */
+  private boardState: { songIndex: number; lines: BoardLine[] } | null = null;
+  private readonly boardListeners = new Set<() => void>();
+  private readonly startListeners = new Set<(s: PartyStart) => void>();
+  private readonly playListeners = new Set<(e: PlayEvent) => void>();
+  private readonly changeListeners = new Set<(topics: ReadonlySet<Topic>, songs: ReadonlySet<string> | null) => void>();
+  /** The connection has been up before: a new welcome is a reconnect, after which anything may have changed. */
+  private welcomed = false;
+  private ws: WebSocket | null = null;
+  private access: string | null = null;
+  private refreshToken: string | null = null;
+  private retry = 0;
+  private retryTimer = 0;
+  private syncTimer = 0;
+  /** Server clock minus this machine's (performance.now), ms, from the round with the shortest trip. */
+  private offset = 0;
+  private bestTrip = Infinity;
+  private pings = new Map<number, number>();
+  /** Signed out on purpose: the connection is not tried again. */
+  private closing = false;
+  /** A song's final score, or leaving it, sent while the connection was gone: sent once it is back. */
+  private pending: ClientMessage[] = [];
+
+  constructor() {
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      const s = raw ? (JSON.parse(raw) as Stored) : null;
+      if (s?.server) {
+        this.state = { ...this.state, server: s.server, status: s.refresh ? 'reconnecting' : 'signed-out', signedOut: !!s.out };
+        this.refreshToken = s.refresh ?? null;
+        this.out = !!s.out;
+      }
+    } catch {
+      /* no storage: the player connects each time */
+    }
+  }
+
+  readonly subscribe = (fn: () => void) => {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  };
+
+  /**
+   * Live updates: `fn` runs whenever one of `topics` changes on the server (see protocol's Topic),
+   * and after a reconnect (anything may have changed meanwhile). `songs`: for `boards`, the songs
+   * whose boards changed, or null for any.
+   */
+  onChanged(topics: readonly Topic[], fn: (songs: ReadonlySet<string> | null) => void): () => void {
+    const l = (changed: ReadonlySet<Topic>, songs: ReadonlySet<string> | null) => {
+      if (topics.some((t) => changed.has(t))) fn(songs);
+    };
+    this.changeListeners.add(l);
+    return () => void this.changeListeners.delete(l);
+  }
+  private changed(topics: Iterable<Topic>, songs: ReadonlySet<string> | null) {
+    const set = new Set(topics);
+    for (const l of this.changeListeners) l(set, songs);
+  }
+  readonly snapshot = () => this.state;
+  readonly subscribeBoard = (fn: () => void) => {
+    this.boardListeners.add(fn);
+    return () => this.boardListeners.delete(fn);
+  };
+  readonly board = () => this.boardState;
+  private setBoard(b: typeof this.boardState) {
+    this.boardState = b;
+    for (const l of this.boardListeners) l();
+  }
+
+  /** Called when the party starts a song. */
+  onStart(fn: (s: PartyStart) => void) {
+    this.startListeners.add(fn);
+    return () => void this.startListeners.delete(fn);
+  }
+
+  /** Called with what the server says went wrong (the host ended the party, a code that names none). */
+  onServerError(fn: (message: string) => void) {
+    this.errorListeners.add(fn);
+    return () => void this.errorListeners.delete(fn);
+  }
+  private readonly errorListeners = new Set<(message: string) => void>();
+
+  /** Called for what happens to the player during a party's song (see PlayEvent). */
+  onPlayEvent(fn: (e: PlayEvent) => void) {
+    this.playListeners.add(fn);
+    return () => void this.playListeners.delete(fn);
+  }
+
+  private set(change: Partial<OnlineState>) {
+    this.state = { ...this.state, ...change };
+    for (const l of this.listeners) l();
+  }
+
+  private save() {
+    try {
+      if (!this.state.server) localStorage.removeItem(STORE_KEY);
+      else
+        localStorage.setItem(
+          STORE_KEY,
+          JSON.stringify({
+            server: this.state.server,
+            ...(this.refreshToken ? { refresh: this.refreshToken } : {}),
+            ...(this.out ? { out: true } : {}),
+          } satisfies Stored),
+        );
+    } catch {
+      /* storage full or blocked: signed in for this session only */
+    }
+  }
+
+  /* HTTP --------------------------------------------------------------------------------------- */
+
+  /**
+   * `raw`: a file sent as it is (a shared song); `file`: the answer is a file, not JSON, and
+   * `progress` hears how much of it has come (0..1), where the server says how big it is.
+   */
+  private async request<T>(
+    path: string,
+    init: {
+      method?: string;
+      body?: unknown;
+      auth?: boolean;
+      raw?: Blob;
+      file?: boolean;
+      progress?: (done: number) => void;
+      /** Reads the answer's headers. */
+      headers?: (h: Headers) => void;
+    } = {},
+  ): Promise<T> {
+    const server = this.state.server;
+    if (!server) throw new Error('No server is chosen.');
+    // A request that hangs (a captive portal, a connection that went nowhere) gives up in a while,
+    // so the game can say so and try again; files, which can take long, are left to the browser.
+    const send = () =>
+      fetch(server + path, {
+        ...(init.file || init.raw ? {} : { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }),
+        method: init.method ?? (init.body === undefined && !init.raw ? 'GET' : 'POST'),
+        headers: {
+          ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+          ...(init.raw ? { 'Content-Type': 'application/octet-stream' } : {}),
+          // A token goes only to the server it is for: the server may change while this is under way.
+          ...(init.auth && this.access && this.state.server === server ? { Authorization: `Bearer ${this.access}` } : {}),
+        },
+        body: init.raw ?? (init.body === undefined ? undefined : JSON.stringify(init.body)),
+      });
+    let res: Response;
+    try {
+      res = await send();
+      // An access token runs out after a while: trade the refresh token for a new one, once.
+      if (res.status === 401 && init.auth && this.refreshToken && this.state.server === server) {
+        await this.renew();
+        if (this.state.server !== server) throw new Error('You moved to another server meanwhile.');
+        res = await send();
+      }
+    } catch (e) {
+      if (e instanceof Error && e.name !== 'TypeError' && e.name !== 'TimeoutError') throw e;
+      throw new Error('The server could not be reached. Check the address and your connection.');
+    }
+    if (res.ok) init.headers?.(res.headers);
+    if (init.file && res.ok) return (init.progress ? await readWithProgress(res, init.progress) : await res.blob()) as T;
+    const body = (await res.json().catch(() => ({}))) as T | ApiError;
+    if (!res.ok) throw new ServerRefusal(res.status, (body as ApiError).error ?? `The server answered with an error (${res.status}).`);
+    return body as T;
+  }
+
+  private async renew() {
+    const token = this.refreshToken;
+    if (!token) throw new Error('You were signed out. Sign in again.');
+    const attempt = this.attempt;
+    this.refreshToken = null;
+    try {
+      const session = await this.request<Session>('/auth/refresh', { body: { refresh: token } });
+      if (!this.signedIn(session, attempt)) throw new Error('You signed out.');
+    } catch (e) {
+      if (attempt !== this.attempt) throw e;
+      // A refused refresh token is spent; one that never reached the server is still good.
+      if (/could not be reached/.test((e as Error).message)) this.refreshToken = token;
+      else this.save();
+      throw e;
+    }
+  }
+
+  /** The player signed out (see Stored.out). */
+  private out = false;
+  /**
+   * Counts sign-outs and changes of server: a sign-in still under way from before one (waiting on
+   * the network) is dropped when it comes back, instead of signing the player in again.
+   */
+  private attempt = 0;
+
+  /** Takes a session, unless the player signed out or changed servers since `attempt` began. */
+  private signedIn(s: Session, attempt = this.attempt): boolean {
+    if (attempt !== this.attempt) return false;
+    this.out = false;
+    this.access = s.access;
+    this.refreshToken = s.refresh;
+    this.save();
+    this.set({ account: s.user, error: null, signedOut: false });
+    return true;
+  }
+
+  /** Picks a server and asks it what it is. Throws a sentence for the player. */
+  async choose(typed: string): Promise<ServerInfo> {
+    const server = serverAddress(typed);
+    if (blockedHere(server))
+      throw new Error(
+        'The web game cannot reach a server over plain HTTP: the browser blocks it on a secure page. Play on it in the desktop app, or give the server HTTPS.',
+      );
+    if (server !== this.state.server) this.forget();
+    this.set({ server, status: 'signed-out', error: null });
+    const info = await this.request<ServerInfo>('/info');
+    checkProtocol(info);
+    this.set({ info });
+    this.save();
+    return info;
+  }
+
+  /** An invite link opened or pasted: its server is chosen, and its code waits for the sign-up. */
+  async useInvite(invite: { server: string; invite: string }) {
+    await this.choose(invite.server);
+    this.set({ invite: invite.invite });
+  }
+
+  /** This game's proof for the server chosen: its identity's key for the server, signing a fresh challenge. */
+  private async proof() {
+    const { server, info } = this.state;
+    if (!server || !info?.id) throw new Error('Connect to a server first.');
+    const { nonce } = await this.request<{ nonce: string }>('/auth/challenge', { body: {} });
+    if (this.state.server !== server) throw new Error('You moved to another server meanwhile.');
+    // The key is this server's by the address the game connects to, not only by the id the server
+    // gives for itself (see identity.ts): a server claiming another's id gets a key no one else knows.
+    return identity.prove(server, info.id, nonce);
+  }
+
+  /** A session for the identity on the server chosen, or null when it has no account there yet. */
+  private async keySession(): Promise<Session | null> {
+    try {
+      return await this.request<Session>('/auth/key', { body: await this.proof() });
+    } catch (e) {
+      if (e instanceof ServerRefusal && e.status === 404) return null;
+      throw e;
+    }
+  }
+
+  /** Signs in with the identity. False: it has no account on this server yet (`join` makes one). */
+  async signInWithIdentity(): Promise<boolean> {
+    const attempt = this.attempt;
+    const session = await this.keySession();
+    if (!session || !this.signedIn(session, attempt)) return false;
+    this.connect();
+    return true;
+  }
+
+  /** Makes an account on the server chosen for the identity, under `name`. */
+  async join(req: Omit<SignUp, 'publicKey' | 'nonce' | 'signature'>) {
+    const attempt = this.attempt;
+    await identity.ensure(req.name);
+    if (!identity.snapshot()?.name) await identity.setName(req.name);
+    const session = await this.request<Session>('/auth/signup', { body: { ...req, ...(await this.proof()) } });
+    if (!this.signedIn(session, attempt)) return;
+    this.set({ invite: null });
+    this.connect();
+  }
+
+  /**
+   * A recovery link opened (`…/join?recover=…`): the account it is for takes this game's identity
+   * (one lost its own) and is signed in.
+   */
+  async recover(server: string, code: string) {
+    await this.choose(server);
+    const attempt = this.attempt;
+    await identity.ensure();
+    const session = await this.request<Session>('/auth/recover', { body: { code, ...(await this.proof()) } });
+    if (!this.signedIn(session, attempt)) return;
+    this.connect();
+  }
+
+  /** The player's own name on this server. */
+  async rename(name: string) {
+    const you = await this.request<Account>('/me/name', { body: { name }, auth: true });
+    this.set({ account: you });
+  }
+
+  /** Signs out of the server, which stays chosen. */
+  signOut() {
+    this.attempt++;
+    this.closing = true;
+    this.welcomed = false;
+    this.access = null;
+    this.refreshToken = null;
+    this.out = true;
+    this.save();
+    this.ws?.close();
+    this.ws = null;
+    this.pending = [];
+    this.waitingParty = null;
+    this.byeReason = null;
+    clearTimeout(this.retryTimer);
+    clearInterval(this.syncTimer);
+    this.set({ status: this.state.server ? 'signed-out' : 'off', account: null, party: null, avatar: null, signedOut: true });
+    this.setBoard(null);
+  }
+
+  /** The player asked to sign in after signing out: the identity signs them in again (Connect tries it). */
+  letIdentitySignIn() {
+    if (!this.out) return;
+    this.out = false;
+    this.save();
+    this.set({ signedOut: false });
+  }
+
+  /** Signs out and forgets the server: another one is signed in to as usual. */
+  forget() {
+    this.signOut();
+    this.out = false;
+    this.set({ server: null, info: null, status: 'off', error: null, signedOut: false });
+    this.save();
+  }
+
+  /** Everything the server holds about the player (a JSON file to save). */
+  /** Everything the server holds about the player: a zip, with a README of what each file is. */
+  exportData() {
+    return this.request<Blob>('/me/export', { auth: true, file: true });
+  }
+
+  /* Leaderboards and runs -------------------------------------------------------- */
+
+  /** Sends a finished run to the leaderboards; the server judges it again before it takes it. */
+  postScore(sub: ScoreSubmission) {
+    return this.request<{ id: string; rank: number; best: boolean }>('/scores', { body: sub, auth: true });
+  }
+  rankings(song: string, chart: string, part: Part, difficulty: Difficulty, week = false) {
+    return this.request<Board>(`/boards/${song}/${chart}/${part}/${difficulty}${week ? '?week=1' : ''}`, { auth: true });
+  }
+  run(scoreId: string) {
+    return this.request<Run>(`/scores/${scoreId}/run`, { auth: true });
+  }
+  share(scoreId: string, shared = true) {
+    return this.request<unknown>(`/scores/${scoreId}/share`, { body: { shared }, auth: true });
+  }
+  sharedRuns(song?: string) {
+    return this.request<(RankLine & { songId: string; title: string; artist: string; part: Part; difficulty: Difficulty })[]>(
+      `/replays${song ? `?song=${song}` : ''}`,
+      { auth: true },
+    );
+  }
+  removeScore(scoreId: string, reason: string) {
+    return this.request<unknown>(`/scores/${scoreId}?reason=${encodeURIComponent(reason)}`, { method: 'DELETE', auth: true });
+  }
+  topThisWeek() {
+    return this.request<{ name: string; score: number }[]>('/boards/top', { auth: true });
+  }
+
+  /* Shared songs ------------------------------------------------------------------------------- */
+
+  /** Shares a song (its .soundwave file) to the server's library. */
+  /** Shares a song. `force`: an admin adds it although the server has the same recording already. */
+  shareSong(file: Blob, force = false) {
+    return this.request<SharedSong>(`/songs${force ? '?force=1' : ''}`, { raw: file, auth: true });
+  }
+  /** Songs on the server that may be the same song twice (owner and moderators). */
+  duplicates() {
+    return this.request<DuplicatePair[]>('/mod/duplicates', { auth: true });
+  }
+  /** Two songs are not the same: the pair is not listed again. */
+  notDuplicates(a: string, b: string) {
+    return this.request<{ ok: boolean }>('/mod/duplicates/ok', { body: { a, b }, auth: true });
+  }
+  songs(query = '') {
+    return this.request<SharedSong[]>(`/songs${query ? `?q=${encodeURIComponent(query)}` : ''}`, { auth: true });
+  }
+  /** A whole shared song, as its .soundwave file. */
+  /**
+   * A shared song's file, in `quality` where the server keeps that copy (else as shared), and the
+   * quality it came in. `progress`: how much has come, 0..1.
+   */
+  async downloadSong(id: string, quality: StreamQuality = 'high', progress?: (done: number) => void) {
+    let came: StreamQuality = 'high';
+    const blob = await this.request<Blob>(`/songs/${id}/file${quality === 'high' ? '' : `?quality=${quality}`}`, {
+      auth: true,
+      file: true,
+      progress,
+      headers: (h) => {
+        const q = h.get('X-Soundwave-Quality');
+        if (q === 'medium' || q === 'low') came = q;
+      },
+    });
+    return { blob, quality: came };
+  }
+  /** Sends a smaller copy of a shared song for streaming (its sharer, the owner and moderators). */
+  sendSongCopy(id: string, quality: Exclude<StreamQuality, 'high'>, file: Blob) {
+    return this.request<{ ok: boolean }>(`/songs/${id}/copies/${quality}`, { method: 'PUT', raw: file, auth: true });
+  }
+  /** A shared song's cover picture. */
+  songCover(id: string) {
+    return this.request<Blob>(`/covers/${id}`, { auth: true, file: true });
+  }
+  /** A shared song's details, analysis and hand-made charts (a charts-only server's whole share). */
+  songCharts(id: string) {
+    return this.request<{ meta: SoundwaveMeta; analysis: SoundwaveAnalysis | null; edits: SoundwaveEdits | null }>(`/songs/${id}/charts`, {
+      auth: true,
+    });
+  }
+  /** The owner or a moderator renames a song on the server (its hash changes; copies follow). */
+  editSong(id: string, title: string, artist: string) {
+    return this.request<SharedSong>(`/songs/${id}/edit`, { body: { title, artist }, auth: true });
+  }
+  removeSong(id: string, reason = '') {
+    return this.request<unknown>(`/songs/${id}?reason=${encodeURIComponent(reason)}`, { method: 'DELETE', auth: true });
+  }
+  reportSong(id: string, reason: string) {
+    return this.request<unknown>(`/songs/${id}/report`, { body: { reason }, auth: true });
+  }
+  songReports() {
+    return this.request<
+      {
+        id: number;
+        songId: string;
+        title: string;
+        artist: string;
+        by: string | null;
+        reason: string;
+        at: number;
+        uploader: string | null;
+      }[]
+    >('/mod/reports', { auth: true });
+  }
+  /**
+   * The address of a shared song's cover anyone can open (for the Discord status), where the server
+   * serves covers publicly over HTTPS; undefined otherwise.
+   */
+  coverUrl(songId: string): string | undefined {
+    const { server, info } = this.state;
+    if (!server?.startsWith('https://') || !info?.publicCovers || info.sharing === 'off') return undefined;
+    return `${server}/covers/${songId}`;
+  }
+
+  /** Tells the server what the player is doing, for the others' menus (sent again after a reconnect). */
+  setStatus(activity: string) {
+    this.activity = activity;
+    this.send({ type: 'status', activity });
+  }
+  private activity = '';
+  presence() {
+    return this.request<Online[]>('/presence', { auth: true });
+  }
+
+  /** Sends one of the party's songs (its .soundwave file) to the server, for the players who lack it. */
+  sendPartySong(songId: string, file: Blob) {
+    return this.request<unknown>(`/party/songs/${songId}`, { method: 'PUT', raw: file, auth: true });
+  }
+  /** Downloads one of the party's songs the server holds, as its .soundwave file. */
+  getPartySong(songId: string, progress?: (done: number) => void) {
+    return this.request<Blob>(`/party/songs/${songId}`, { auth: true, file: true, progress });
+  }
+
+  /* Moderation (owner and moderators) --------------------------------------------------------- */
+
+  moderate(action: 'kick' | 'ban' | 'unban' | 'role', body: Record<string, unknown>) {
+    return this.request<{ ok?: boolean }>(`/mod/${action}`, { body, auth: true });
+  }
+  /** An admin makes a one-time link that gives a player who lost their identity their account back. */
+  recoveryLink(name: string) {
+    return this.request<Recovery>('/mod/recovery', { body: { name }, auth: true });
+  }
+  /** An admin steps down to moderator or player (never the server's last admin). */
+  async stepDown(role: 'moderator' | 'player') {
+    const me = this.state.account;
+    if (!me) return;
+    await this.moderate('role', { name: me.name, role });
+    this.set({ account: { ...me, role } });
+  }
+  /** Every player on the server, for the admin's list (owner and moderators). */
+  users() {
+    return this.request<UserEntry[]>('/mod/users', { auth: true });
+  }
+  auditLog() {
+    return this.request<{ at: number; actor: string; action: string; target: string; reason: string }[]>('/mod/audit', { auth: true });
+  }
+  deleteAccount() {
+    return this.request<unknown>('/me', { method: 'DELETE', auth: true }).then(() => this.forget());
+  }
+
+  /** `uses` and `hours`: null for no limit (the owner's and moderators' choice; a player's invite is one use, a week). */
+  makeInvite(uses: number | null = 1, hours: number | null = 24 * 7) {
+    return this.request<Invite>('/invites', { body: { uses, hours }, auth: true });
+  }
+
+  /* The connection ------------------------------------------------------------------------------ */
+
+  /** Connects with the stored sign-in, when there is one (the game starting). */
+  resume() {
+    if ((this.refreshToken || (identity.snapshot() && !this.out)) && this.state.server && !this.ws) this.connect();
+  }
+
+  private connect() {
+    this.closing = false;
+    clearTimeout(this.retryTimer);
+    // One connection at a time: the screens and the start of the game may all ask for it at once.
+    if (this.ws || this.opening === this.attempt) return;
+    this.set({ status: this.state.account ? 'reconnecting' : 'connecting' });
+    void this.open();
+  }
+  /** The `attempt` whose connection is being opened (waiting on the network), or -1. */
+  private opening = -1;
+
+  private async open() {
+    const attempt = this.attempt;
+    this.opening = attempt;
+    const done = () => {
+      if (this.opening === attempt) this.opening = -1;
+    };
+    try {
+      if (!this.state.info) {
+        const info = await this.request<ServerInfo>('/info');
+        if (attempt !== this.attempt) return done();
+        checkProtocol(info);
+        this.set({ info });
+      }
+      if (!this.access)
+        await this.renew().catch(async (e: Error) => {
+          // The sign-in ran out (or there was none kept): the identity signs in again by itself,
+          // unless the player signed out.
+          if (attempt !== this.attempt || this.out || /could not be reached/.test(e.message) || !(await identity.load())) throw e;
+          const session = await this.keySession();
+          if (!session || !this.signedIn(session, attempt)) throw e;
+        });
+    } catch (e) {
+      done();
+      if (attempt !== this.attempt) return;
+      if (this.refreshToken) return this.again();
+      // Signed out after all: what waited for the connection (a party to join) is not sent later.
+      this.pending = [];
+      this.set({ status: 'signed-out', error: (e as Error).message });
+      return;
+    }
+    done();
+    if (attempt !== this.attempt || !this.access || this.ws) return;
+    const url = this.state.server!.replace(/^http/, 'ws') + '/ws';
+    const ws = new WebSocket(url);
+    this.ws = ws;
+    const token = this.access;
+    ws.onopen = () => {
+      if (this.ws === ws) ws.send(JSON.stringify({ type: 'hello', protocol: PROTOCOL_VERSION, token } satisfies ClientMessage));
+    };
+    ws.onmessage = (e) => {
+      // A socket this client has let go of (signed out, replaced) says nothing more.
+      if (this.ws !== ws) return;
+      let msg: unknown;
+      try {
+        msg = JSON.parse(String(e.data));
+      } catch {
+        return;
+      }
+      // A message of a shape the game does not know (a server with a bug, or one up to no good) is left unread.
+      if (wellFormed(msg)) this.receive(msg);
+    };
+    ws.onclose = (e) => {
+      if (this.ws !== ws) return;
+      this.ws = null;
+      clearInterval(this.syncTimer);
+      if (this.closing) return;
+      const reason = this.byeReason;
+      this.byeReason = null;
+      // The access token was refused (it lasts a quarter of an hour, and a drop can outlast it): a
+      // fresh one, then again.
+      if (e.code === 4003) {
+        this.access = null;
+        return this.again();
+      }
+      // Too many connections from this network (a shared address): said, and tried again in a while.
+      if (e.code === 4009) {
+        if (reason) this.set({ error: reason });
+        return this.again();
+      }
+      // The server said why it closed (banned, signed in elsewhere, too old): no point trying again.
+      if (e.code >= 4000) return this.set({ status: 'signed-out', party: null, error: reason ?? this.state.error });
+      this.again();
+    };
+  }
+
+  /** Tries again after a pause that grows with each failure (1 s up to 30 s). */
+  private again() {
+    this.set({ status: 'reconnecting' });
+    const wait = Math.min(30_000, 1000 * 2 ** this.retry++);
+    clearTimeout(this.retryTimer);
+    this.retryTimer = window.setTimeout(() => {
+      if (this.ws || this.opening === this.attempt) return;
+      void this.open();
+    }, wait);
+  }
+  /** Why the server is about to close the connection (its `bye`), for the close that follows. */
+  private byeReason: string | null = null;
+
+  private send(msg: ClientMessage) {
+    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
+  }
+
+  private receive(msg: ServerMessage) {
+    switch (msg.type) {
+      case 'welcome':
+        this.retry = 0;
+        this.set({ status: 'online', account: msg.you, error: null });
+        if (this.waitingParty) {
+          this.pending.push({ type: 'party-join', code: this.waitingParty });
+          this.waitingParty = null;
+        }
+        void this.request<{ avatar: Avatar | null }>('/me/profile', { auth: true }).then(
+          (r) => this.set({ avatar: r.avatar }),
+          () => {},
+        );
+        for (const m of this.pending.splice(0)) this.send(m);
+        if (this.activity) this.send({ type: 'status', activity: this.activity });
+        // Back after a drop: whatever is on screen is fetched again.
+        if (this.welcomed) this.changed(TOPICS, null);
+        this.welcomed = true;
+        this.sync();
+        clearInterval(this.syncTimer);
+        this.syncTimer = window.setInterval(() => this.sync(), SYNC_EVERY_MS);
+        return;
+      case 'pong': {
+        const sent = this.pings.get(msg.t);
+        if (sent === undefined) return;
+        this.pings.delete(msg.t);
+        const back = performance.now();
+        const trip = back - sent;
+        // The round with the shortest trip says the most about the clocks: its answer was the least delayed.
+        if (trip <= this.bestTrip) {
+          this.bestTrip = trip;
+          this.offset = msg.serverT - (sent + trip / 2);
+        }
+        return;
+      }
+      case 'party':
+        this.set({ party: msg.party });
+        if (msg.party?.phase !== 'playing') this.setBoard(null);
+        return;
+      case 'start': {
+        const start: PartyStart = { songIndex: msg.songIndex, at: msg.at - this.offset, chart: msg.chart };
+        for (const l of this.startListeners) l(start);
+        return;
+      }
+      case 'board':
+        this.setBoard({ songIndex: msg.songIndex, lines: msg.lines });
+        return;
+      case 'changed':
+        this.changed(msg.topics, msg.songs ? new Set(msg.songs) : null);
+        return;
+      case 'you':
+        if (this.state.account?.id === msg.you.id) this.set({ account: msg.you });
+        return;
+      case 'error':
+        this.set({ error: msg.message });
+        for (const l of this.errorListeners) l(msg.message);
+        return;
+      case 'hit':
+      case 'strikeFired':
+      case 'struck':
+      case 'cheer': {
+        const e: PlayEvent = msg.type === 'hit' || msg.type === 'strikeFired' ? { ...msg, at: msg.at - this.offset } : msg;
+        for (const l of this.playListeners) l(e);
+        return;
+      }
+      case 'bye':
+        // The close that follows says what to do about it (see onclose: a refused token is renewed).
+        this.byeReason = msg.reason;
+        return;
+    }
+  }
+
+  /** Measures the clocks against each other: a few pings a little apart, the best one kept. */
+  private sync() {
+    this.bestTrip = Infinity;
+    for (let i = 0; i < SYNC_ROUNDS; i++)
+      window.setTimeout(() => {
+        const t = performance.now();
+        this.pings.set(t, t);
+        this.send({ type: 'ping', t });
+      }, i * 150);
+  }
+
+  /* Party ------------------------------------------------------------------------------------ */
+
+  clearError() {
+    this.set({ error: null });
+  }
+  /** Shows something that went wrong on the party screen. */
+  report(message: string) {
+    this.set({ error: message });
+  }
+  createParty() {
+    this.send({ type: 'party-create' });
+  }
+  joinParty(code: string) {
+    // Joined while the connection is being made again: sent once it is back.
+    if (this.state.status === 'reconnecting') this.sendOrKeep({ type: 'party-join', code });
+    else this.send({ type: 'party-join', code });
+  }
+  leaveParty() {
+    this.send({ type: 'party-leave' });
+    this.set({ party: null });
+    this.setBoard(null);
+  }
+  setSet(songs: SetSong[]) {
+    this.send({ type: 'set', songs });
+  }
+  /** Versus: the host lets every player pick songs, or picks the set alone again. */
+  setEveryonePicks(on: boolean) {
+    this.send({ type: 'everyone-picks', on });
+  }
+  /** Versus with everyone picking: the songs this player puts in the set. */
+  setPicks(songs: SetSong[]) {
+    this.send({ type: 'picks', songs });
+  }
+  ready(part: Part, difficulty: Difficulty, ready: boolean, have: string[], calibrated = false) {
+    this.send({ type: 'ready', part, difficulty, ready, have, calibrated });
+  }
+  start(songIndex: number, charts: WireChart[], assign: Record<string, number>) {
+    this.send({ type: 'start', songIndex, charts, assign });
+  }
+  progress(songIndex: number, score: number, streak: number, stars: number) {
+    this.send({ type: 'progress', songIndex, score, streak, stars });
+  }
+  finish(songIndex: number, result: SongScore) {
+    this.sendOrKeep({ type: 'finish', songIndex, result });
+  }
+  /** The host picks what the party plays, or goes back to just the players (null). */
+  setMode(mode: PartyMode | null) {
+    this.send({ type: 'mode', mode });
+  }
+  /** The host makes the party private (never offered on Discord), or not. */
+  setPrivate(on: boolean) {
+    this.send({ type: 'private', on });
+  }
+  /**
+   * A friend's party, joined from Discord: at once when signed in to its server, else once signed
+   * in there (the server is chosen, and its sign-in shown).
+   */
+  joinFrom(server: string, code: string) {
+    if (this.state.server === server && this.state.account) return this.joinParty(code);
+    this.waitingParty = code;
+    void this.choose(server).catch((e: Error) => {
+      this.waitingParty = null;
+      this.set({ error: e.message });
+    });
+  }
+  /** A party to join once signed in (from Discord). */
+  private waitingParty: string | null = null;
+  quit(songIndex: number) {
+    this.sendOrKeep({ type: 'quit', songIndex });
+  }
+  private sendOrKeep(msg: ClientMessage) {
+    if (this.ws?.readyState === WebSocket.OPEN) this.send(msg);
+    else this.pending.push(msg);
+  }
+  backToLobby() {
+    this.send({ type: 'lobby' });
+  }
+  /** The host changes the Showdown's options. */
+  setShowdown(options: ShowdownOptions) {
+    this.send({ type: 'showdown', options });
+  }
+  /** Showdown: spends the charge on a hit against the player above (the server picks whom). */
+  strike(songIndex: number, charge: number) {
+    this.send({ type: 'strike', songIndex, charge });
+  }
+  /** A player watching cheers the others on. */
+  cheer() {
+    this.send({ type: 'cheer' });
+  }
+  /** Stores the player's look on the server (null: the band member's own); the party sees it at once. */
+  async saveAvatar(avatar: Avatar | null) {
+    const r = await this.request<{ avatar: Avatar | null }>('/me/profile', { method: 'PUT', body: { avatar }, auth: true });
+    this.set({ avatar: r.avatar });
+  }
+  showdownRotation() {
+    return this.request<SetSong[]>('/showdown/rotation', { auth: true });
+  }
+  setShowdownRotation(songs: SetSong[]) {
+    return this.request<SetSong[]>('/showdown/rotation', { body: { songs }, auth: true });
+  }
+  kick(id: string) {
+    this.send({ type: 'kick', id });
+  }
+}
+
+export const online = new OnlineClient();
+
+/** Throws a sentence for the player when the server speaks another version of the protocol. */
+function checkProtocol(info: ServerInfo) {
+  if (info.protocol !== PROTOCOL_VERSION)
+    throw new Error(
+      info.protocol > PROTOCOL_VERSION
+        ? 'This server needs a newer version of Soundwave. Update the game to play here.'
+        : 'This server runs an older version than your game. Its owner needs to update it.',
+    );
+}
+
+/** Reads a response's body, telling `progress` how much of it has come (when its length is known). */
+export async function readWithProgress(res: Response, progress: (done: number) => void): Promise<Blob> {
+  // The server says the size in a header of its own too: a proxy that compresses or chunks the
+  // answer drops Content-Length (and then it is the compressed size anyway).
+  const size = Number(res.headers.get('X-File-Size')) || Number(res.headers.get('Content-Length')) || 0;
+  // Asked once: a stream read in pieces cannot be read again whole.
+  const reader = res.body?.getReader();
+  if (!reader) return res.blob();
+  const parts: Uint8Array<ArrayBuffer>[] = [];
+  let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value);
+    got += value.length;
+    // Without a size there is no share of it to tell.
+    if (size) progress(Math.min(1, got / size));
+  }
+  return new Blob(parts, { type: res.headers.get('Content-Type') ?? '' });
+}

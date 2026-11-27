@@ -13,7 +13,24 @@
 import type { PadInput } from './pads';
 
 /** Where a shortcut works. */
-export type Area = 'menus' | 'lists' | 'home' | 'library' | 'lobby' | 'results' | 'settings' | 'stages' | 'song' | 'replay' | 'editor';
+export type Area =
+  | 'menus'
+  | 'lists'
+  | 'home'
+  | 'library'
+  | 'lobby'
+  | 'results'
+  | 'online'
+  | 'party'
+  | 'between'
+  | 'boards'
+  | 'admin'
+  | 'look'
+  | 'settings'
+  | 'stages'
+  | 'song'
+  | 'replay'
+  | 'editor';
 
 export const AREAS: { id: Area; label: string }[] = [
   { id: 'menus', label: 'Every menu' },
@@ -22,6 +39,12 @@ export const AREAS: { id: Area; label: string }[] = [
   { id: 'library', label: 'Music library' },
   { id: 'lobby', label: 'Before a song' },
   { id: 'results', label: 'After a song' },
+  { id: 'online', label: 'Online tab' },
+  { id: 'party', label: 'In a party' },
+  { id: 'between', label: 'Between a party’s songs' },
+  { id: 'boards', label: 'Leaderboards' },
+  { id: 'admin', label: 'Running a server' },
+  { id: 'look', label: 'Your look' },
   { id: 'settings', label: 'Settings' },
   { id: 'stages', label: 'Stages' },
   { id: 'song', label: 'Playing a song' },
@@ -49,6 +72,8 @@ export interface Command {
   fixedKey?: boolean;
   /** Nor the controller button: it follows the controller's own layout (back is B, or A on a Switch). */
   fixedPad?: boolean;
+  /** Other areas it also works in (a party's part and difficulty, in the lobby and between songs). */
+  also?: Area[];
 }
 
 const cmd = (area: Area, list: Omit<Command, 'area'>[]): Command[] => list.map((c) => ({ ...c, area }));
@@ -74,6 +99,8 @@ export const COMMANDS: Command[] = [
     { id: 'home.search', label: 'Search tracks', key: 'Slash' },
     { id: 'home.update', label: 'Update the game', key: 'KeyU' },
     { id: 'home.install', label: 'Get the app', key: 'KeyI' },
+    // No controller button: the shoulder buttons reach the tab, and the Stage tab's New stage has this one.
+    { id: 'home.together', label: 'Online tab', key: 'KeyT' },
     { id: 'home.replayKeep', label: 'Keep a replay', key: 'KeyK' },
     { id: 'home.replayExport', label: 'Export a replay’s video', key: 'KeyV', pad: 'b11' },
   ]),
@@ -83,6 +110,7 @@ export const COMMANDS: Command[] = [
     { id: 'library.sort', label: 'Sort', key: 'KeyS', pad: 'b7' },
     { id: 'library.add', label: 'Add songs', key: 'KeyA', pad: 'b8' },
     { id: 'library.ready', label: 'Ready up', key: 'KeyR', pad: 'b9' },
+    { id: 'library.share', label: 'Share my songs with the server, or stop', key: 'KeyH' },
   ]),
   ...cmd('lobby', [
     { id: 'lobby.part', label: 'Next part', pad: 'b3' },
@@ -100,12 +128,79 @@ export const COMMANDS: Command[] = [
     { id: 'results.part3', label: 'Next song: bass', key: 'Digit3' },
     { id: 'results.part4', label: 'Next song: drums', key: 'Digit4' },
   ]),
+  // The Online tab, signed in: a party to start or join, the server's boards, the player's look and account.
+  ...cmd('online', [
+    { id: 'party.create', label: 'Start a party or open yours (signed out: connect)', key: 'KeyC', pad: 'b3' },
+    { id: 'party.join', label: 'Join a party', key: 'KeyJ', pad: 'b2' },
+    { id: 'party.signOut', label: 'Your account (sign out, save your data)', key: 'KeyO' },
+    { id: 'party.export', label: 'Save my data from the server (in Your account)', key: 'KeyD' },
+    { id: 'party.invite', label: 'Invite a friend', key: 'KeyF', pad: 'b8' },
+    { id: 'party.boards', label: 'Leaderboards', key: 'KeyG', pad: 'b10' },
+    { id: 'party.avatar', label: 'Your look on the stage', key: 'KeyV' },
+    { id: 'party.admin', label: 'Run the server', key: 'KeyM' },
+  ]),
+  // A party's room and lobby: the mode, the set, the player's part and being ready.
+  ...cmd('party', [
+    { id: 'party.ready', label: 'Ready, or not', key: 'KeyR', pad: 'b9' },
+    { id: 'party.pickSongs', label: 'Pick the party’s songs', key: 'KeyU', pad: 'b8' },
+    { id: 'party.part', label: 'Next part', key: 'KeyP', pad: 'b3', also: ['between'] },
+    { id: 'party.difficulty', label: 'Next difficulty', key: 'KeyF', pad: 'b2', also: ['between'] },
+    { id: 'party.calibrate', label: 'Calibrate the audio offset', key: 'KeyC' },
+    { id: 'party.leave', label: 'Leave the party', key: 'KeyL', also: ['between'] },
+    { id: 'party.versus', label: 'Play Versus', key: 'Digit1' },
+    { id: 'party.showdown', label: 'Play a Showdown', key: 'Digit2' },
+    { id: 'party.changeMode', label: 'Pick another mode', key: 'KeyX' },
+    { id: 'party.everyonePicks', label: 'Versus: everyone picks songs, or the host alone', key: 'KeyK' },
+    { id: 'party.hits', label: 'Showdown hits on or off', key: 'KeyA' },
+    { id: 'party.onePart', label: 'Showdown on one part, or any', key: 'KeyO' },
+    { id: 'party.rotation', label: 'Showdown on the server’s rotation, or my set', key: 'KeyW' },
+    { id: 'party.cheer', label: 'Cheer the players on', key: 'KeyY' },
+    { id: 'party.private', label: 'Private party, or open to friends on Discord', key: 'KeyT' },
+    { id: 'party.discord', label: 'Show the party on my Discord status, or not', key: 'KeyH' },
+  ]),
+  // After each song of a party, until the next one starts.
+  ...cmd('between', [
+    { id: 'party.next', label: 'Next song', key: 'KeyN', pad: 'b9' },
+    { id: 'party.hold', label: 'Hold the countdown to the next song', key: 'Space' },
+    { id: 'party.lobby', label: 'Back to the party lobby', key: 'KeyB', pad: 'b8' },
+  ]),
+  // The parts are the tab buttons (Q and E, the shoulder buttons), as the tabs of any menu.
+  ...cmd('boards', [
+    { id: 'boards.prevSong', label: 'Previous song', key: 'Comma', pad: 'b6' },
+    { id: 'boards.nextSong', label: 'Next song', key: 'Period', pad: 'b7' },
+    { id: 'boards.difficulty', label: 'Next difficulty', key: 'KeyF', pad: 'b2' },
+    { id: 'boards.week', label: 'This week, or all time', key: 'KeyW', pad: 'b3' },
+    { id: 'boards.replays', label: 'Song boards, or shared replays', key: 'KeyR', pad: 'b8' },
+  ]),
+  // Your look, edited on the Online tab.
+  ...cmd('look', [
+    { id: 'look.part', label: 'Try it on at the next part', key: 'KeyP', pad: 'b3' },
+    { id: 'look.slot', label: 'Colour the next thing (top, bottom, instrument)', key: 'KeyF', pad: 'b2' },
+    { id: 'look.random', label: 'Surprise me (random colours)', key: 'KeyX', pad: 'b8' },
+    { id: 'look.undo', label: 'Undo changes', key: 'KeyU' },
+    { id: 'look.own', label: 'Their own look (no colours of yours)', key: 'KeyO' },
+    { id: 'look.save', label: 'Save your look', key: 'KeyK', pad: 'b9' },
+  ]),
+  // The admin page's sections, by number, as its tiles stand.
+  ...cmd('admin', [
+    { id: 'admin.overview', label: 'Overview', key: 'Digit0' },
+    { id: 'admin.library', label: 'Server library', key: 'Digit1' },
+    { id: 'admin.players', label: 'Players', key: 'Digit2' },
+    { id: 'admin.invites', label: 'Invites', key: 'Digit3' },
+    { id: 'admin.rotation', label: 'Showdown rotation', key: 'Digit4' },
+    { id: 'admin.log', label: 'Moderation log', key: 'Digit5' },
+    { id: 'admin.reports', label: 'Reported songs', key: 'Digit6' },
+    { id: 'admin.duplicates', label: 'Possible duplicates', key: 'Digit7' },
+    { id: 'admin.add', label: 'Add songs to the server library', key: 'KeyA', pad: 'b3' },
+    { id: 'admin.sort', label: 'Sort the server library another way', key: 'KeyS', pad: 'b2' },
+  ]),
   ...cmd('settings', [{ id: 'settings.reset', label: 'Restore defaults', key: 'KeyR', pad: 'b3' }]),
   ...cmd('stages', [
     // New stage sits where the library's Add songs does; Customize is in a stage's menu for a controller.
     { id: 'stages.new', label: 'New stage', key: 'KeyN', pad: 'b8' },
     { id: 'stages.edit', label: 'Customize the stage', key: 'KeyC' },
-    { id: 'stages.drop', label: 'Test the drop', key: 'KeyT', pad: 'b9' },
+    // Not T: that is the Online tab's, which the Stage tab keeps.
+    { id: 'stages.drop', label: 'Test the drop', key: 'KeyD', pad: 'b9' },
     { id: 'stages.random', label: 'Random colours', key: 'KeyR', pad: 'b10' },
     { id: 'stages.undo', label: 'Undo', key: 'Ctrl+KeyZ' },
   ]),
@@ -242,21 +337,36 @@ export const MODIFIER_CODES = new Set([
   'MetaRight',
 ]);
 
-/** Areas the lists' shortcuts (Options, Select, Delete) work beside, and the main menu's that share the Replays tab with them. */
-const WITH_LISTS: readonly Area[] = ['library', 'stages'];
-const besideLists = (c: Command) => WITH_LISTS.includes(c.area) || c.id.startsWith('home.replay');
+/** Whether a command works in an area (its own, or one it also works in). */
+const isIn = (c: Command, area: Area) => c.area === area || !!c.also?.includes(area);
+/** The main menu's own shortcuts, which every tab keeps (the Stage tab without Settings). */
+const HOME_ALWAYS = new Set(['home.together', 'home.settings', 'home.update', 'home.install']);
+const always = (c: Command) => HOME_ALWAYS.has(c.id);
+/**
+ * The shortcuts that answer at the same time, screen by screen: two of them on one input is a clash,
+ * the same input on two screens is not (C starts a party on the Online tab and calibrates in its lobby).
+ * Every menu's own shortcuts work beside all of these.
+ */
+const SCREENS: ((c: Command) => boolean)[] = [
+  (c) => always(c) || c.id === 'home.add',
+  (c) => always(c) || isIn(c, 'online'),
+  (c) => always(c) || c.id === 'home.search' || c.id === 'home.new',
+  (c) => (always(c) && c.id !== 'home.settings') || isIn(c, 'stages') || isIn(c, 'lists'),
+  (c) => always(c) || c.id.startsWith('home.replay') || isIn(c, 'lists'),
+  (c) => isIn(c, 'library') || isIn(c, 'lists'),
+  ...(['lobby', 'results', 'party', 'between', 'boards', 'admin', 'look', 'settings', 'song', 'replay', 'editor'] as const).map(
+    (a) => (c: Command) => isIn(c, a),
+  ),
+];
+/** A song and the editor take no menu shortcuts. */
+const withMenus = (o: Command) => o.area !== 'song' && o.area !== 'editor';
 
-/** Other commands in the same area (or in every menu, or a list beside it) that answer to the same input. */
+/** Other commands on the same screen (or in every menu) that answer to the same input. */
 export function clashes(id: string, kind: 'key' | 'pad' | 'mouse'): Command[] {
   const c = BY_ID.get(id);
   const mine = bound(id)[kind];
   if (!c || !mine) return [];
-  const near = (o: Command) =>
-    o.area === c.area ||
-    o.area === 'menus' ||
-    (c.area === 'menus' && o.area !== 'song' && o.area !== 'editor') ||
-    (c.area === 'lists' && besideLists(o)) ||
-    (o.area === 'lists' && besideLists(c));
+  const near = (o: Command) => o.area === 'menus' || (c.area === 'menus' && withMenus(o)) || SCREENS.some((on) => on(c) && on(o));
   return COMMANDS.filter((o) => o.id !== id && near(o) && (bound(o.id)[kind] === mine || (kind === 'key' && bound(o.id).key2 === mine)));
 }
 

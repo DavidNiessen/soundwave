@@ -1,6 +1,9 @@
 import type { GraphicsSettings } from '../../game/graphics';
 import type { VenueId } from '../venues/catalog';
 import { StageView } from '../stage/StageView';
+import type { Part } from '../../chart/types';
+import type { Avatars } from '../stage/Stage';
+import type { RingSeat } from './ring';
 
 /**
  * The menus' stage, kept alive across remounts.
@@ -30,6 +33,32 @@ const LINGER = 1500;
 /** How long a new stage takes to fade in over the one before (the .stage3d transition), ms. */
 const FADE_MS = 900;
 let held: Held | null = null;
+/** How the menu's band is dressed: as the signed-in player (and their party), or as themselves. */
+let dressed: Avatars = {};
+/** A Showdown lobby's players on the ring, or null for the band. */
+let ringed: RingSeat[] | null = null;
+/** Where the menu stage's camera holds, for any menu stage built later. */
+let looking: { part: Part | null; shift: number } = { part: null, shift: 0 };
+
+/** Keeps the menu stage's camera on one part's band member, or lets it roam again (null). */
+export function setMenuLook(part: Part | null, shift = 0) {
+  looking = { part, shift };
+  held?.stage.lookAt(part, shift);
+}
+
+/** Dresses the menu stage's band, now and for any menu stage built later. */
+export function setMenuAvatars(avatars: Avatars) {
+  dressed = avatars;
+  held?.stage.setAvatars(avatars);
+}
+
+/** Stands a Showdown lobby's players on the menu stage's ring (null: the band again), now and for any menu stage built later. */
+export function setMenuRing(seats: RingSeat[] | null) {
+  if (JSON.stringify(seats) === JSON.stringify(ringed)) return;
+  ringed = seats;
+  held?.stage.setRing(seats);
+}
+
 /** Stages on their way out: still on screen until the held one has drawn. */
 const leaving = new Set<Held>();
 /** Until when (performance.now ms) the menu stage plays a drop: overdrive, at full tilt. */
@@ -91,7 +120,13 @@ export function acquireMenuStage(host: HTMLElement, g: GraphicsSettings, venue: 
     }
   }
   if (!held) {
-    const mine: Held = { key, users: 0, timer: null, shown: false, stage: new StageView(host, g, { mode: 'menu', venue }) };
+    const mine: Held = {
+      key,
+      users: 0,
+      timer: null,
+      shown: false,
+      stage: new StageView(host, g, { mode: 'menu', venue, avatars: dressed, ring: ringed ?? undefined }),
+    };
     setLoading(venue);
     mine.stage.ready.then(
       () => {
@@ -109,6 +144,7 @@ export function acquireMenuStage(host: HTMLElement, g: GraphicsSettings, venue: 
       },
     );
     held = mine;
+    if (looking.part) mine.stage.lookAt(looking.part, looking.shift);
   }
   const h = held;
   if (h.timer) {

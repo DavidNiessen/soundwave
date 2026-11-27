@@ -185,3 +185,30 @@ export function loadVenue(): Promise<VenueAssets> {
   });
   return cache;
 }
+
+let bandCache: Promise<FigureSet> | null = null;
+
+/**
+ * The band's figures alone, without the rest of the venue: for a portrait of one band member
+ * outside the stage (the Online tab's player). Loaded once.
+ */
+export function loadBandSet(): Promise<FigureSet> {
+  bandCache ??= (async () => {
+    const base = `${import.meta.env.BASE_URL}stage/aurora/`;
+    const draco = new DRACOLoader().setDecoderPath(`${import.meta.env.BASE_URL}draco/`);
+    const loader = new GLTFLoader().setDRACOLoader(draco);
+    const load = async (path: string): Promise<FigureSet> => {
+      const r = await fetch(`${base}${path}.json`);
+      if (!r.ok) throw new Error(`${path}.json: ${r.status}`);
+      const data = (await r.json()) as FigureData;
+      const [gltf, anim] = await Promise.all([
+        loader.loadAsync(`${base}${path}.glb`),
+        fetch(`${base}${path}.bin`).then((x) => x.arrayBuffer()),
+      ]);
+      return { scene: gltf.scene, data, anim: new Uint16Array(anim) };
+    };
+    return load('local/band').catch(() => load('band'));
+  })();
+  bandCache.catch(() => (bandCache = null));
+  return bandCache;
+}

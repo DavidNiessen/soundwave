@@ -68,6 +68,11 @@
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
   /* An earned star. Gold is kept for gold stars, the tier beyond five. */
   --star: #c4a6ff;
+  /* A Showdown player's pill over the stage: night blue into violet, so it reads over any stage
+     without taking a light role (pink acts, mint focuses, lavender selects, gold is earned). */
+  --showdown-1: #3d6bff;
+  --showdown-2: #8a4dff;
+  --showdown-3: #c04dff;
   --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
   /* A gentler landing than --ease, for large things that arrive (the home tiles). */
   --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
@@ -2908,11 +2913,6 @@ input.text {
     background 0.16s,
     color 0.16s;
 }
-.option-label {
-  font-weight: 850;
-  font-style: italic;
-  text-transform: uppercase;
-}
 .option-help {
   font-size: 0.92rem;
   line-height: 1.4;
@@ -3858,6 +3858,52 @@ input.text {
 .hud.overdrive .od-fill {
   filter: drop-shadow(0 0 7px var(--od));
 }
+/* Showdown: a Strike charged lights the meter up in the Strike's colours. */
+.hud.strike-ready .od-fill {
+  stroke: var(--charge, var(--pink));
+  filter: drop-shadow(0 0 5px rgb(255 77 157 / 0.7));
+  animation: hud-charge-pulse 1.2s ease-in-out infinite;
+}
+@keyframes hud-charge-pulse {
+  50% {
+    filter: drop-shadow(0 0 9px rgb(255 77 157 / 0.9));
+  }
+}
+/* Showdown: a hit's Drain holds the multiplier down; the dial gets a red edge and a lock. */
+.hud.drained .hud-dial-ring .plate {
+  stroke: var(--danger);
+  stroke-width: 3;
+}
+.hud.drained .hud-dial-ring .fill {
+  stroke: var(--danger);
+}
+.hud-hold {
+  position: absolute;
+  /* A badge on the dial's lower right edge, clear of the number in the middle. */
+  left: 84%;
+  top: 84%;
+  translate: -50% -50%;
+  display: grid;
+  place-items: center;
+  width: 26cqw;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--danger);
+  color: var(--pink-ink);
+  opacity: 0;
+  scale: 0.6;
+  transition:
+    opacity 0.2s,
+    scale 0.2s var(--ease);
+}
+.hud-hold svg {
+  width: 62%;
+  height: 62%;
+}
+.hud.drained .hud-hold {
+  opacity: 1;
+  scale: 1;
+}
 .hud-mult {
   position: relative;
   font-size: 25cqw;
@@ -4075,8 +4121,12 @@ input.text {
   margin-left: auto;
 }
 .hud-score {
-  font-size: clamp(26px, 2.3vw, 54px);
+  /* A score too long to fit beside its label is set smaller (--fit, see PlayController.fitScore),
+     with room on the right for the italic's lean. */
+  font-size: calc(clamp(26px, 2.3vw, 54px) * var(--fit, 1));
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding-inline-end: 0.08em;
 }
 
 /* Overdrive: its name and key beside the dial; pressing it starts overdrive. */
@@ -4799,6 +4849,10 @@ input.text {
   }
   .action-bar:not(:has(.primary)) .act-group.end .act {
     flex: 1;
+  }
+  /* Three or more side by side would each cut their name short: they keep their icons instead. */
+  .action-bar:not(:has(.primary)) .act-group.end:has(> .act:nth-child(3)) .act-label {
+    display: none;
   }
   .act-passive {
     display: none;
@@ -6099,14 +6153,23 @@ kbd.mark {
   width: 1.15rem;
   height: 1.15rem;
 }
+/* On a phone five named tabs do not fit: the row takes the width, and only the open tab says its name. */
 @media (max-width: 640px) {
   .home-tabs {
     order: 3;
     margin-left: 0;
+    width: 100%;
   }
-  .home-tabs .tab,
-  .home-tabs .tab.on {
-    padding: 0;
+  .home-tabs .tab-row {
+    flex: 1;
+  }
+  .home-tabs .tab {
+    flex: 1 1 auto;
+    justify-content: center;
+    padding: 0 0.55rem;
+  }
+  .home-tabs .tab:not(.on) .tab-label {
+    display: none;
   }
 }
 
@@ -6542,9 +6605,9 @@ a.btn {
   height: 1.15rem;
   filter: drop-shadow(0 2px 4px rgb(0 0 0 / 0.5));
 }
-/* The replay's own keep button lights up while the replay is kept. */
+/* The replay's own keep button lights up while the replay is kept (lavender: mint is only the focus ring). */
 .btn[aria-pressed='true'] svg {
-  color: var(--mint);
+  color: var(--lit);
   fill: currentColor;
 }
 .replay-speed {
@@ -6620,7 +6683,7 @@ a.btn {
 }
 .replay-kept {
   display: inline-grid;
-  color: var(--mint);
+  color: var(--lit);
 }
 .replay-kept svg {
   width: 1rem;
@@ -6956,6 +7019,4095 @@ a.btn {
 }
 
 /* ------------------------------------------------------------------------------------------- */
+/* Playing together                                                                             */
+
+.party-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+}
+.party-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+/* Leaderboards and shared songs: lists of lines with a rank or a title, a number and buttons. */
+.boards-pick {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+.boards-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.boards-line {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  min-height: var(--target);
+  padding: 0.35rem 0.5rem 0.35rem 0.9rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+}
+.boards-line .party-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.boards-line .num {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+.boards-line .rank {
+  min-width: 1.4rem;
+  color: var(--ink-3);
+}
+.boards-line.me {
+  outline: 2px solid var(--pink);
+  outline-offset: -2px;
+}
+.won {
+  color: var(--mint);
+  font-weight: 700;
+}
+.party-note {
+  max-width: 60ch;
+  text-align: center;
+  font-size: 0.9rem;
+}
+.party-error {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin: 0 0 0.8rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: var(--r-m);
+  background: rgb(255 90 114 / 0.16);
+  color: var(--danger-2);
+  font-weight: 700;
+}
+.party-error .btn {
+  margin-left: auto;
+}
+.head-count .warn svg {
+  vertical-align: -0.15em;
+}
+/* Two choices side by side (sign in or make an account, a Showdown's options): the chosen one is
+   filled where it stands. */
+.avatar .choice.on,
+.choice-pair .choice.on {
+  background: var(--lit);
+}
+.choice-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  padding: 0.3rem;
+  border-radius: calc(var(--r-m) + 0.3rem);
+  background: var(--well);
+}
+.choice-pair .choice:disabled {
+  opacity: 1;
+}
+.choice-pair .choice.on:disabled {
+  color: var(--lit-ink);
+}
+.label-note {
+  margin-left: auto;
+  color: var(--ink-3);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+.party .label svg,
+.party .hint svg {
+  width: 1em;
+  height: 1em;
+  flex: none;
+}
+.party .hint svg {
+  vertical-align: -0.12em;
+  color: var(--ink-2);
+}
+
+/* Signing in: the server first, then you. */
+.party-server {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 0.6rem 0.6rem 0.9rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+}
+.party-server .song-text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Signed in, in no party: the party tiles, as the main menu's, and the account below them. */
+/* Centred in the screen, as one block no wider than the main menu's tiles. */
+.party-home {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.8rem, 2vh, 1.4rem);
+  width: 100%;
+  max-width: 82rem;
+  margin: 0 auto;
+  padding-bottom: clamp(1rem, 4vh, 3rem);
+}
+.party-home > * {
+  flex: none;
+}
+.page.party.centered .page-head {
+  width: 100%;
+  max-width: 82rem;
+  margin: 0 auto;
+}
+/* Signing in: one card in the middle, the server first and then you. */
+.party-connect {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding-bottom: clamp(1rem, 4vh, 3rem);
+}
+/* Centred by its margins, not justify-content: a card taller than the screen then scrolls from its top. */
+.party-connect > :first-child,
+.party-home > :first-child {
+  margin-top: auto;
+}
+.party-connect > :last-child,
+.party-home > :last-child {
+  margin-bottom: auto;
+}
+.connect-card {
+  flex: none;
+  width: min(100%, 32rem);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: clamp(1.1rem, 2.4vw, 1.8rem);
+  border-radius: var(--r-l);
+  background: var(--panel);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.1),
+    0 1.6rem 3rem -1.6rem rgb(0 0 0 / 0.7);
+  animation: rise-in 0.45s var(--ease) backwards;
+}
+.connect-steps {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.connect-steps li {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 3px solid var(--line);
+  color: var(--ink-3);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.85rem;
+  transition:
+    color 0.2s,
+    border-color 0.2s;
+}
+.connect-steps li.on {
+  color: var(--ink);
+  border-color: var(--pink);
+}
+.connect-steps li.done {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.connect-steps .num {
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  background: var(--well);
+  font-size: 0.85rem;
+}
+.connect-steps li.on .num {
+  background: var(--pink);
+  color: var(--pink-ink);
+}
+.connect-steps li.done .num {
+  background: var(--ok);
+  color: var(--night);
+}
+.connect-steps .num svg {
+  width: 1rem;
+  height: 1rem;
+}
+.connect-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  animation: fade-in 0.25s var(--ease);
+}
+.connect-title {
+  font-size: clamp(1.4rem, 2.2vw, 2rem);
+  font-weight: 900;
+  font-style: italic;
+  font-stretch: 112%;
+  text-transform: uppercase;
+  line-height: 1;
+}
+/* A field with its icon inside, as one well. */
+.connect-input {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: calc(var(--target) + 0.25rem);
+  padding: 0 0.9rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+  transition:
+    background 0.18s,
+    box-shadow 0.18s;
+}
+/* The game's focus ring goes round the whole field (data-ring-box), not the bare input inside it. */
+.connect-input:focus-within {
+  background: rgb(12 7 40 / 0.86);
+}
+.connect-input svg {
+  flex: none;
+  width: 1.15rem;
+  height: 1.15rem;
+  color: var(--ink-3);
+}
+.connect-form .meta-field {
+  gap: 0.3rem;
+}
+.connect-input {
+  align-items: stretch;
+}
+.connect-input svg {
+  align-self: center;
+}
+/* The input fills the field's height, so its letters are never cut at the top or bottom. */
+.meta-field .connect-input input {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.55rem 0.2rem;
+  line-height: 1.4;
+  background: transparent;
+}
+.meta-field .connect-input input:focus {
+  background: transparent;
+}
+.connect-input:has(input[aria-invalid='true']) {
+  box-shadow: inset 0 0 0 2px #ffc98a;
+}
+.meta-field > .warn,
+.meta-field > .dim:last-child:not(:first-child) {
+  font-size: 0.85rem;
+}
+.connect-go {
+  justify-content: center;
+  min-height: 3.2rem;
+  font-size: 1.1rem;
+}
+.connect-note {
+  font-size: 0.92rem;
+}
+.connect-card .party-error {
+  margin: 0;
+}
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.party-tiles {
+  flex: none;
+  height: auto;
+  min-height: min(26rem, 52vh);
+}
+.party-tiles .tile.hero {
+  max-width: none;
+}
+.party-tiles .tile.hero .mosaic {
+  max-width: 42%;
+}
+.tile-title .keycap-hint,
+.tile-title .hint-glyph {
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+.party-tiles .tile-stack .tile {
+  flex: 1 1 auto;
+}
+.tile.small {
+  align-items: center;
+}
+.tile-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: clamp(3.2rem, 4.6vw, 4.2rem);
+  aspect-ratio: 1;
+  margin-left: clamp(0.8rem, 1.2vw, 1.1rem);
+  border-radius: var(--r-m);
+  background: var(--well);
+  color: var(--ink-2);
+}
+.tile-icon svg {
+  width: 45%;
+  height: 45%;
+}
+.tile.small .tile-title {
+  font-size: clamp(1.05rem, 1.4vw, 1.35rem);
+}
+.tile.small .tile-cap {
+  font-size: 0.92rem;
+}
+/* Joining is typed, so its tile is no button: it does not lift under the pointer. */
+.tile.party-join {
+  cursor: default;
+}
+:root[data-input='mouse'] .tile.party-join:hover {
+  transform: none;
+  background: var(--panel);
+}
+.party-join-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+}
+.party-join-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--target);
+  padding: 0 0.9rem;
+  border: 0;
+  outline: none;
+  caret-color: var(--mint);
+  border-radius: var(--r-m);
+  background: var(--well);
+  color: var(--ink);
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.party-join-row input::placeholder {
+  color: var(--ink-3);
+  opacity: 0.6;
+}
+.party-account {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem 0.9rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: var(--r-l);
+  background: var(--panel);
+}
+.party-account > .song-text {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+.party-account .party-row {
+  justify-content: flex-end;
+}
+
+/* The room: a party is its players, and the host picks a mode from three tiles. */
+.party-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-width: 0;
+}
+.mode-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(0.7rem, 1.3vw, 1.2rem);
+}
+.mode-tile {
+  max-width: none;
+}
+.mode-tile .tile-text {
+  flex: 1;
+}
+.mode-tile .tile-title {
+  font-size: clamp(1.1rem, 1.55vw, 1.5rem);
+}
+/* The party's own tile glows as the modes do, so the screen reads as one family. */
+.party-tiles .tile.hero .mosaic.blank {
+  background: radial-gradient(110% 80% at 50% 100%, rgb(255 77 157 / 0.45) 0%, transparent 70%), var(--well);
+  color: var(--ink);
+}
+.party-tiles .tile.hero .mosaic.blank svg {
+  width: 32%;
+  height: 32%;
+  filter: drop-shadow(0 0.4rem 1.2rem rgb(255 77 157 / 0.55));
+}
+.mode-tile:disabled {
+  cursor: default;
+}
+/* The Online tab's party tile while the connection is being tried again: it says why it waits. */
+.tile.hero:disabled {
+  cursor: default;
+}
+.tile.hero:disabled .tile-title {
+  color: var(--ink-3);
+}
+:root[data-input='mouse'] .tile.hero:disabled:hover {
+  transform: none;
+}
+:root[data-input='mouse'] .mode-tile:disabled:hover {
+  transform: none;
+  background: var(--panel);
+}
+/* Each mode has a light of its own: the room reads at a glance even across a room. */
+.mode-art {
+  flex: none;
+  height: clamp(8rem, 24vh, 13rem);
+  display: grid;
+  place-items: center;
+  background: radial-gradient(120% 90% at 50% 100%, var(--mode-glow) 0%, transparent 70%), var(--well);
+  color: var(--ink);
+}
+.mode-art svg {
+  width: clamp(3rem, 5vw, 4.6rem);
+  height: auto;
+  filter: drop-shadow(0 0.4rem 1.2rem var(--mode-glow));
+  transition: transform 0.3s var(--ease);
+}
+.mode-tile.is-focus .mode-art svg,
+:root[data-input='mouse'] .mode-tile:not(:disabled):hover .mode-art svg {
+  transform: scale(1.08) rotate(-4deg);
+}
+.mode-tile[data-mode='versus'] {
+  --mode-glow: rgb(255 77 157 / 0.55);
+}
+.mode-tile[data-mode='showdown'] {
+  --mode-glow: rgb(138 77 255 / 0.5);
+}
+.mode-tile .tile-meta.warn {
+  color: #ffc98a;
+}
+
+/* The party's code, and the players. */
+.party-code {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+}
+.party-code .party-private {
+  align-self: flex-start;
+  margin-top: 0.5rem;
+}
+.party-code-text {
+  font-size: clamp(2rem, 4vw, 3.2rem);
+  letter-spacing: 0.16em;
+  color: var(--pink-2);
+  user-select: all;
+}
+.party-code-chip {
+  margin-left: auto;
+  padding: 0.25rem 0.6rem;
+  border-radius: var(--r-s);
+  background: var(--well);
+  color: var(--pink-2);
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.05em;
+  user-select: all;
+}
+.party-players {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.party-main > .party-players {
+  margin-top: 0.4rem;
+}
+.party-name svg {
+  width: 1em;
+  height: 1em;
+  margin-left: 0.35em;
+  vertical-align: -0.12em;
+  color: var(--ink-2);
+}
+/* The players as cards: their look's colours, their part, and whether they are ready. */
+.player-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(13.5rem, 1fr));
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.player-card {
+  --top: var(--violet);
+  --bottom: var(--deep);
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 4.2rem;
+  padding: 0.55rem 0.7rem 0.55rem 0.55rem;
+  border-radius: var(--r-m);
+  background: var(--panel);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 0 0 1px var(--glass-edge);
+  animation: card-in 0.5s var(--ease-soft) backwards;
+  animation-delay: calc(var(--i, 0) * 45ms);
+  transition:
+    box-shadow 0.25s,
+    background 0.25s;
+}
+.player-card.me {
+  background: linear-gradient(90deg, rgb(255 255 255 / 0.1), transparent 70%), var(--panel);
+}
+.player-card.ready {
+  box-shadow:
+    inset 0 0 0 1.5px rgb(98 232 154 / 0.7),
+    0 0 1.4rem -0.4rem rgb(98 232 154 / 0.5);
+}
+.player-card.gone {
+  opacity: 0.55;
+}
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.6rem) scale(0.96);
+  }
+}
+/* The player's initial on their look: the top's colour over the trousers', with the part they play. */
+.player-art {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2.9rem;
+  height: 2.9rem;
+  border-radius: 50%;
+  background: linear-gradient(160deg, var(--top) 0 55%, var(--bottom) 55%);
+  box-shadow: inset 0 0 0 2px rgb(255 255 255 / 0.18);
+}
+.player-initial {
+  color: var(--ink);
+  font-weight: 900;
+  font-style: italic;
+  font-size: 1.15rem;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.7);
+}
+.player-part {
+  position: absolute;
+  right: -0.3rem;
+  bottom: -0.3rem;
+  display: grid;
+  place-items: center;
+  width: 1.45rem;
+  height: 1.45rem;
+  border-radius: 50%;
+  background: var(--night);
+  box-shadow: 0 0 0 2px var(--night);
+  color: var(--ink-2);
+}
+.player-part svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+.player-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+.player-name {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  font-weight: 800;
+}
+.player-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.player-name svg {
+  flex: none;
+  width: 1em;
+  height: 1em;
+  color: var(--ink-2);
+}
+.player-you {
+  flex: none;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--r-s);
+  background: var(--lit);
+  color: var(--lit-ink);
+  font-size: 0.72rem;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+}
+.player-pick {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  color: var(--ink-2);
+  font-size: 0.88rem;
+}
+.player-notes {
+  color: #ffc98a;
+  font-size: 0.8rem;
+}
+.player-card .party-remove {
+  flex: none;
+  width: 2.1rem;
+  height: 2.1rem;
+}
+/* Ready: a tick pops onto the player's picture and the card lights up green. */
+.player-ready {
+  position: absolute;
+  top: -0.3rem;
+  right: -0.35rem;
+  display: grid;
+  place-items: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 2px var(--night);
+  color: var(--night);
+  animation: pop-in 0.35s var(--ease);
+}
+.player-ready svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+/* A Showdown's lobby on a wide screen leaves its middle open: the players' ring stands there on the stage. */
+.ring-window {
+  display: none;
+}
+@media (min-width: 1400px) {
+  .party-lobby.ringside {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.75fr) minmax(21rem, 0.95fr);
+  }
+  .party-lobby.ringside .ring-window {
+    display: block;
+  }
+}
+/* Beside the room's mode tiles the panel is narrow: one card a row, so names fit. */
+.party-room .player-cards {
+  grid-template-columns: minmax(0, 1fr);
+}
+/* The last card while there is room: how friends join. */
+.player-card.invite {
+  background: transparent;
+  backdrop-filter: none;
+  box-shadow: inset 0 0 0 1.5px rgb(255 255 255 / 0.16);
+  border: 0;
+  outline: 1.5px dashed rgb(255 255 255 / 0.22);
+  outline-offset: -1.5px;
+}
+.player-card.invite .player-art {
+  background: var(--well);
+  color: var(--ink-3);
+}
+.player-card.invite .player-art svg {
+  width: 1.3rem;
+  height: 1.3rem;
+}
+.player-card.invite .player-name {
+  color: var(--ink-2);
+}
+.label-note.all-ready {
+  color: var(--ok);
+}
+.party-remove {
+  width: 2.4rem;
+  height: 2.4rem;
+}
+
+/* A mode's lobby: the set, its options and the players beside your choices. */
+.party-set-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.8rem;
+}
+.party-set-head .label {
+  flex: 1;
+  white-space: nowrap;
+}
+.set-card.next {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.1),
+    inset 0 0 0 2px rgb(255 77 157 / 0.55);
+}
+.next-tag {
+  padding: 0.15rem 0.55rem;
+  border-radius: var(--r-s);
+  background: var(--pink);
+  color: var(--pink-ink);
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+}
+.party-empty {
+  grid-template-columns: 1.6rem minmax(0, 1fr);
+}
+/* The empty set's explanation is the one thing on the card: it wraps instead of being cut short. */
+.party-empty :is(.song-title, .song-artist) {
+  white-space: normal;
+  overflow: visible;
+}
+.party-empty .slot-num svg {
+  width: 1.3rem;
+  height: 1.3rem;
+  color: var(--ink-3);
+}
+.set-notes .warn {
+  flex-wrap: wrap;
+}
+.set-notes .warn .btn {
+  margin-left: 0.2rem;
+}
+/* A song on its way: what is happening, and how far. */
+.transfer {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  color: var(--ink-2);
+}
+.transfer svg {
+  width: 1rem;
+  height: 1rem;
+}
+.transfer-bar {
+  flex-basis: 100%;
+  height: 0.3rem;
+  border-radius: 1rem;
+  background: linear-gradient(90deg, var(--lit) calc(var(--done, 0) * 100%), var(--well) 0);
+}
+.option-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 800;
+  color: var(--ink-2);
+}
+/* A Showdown's rules in a line, and the host's three switches as chips. */
+.showdown-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: var(--r-l);
+  background: var(--panel);
+  backdrop-filter: var(--glass-blur);
+}
+.showdown-rules .hint {
+  max-width: none;
+  margin: 0;
+}
+.option-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+.option-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: var(--target);
+  padding: 0.3rem 0.85rem 0.3rem 0.5rem;
+  border: 0;
+  border-radius: 99rem;
+  background: var(--raised);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background 0.2s,
+    transform 0.2s var(--ease);
+}
+.option-chip svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  color: var(--ink-2);
+}
+.option-chip-label {
+  color: var(--ink-3);
+  font-weight: 700;
+  font-size: 0.86rem;
+}
+.option-chip-value {
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  font-size: 0.9rem;
+}
+:root[data-input='mouse'] .option-chip:not(:disabled):hover {
+  background: var(--raised-hi);
+}
+.option-chip:not(:disabled):active {
+  transform: scale(0.97);
+}
+.option-chip:disabled {
+  cursor: default;
+  background: var(--row);
+}
+/* Everyone is ready: the next song counts itself in. */
+.party-countdown {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  margin: 0;
+  padding: 0.6rem 0.9rem;
+  border-radius: var(--r-m);
+  background: linear-gradient(90deg, rgb(98 232 154 / 0.22) calc(var(--left, 1) * 100%), rgb(98 232 154 / 0.08) 0), var(--well);
+  transition: background 0.25s linear;
+}
+.party-countdown-num {
+  flex: none;
+  min-width: 1.6ch;
+  color: var(--ok);
+  font-size: 2rem;
+  font-weight: 900;
+  font-style: italic;
+  line-height: 1;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  animation: count-pop 0.45s var(--ease);
+}
+.party-countdown-text {
+  display: flex;
+  flex-direction: column;
+  font-weight: 800;
+}
+.party-countdown-text .dim {
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+@keyframes count-pop {
+  from {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+.party-calibrate > span {
+  flex: 1;
+  font-size: 0.85rem;
+  line-height: 1.3;
+}
+.party-calibrate {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.5rem 0.45rem 0.8rem;
+  border-radius: var(--r-m);
+  background: rgb(255 201 138 / 0.1);
+  font-size: 0.92rem;
+}
+.btn.is-ready {
+  background: rgb(98 232 154 / 0.18);
+  color: var(--ok);
+}
+:root[data-input='mouse'] .btn.is-ready:hover:not(:disabled) {
+  background: rgb(98 232 154 / 0.28);
+}
+.btn-note {
+  margin-left: auto;
+  color: var(--ink-3);
+  font-size: 0.82rem;
+  font-weight: 700;
+  font-style: normal;
+  text-transform: none;
+}
+.party-calibrate.hint {
+  max-width: none;
+}
+/* Ending the party is held, but it is not the screen's purpose: a low red strip, not a big button. */
+.party-end .hold-btn.danger {
+  width: 100%;
+  min-height: var(--target);
+  margin-top: 0;
+  padding-inline: 1rem;
+  flex-direction: row;
+  gap: 0.8rem;
+  background: rgb(255 90 114 / 0.14);
+  color: var(--danger-2);
+}
+.party-end .hold-btn.danger .hold-text {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 0.8rem;
+}
+.party-end .hold-label {
+  font-size: 1rem;
+}
+.party-end .hold-hint {
+  font-size: 0.82rem;
+  opacity: 0.8;
+}
+.party-end .hold-btn.danger .hold-fill {
+  background: rgb(255 90 114 / 0.45);
+}
+.party-wait {
+  padding: 0.4rem 0.2rem;
+}
+.party-foot {
+  align-items: center;
+}
+.party-watch {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--line);
+}
+.party-watch .party-board {
+  position: static;
+  transform: none;
+  max-height: none;
+}
+.party-result.me {
+  outline: 2px solid var(--pink);
+  outline-offset: -2px;
+}
+.party-result .slot-num svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  color: var(--gold);
+}
+.party-results .set-card {
+  grid-template-columns: 1.6rem minmax(0, 1fr) auto;
+}
+/* The main menu's Play together tile: the party's glow beside it, the key with the name, and a
+   line saying where the player stands online. */
+.together-art {
+  flex: none;
+  align-self: stretch;
+  aspect-ratio: 1;
+  max-width: 42%;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(90% 70% at 30% 100%, rgb(255 77 157 / 0.5) 0%, transparent 70%),
+    radial-gradient(80% 60% at 85% 0%, rgb(93 242 214 / 0.35) 0%, transparent 70%), var(--well);
+  color: var(--ink);
+}
+.together-art svg {
+  width: 38%;
+  height: 38%;
+  filter: drop-shadow(0 0.4rem 1.2rem rgb(255 77 157 / 0.55));
+  transition: transform 0.3s var(--ease);
+}
+.tile.together.is-focus .together-art svg,
+:root[data-input='mouse'] .tile.together:hover .together-art svg {
+  transform: scale(1.08) rotate(-4deg);
+}
+/* The title takes its size from the card's width, so "together" and its key always fit on one line. */
+.tile.together .tile-text {
+  container-type: inline-size;
+}
+.together-title {
+  font-size: clamp(1rem, 11cqi, 1.6rem);
+}
+.together-title .nowrap {
+  white-space: nowrap;
+}
+.together-title .keycap-hint,
+.together-title .hint-glyph {
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+.together-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  align-self: flex-start;
+  margin-top: 0.2rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 1rem;
+  background: var(--well);
+  color: var(--ink-3);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.together-status.on {
+  color: var(--ok);
+}
+@media (max-width: 900px) {
+  .mode-tiles {
+    grid-template-columns: 1fr;
+  }
+  .mode-tile {
+    min-height: 0;
+    flex-direction: row;
+  }
+  .mode-art {
+    width: 6rem;
+    height: auto;
+  }
+  .party-tiles {
+    flex-direction: column;
+  }
+}
+
+/* The party's board, beside the highway on the side away from the hit feedback. */
+.party-board {
+  position: absolute;
+  z-index: 2;
+  left: calc(var(--hw-x, 50%) + var(--hw-w, 400px) * 0.5 + clamp(14px, 1.6vw, 34px));
+  top: 18%;
+  width: clamp(11rem, 17vw, 16rem);
+  max-height: 60%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0.4rem;
+  border-radius: var(--r-m);
+  background: var(--panel);
+  list-style: none;
+  pointer-events: none;
+}
+.party-board-row {
+  display: grid;
+  grid-template-columns: 1.4rem minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0.45rem;
+  border-radius: var(--r-s);
+  font-size: 0.9rem;
+}
+.party-board-row.me {
+  background: var(--pink);
+  color: var(--pink-ink);
+}
+.party-board-row.me .dim {
+  color: inherit;
+  opacity: 0.75;
+}
+.party-board-row.out {
+  opacity: 0.5;
+}
+.party-board-row .rank {
+  font-weight: 900;
+}
+.party-board-row .party-name {
+  grid-area: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+/* On a narrow screen the highway takes the width: the board sits small along the top instead. */
+@media (max-width: 720px) {
+  .party-board {
+    left: auto;
+    right: 0.5rem;
+    top: calc(var(--safe-t) + 4.2rem);
+    width: 10rem;
+    max-height: 40%;
+    font-size: 0.8rem;
+  }
+}
+
+/* Showdown during a song: the warning and the hit in words, above the highway; Drain's still edge. */
+.showdown-hit,
+.showdown-note {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  translate: -50% 0;
+  margin: 0;
+  padding: 0.45rem 0.9rem;
+  border-radius: var(--r-m);
+  font-weight: 800;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.showdown-hit {
+  top: calc(var(--safe-t) + 4.6rem);
+  background: var(--panel);
+  color: var(--ink);
+}
+.showdown-hit.coming {
+  background: var(--danger);
+  color: #1a0710;
+}
+.showdown-note {
+  top: calc(var(--safe-t) + 7.6rem);
+  background: var(--panel);
+  color: var(--od);
+  animation: rise-in 0.3s var(--ease) backwards;
+}
+.showdown-edge {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  box-shadow: inset 0 0 0 6px var(--danger);
+  pointer-events: none;
+}
+/* Showdown arrows on the board: whom this player would strike, and who can strike them. */
+.party-board-row .aim {
+  width: 0.95rem;
+  height: 0.95rem;
+  vertical-align: -0.15em;
+}
+.party-board-row.hit .party-name {
+  color: var(--danger-2);
+}
+.party-board-row.me.hit .party-name {
+  color: inherit;
+  text-decoration: underline;
+}
+.party-board-left {
+  margin: 0.15rem 0.45rem 0;
+  font-size: 0.8rem;
+}
+
+/* Your look: the colours on the left, the stage behind them on the right shows the result. */
+.avatar-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  width: min(100%, 34rem);
+}
+.avatar-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.avatar-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+.avatar-swatch {
+  width: var(--target);
+  height: var(--target);
+  border-radius: 50%;
+  background: var(--swatch);
+  box-shadow:
+    inset 0 0 0 2px rgb(255 255 255 / 0.16),
+    0 0 0 0 var(--ink);
+  transition: box-shadow 0.15s var(--ease);
+}
+.avatar-swatch:hover {
+  box-shadow:
+    inset 0 0 0 2px rgb(255 255 255 / 0.4),
+    0 0 0 2px rgb(255 255 255 / 0.25);
+}
+.avatar-swatch.on {
+  box-shadow:
+    inset 0 0 0 2px rgb(0 0 0 / 0.35),
+    0 0 0 3px var(--ink);
+}
+
+/* The connected main menu: a sidebar while signed in to a server. */
+.home-body[data-tab='play'] {
+  position: relative;
+}
+.play-row {
+  flex: 0 1 auto;
+  display: flex;
+  gap: clamp(0.8rem, 1.5vw, 1.5rem);
+  min-height: 0;
+  height: min(100%, 30rem);
+}
+.play-row > .tiles {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+}
+.play-row > .online-side {
+  overflow-y: auto;
+}
+.online-side {
+  flex: none;
+  width: clamp(14rem, 20vw, 18rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.online-you {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--r-m);
+  background: var(--panel);
+}
+.online-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--ink-3);
+  flex: none;
+}
+.online-dot.on {
+  background: var(--ok);
+}
+.online-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.3rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: var(--r-m);
+  background: var(--panel);
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}
+.online-card .label svg {
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.12em;
+}
+.online-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.9rem;
+}
+.online-list li {
+  display: grid;
+  grid-template-columns: 1.4rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.4rem;
+}
+.online-list li.me {
+  color: var(--pink-2);
+}
+.online-list svg {
+  width: 1rem;
+  height: 1rem;
+  color: var(--gold);
+}
+@media (max-width: 900px) {
+  .play-row {
+    flex-direction: column-reverse;
+  }
+  .online-side {
+    width: auto;
+  }
+}
+
+/* ------------------------------------------------------------------------------------------- */
+/* Leaderboards: the song on the left, the part and difficulty as tabs on top, the runs below.  */
+
+.boards-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(16rem, 0.62fr) minmax(0, 1.6fr);
+  gap: clamp(1rem, 2.6vw, 2.6rem);
+}
+.boards-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-bottom: 1rem;
+}
+.boards-cover {
+  width: min(100%, 22rem);
+  aspect-ratio: 1;
+  border-radius: var(--r-l);
+  overflow: hidden;
+  box-shadow: 0 1.2rem 2.4rem -1rem rgb(0 0 0 / 0.7);
+  animation: rise-in 0.45s var(--ease) backwards;
+}
+.boards-cover .cover {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
+.boards-song {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: min(100%, 22rem);
+}
+.boards-song .song-text {
+  flex: 1;
+  min-width: 0;
+}
+.boards-title {
+  display: block;
+  font-size: clamp(1.25rem, 1.9vw, 1.8rem);
+  font-weight: 900;
+  font-style: italic;
+  font-stretch: 112%;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.boards-step {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.boards-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: auto;
+  width: min(100%, 22rem);
+}
+.boards-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.boards-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  min-height: 0;
+  min-width: 0;
+}
+.boards-tabs {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+}
+.boards-tabs-label {
+  color: var(--pink-2);
+  font-weight: 900;
+  font-style: italic;
+  font-stretch: 112%;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.boards-tab-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: calc(var(--r-l) + 0.2rem);
+  background: var(--panel);
+}
+.boards-parts,
+.boards-diffs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(3.2rem, 1fr));
+  gap: 0.3rem;
+  padding: 0.25rem;
+}
+.boards-parts .choice svg {
+  width: 1.6rem;
+  height: 1.6rem;
+}
+.boards-diffs {
+  margin-left: 0.6rem;
+}
+.boards-list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.board-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0 0.4rem 0 0;
+  list-style: none;
+  overflow-y: auto;
+  min-height: 0;
+}
+.board-rows.pinned {
+  flex: none;
+  overflow: visible;
+  padding-top: 0.4rem;
+  border-top: 1px dashed var(--line);
+}
+.board-row {
+  display: grid;
+  grid-template-columns: 2.6rem minmax(0, 1fr) auto 4.6rem 2.2rem minmax(6.5rem, auto) auto;
+  align-items: center;
+  gap: 0.9rem;
+  min-height: 3.5rem;
+  padding: 0.35rem 0.6rem 0.35rem 0.9rem;
+  border-radius: var(--r-m);
+  background: var(--panel);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08);
+  animation: rise-in 0.4s var(--ease) backwards;
+  animation-delay: calc(var(--i, 0) * 25ms);
+}
+.board-row.me {
+  background: linear-gradient(90deg, rgb(255 77 157 / 0.28), rgb(255 77 157 / 0.08) 60%), var(--panel);
+  box-shadow: inset 0 0 0 2px rgb(255 77 157 / 0.6);
+}
+.board-rank {
+  display: grid;
+  place-items: center;
+  color: var(--ink-2);
+  font-size: 1.2rem;
+}
+.board-rank svg {
+  width: 1.4rem;
+  height: 1.4rem;
+}
+.board-row.top-1 .board-rank {
+  color: var(--gold);
+}
+.board-row.top-2 .board-rank,
+.board-row.top-3 .board-rank {
+  color: var(--ink);
+}
+.board-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+.board-shared {
+  width: 0.95em;
+  height: 0.95em;
+  margin-left: 0.45em;
+  vertical-align: -0.1em;
+  color: var(--ink-2);
+}
+.board-pill {
+  justify-self: center;
+  min-width: 4rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 1rem;
+  background: var(--well);
+  color: var(--ink-2);
+  text-align: center;
+  font-weight: 900;
+  font-style: italic;
+  font-variant-numeric: tabular-nums;
+}
+.board-pill.perfect,
+.board-pill.fc {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--gold);
+  color: var(--gold);
+}
+.board-diff {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--r-s);
+  background: var(--lit);
+  color: var(--lit-ink);
+  font-weight: 900;
+  font-style: italic;
+}
+.board-score {
+  justify-self: end;
+  font-size: 1.3rem;
+}
+.board-acts {
+  display: flex;
+  gap: 0.3rem;
+}
+.board-row .board-acts .btn {
+  opacity: 0.55;
+  transition: opacity 0.18s;
+}
+.board-row:hover .board-acts .btn,
+.board-row:focus-within .board-acts .btn {
+  opacity: 1;
+}
+.board-row.shared .board-rank svg {
+  color: var(--ink-2);
+}
+.boards-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  padding: 0.2rem 0.4rem 0.8rem;
+}
+.boards-empty {
+  padding: 2rem 0.4rem;
+}
+@media (max-width: 900px) {
+  .boards-layout {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+  .boards-cover {
+    width: 9rem;
+  }
+  .boards-tab-strip {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .board-row {
+    grid-template-columns: 2rem minmax(0, 1fr) auto auto;
+  }
+  .board-row .stars,
+  .board-row .board-diff,
+  .board-row .board-pill {
+    display: none;
+  }
+}
+.transfer.held {
+  color: var(--ink-2);
+}
+/* On its own in the stack the tile stands upright, its glow on top. */
+.tile-stack .tile:only-child .together-art {
+  flex: 1;
+  aspect-ratio: auto;
+  max-width: none;
+  min-height: 0;
+}
+
+/* The main menu's Online tab: a dot on the tab while the player is in a party. */
+.tab-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0.5rem var(--ok);
+  flex: none;
+}
+.online-panel {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.8rem, 2vh, 1.4rem);
+  min-height: 0;
+  overflow-y: auto;
+}
+.online-panel .play-row {
+  height: auto;
+  min-height: min(26rem, 52vh);
+}
+.online-panel .party-tiles {
+  min-height: 0;
+}
+.tile.hero.in-party .party-code-text {
+  margin: 0.3rem 0;
+}
+.online-panel .tile-title .nowrap {
+  white-space: nowrap;
+}
+.online-panel .tile-title .keycap-hint,
+.online-panel .tile-title .hint-glyph {
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+
+/* ------------------------------------------------------------------------------------------- */
+/* Showdown during a song: the standings with the cut line, your place, the round, the strike.  */
+
+.sd-board {
+  position: absolute;
+  z-index: 2;
+  right: clamp(0.8rem, 2vw, 2rem);
+  top: calc(var(--safe-t) + 4.5rem);
+  width: clamp(13rem, 19vw, 18rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  pointer-events: none;
+}
+.sd-row {
+  display: grid;
+  grid-template-columns: 1.8rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem 0.4rem 0.5rem;
+  border-radius: 999px;
+  background: var(--panel-solid);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1);
+  transition: transform 0.3s var(--ease);
+}
+.sd-row.lead {
+  box-shadow: inset 0 0 0 2px rgb(255 210 61 / 0.55);
+}
+.sd-row.me {
+  background: linear-gradient(90deg, var(--pink), var(--pink-2));
+  color: var(--pink-ink);
+  transform: translateX(-0.6rem);
+}
+.sd-row.hit:not(.me) .sd-name {
+  color: var(--danger-2);
+}
+.sd-rank {
+  display: grid;
+  place-items: center;
+  font-size: 1.05rem;
+}
+.sd-rank svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--gold);
+}
+.sd-row.me .sd-rank svg {
+  color: inherit;
+}
+.sd-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 800;
+}
+.sd-name .aim {
+  width: 0.95rem;
+  height: 0.95rem;
+  margin-right: 0.3rem;
+  vertical-align: -0.15em;
+}
+.sd-share {
+  font-size: 0.95rem;
+}
+.sd-gap {
+  height: 0.5rem;
+  margin: 0 auto;
+  width: 0.3rem;
+  border-radius: 1rem;
+  background: repeating-linear-gradient(to bottom, var(--ink-3) 0 2px, transparent 2px 5px);
+  opacity: 0.6;
+}
+/* The cut: who is above it goes through after this song. */
+.sd-cut {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.1rem 0.2rem;
+  color: var(--ink);
+}
+.sd-cut svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  flex: none;
+}
+.sd-cut-line {
+  flex: 1;
+  height: 0;
+  border-top: 2px dashed currentColor;
+  opacity: 0.7;
+}
+.sd-cut-margin {
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  background: var(--panel-solid);
+  font-size: 0.95rem;
+  white-space: nowrap;
+}
+.sd-cut svg,
+.sd-cut-line {
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.8));
+}
+.sd-cut.safe .sd-cut-margin {
+  color: var(--ok);
+}
+.sd-cut.danger .sd-cut-margin {
+  color: var(--danger-2);
+}
+/* On its own dark pill: plain text over the bright stage cannot be read. */
+.sd-left {
+  align-self: flex-end;
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  background: var(--panel-solid);
+  color: var(--ink-2);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.sd-place {
+  position: absolute;
+  z-index: 2;
+  right: clamp(1rem, 3vw, 3rem);
+  bottom: calc(var(--safe-b) + clamp(5rem, 12vh, 8rem));
+  margin: 0;
+  font-size: clamp(2.6rem, 5vw, 4.6rem);
+  font-weight: 900;
+  font-style: italic;
+  font-stretch: 112%;
+  line-height: 1;
+  color: var(--ink);
+  text-shadow: 0 0.1em 0.5em rgb(0 0 0 / 0.6);
+  pointer-events: none;
+}
+.sd-place.danger {
+  color: var(--danger-2);
+}
+/* The round, while the song counts in. */
+.sd-round {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  top: 18%;
+  translate: -50% 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  pointer-events: none;
+  animation: rise-in 0.5s var(--ease) backwards;
+}
+.sd-round-title {
+  font-size: clamp(2.6rem, 6vw, 5rem);
+  font-weight: 900;
+  font-style: italic;
+  font-stretch: 112%;
+  text-transform: uppercase;
+  line-height: 1;
+  text-shadow: 0 0.1em 0.6em rgb(255 77 157 / 0.55);
+}
+.sd-round-sub {
+  padding: 0.25rem 0.8rem;
+  border-radius: 999px;
+  background: var(--panel-solid);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.9rem;
+}
+/* Ready to strike: the target over the highway, and the charge a strike would spend. */
+.sd-ready {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  top: calc(var(--safe-t) + 4.4rem);
+  translate: -50% 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  pointer-events: none;
+  animation: rise-in 0.3s var(--ease) backwards;
+}
+.sd-ready-label {
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.9rem;
+  text-shadow: 0 0.1em 0.4em rgb(0 0 0 / 0.7);
+}
+.sd-ready-target {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  background: var(--panel-solid);
+  box-shadow: inset 0 0 0 1.5px rgb(255 255 255 / 0.12);
+  font-weight: 800;
+  transition:
+    background 0.25s,
+    box-shadow 0.25s;
+}
+/* Charged: the target lights up, and the key to strike shows. */
+.sd-ready.ready .sd-ready-target {
+  background: linear-gradient(90deg, var(--violet), var(--pink));
+  box-shadow: 0 0 1.4rem rgb(255 77 157 / 0.55);
+  animation: sd-ready-pulse 1.2s ease-in-out infinite;
+}
+@keyframes sd-ready-pulse {
+  50% {
+    box-shadow: 0 0 2.2rem rgb(255 77 157 / 0.8);
+  }
+}
+.sd-ready.lead .sd-ready-target {
+  box-shadow: inset 0 0 0 2px rgb(255 210 61 / 0.6);
+  color: var(--gold);
+}
+.sd-ready:not(.ready) .sd-ready-name {
+  color: var(--ink-2);
+}
+.sd-ready-rank {
+  font-size: 1.2rem;
+}
+.sd-ready-target svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+.sd-ready-name {
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sd-ready-key {
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--r-s);
+  background: var(--lit);
+  color: var(--lit-ink);
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+.sd-ready-charge {
+  display: flex;
+  gap: 0.25rem;
+}
+.sd-ready-charge span {
+  width: 1.6rem;
+  height: 0.35rem;
+  border-radius: 1rem;
+  background: rgb(255 255 255 / 0.18);
+}
+.sd-ready-charge span.on {
+  background: var(--od);
+  box-shadow: 0 0 0.5rem var(--od);
+}
+/* Struck: who struck you, on the left, and what the hit does for how long. */
+.sd-struck {
+  position: absolute;
+  z-index: 3;
+  left: clamp(0.8rem, 2vw, 2rem);
+  top: 40%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.7rem 1rem;
+  border-radius: var(--r-l);
+  background: var(--panel-solid);
+  box-shadow: inset 0 0 0 2px var(--danger);
+  pointer-events: none;
+  animation: rise-in 0.3s var(--ease) backwards;
+}
+.sd-struck.coming {
+  background: var(--danger);
+  color: #1a0710;
+}
+.sd-struck-label {
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.85rem;
+}
+.sd-struck-name {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+.sd-struck-name svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+.sd-struck-what {
+  font-size: 0.85rem;
+  color: var(--ink-2);
+}
+@media (max-width: 720px) {
+  .sd-board {
+    width: 11rem;
+    font-size: 0.8rem;
+  }
+  .sd-struck {
+    top: auto;
+    bottom: 30%;
+  }
+}
+
+/* A Showdown's results: the round, everyone with the cut line, your card and the next song. */
+.sdr-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.4rem;
+}
+.sdr-kicker {
+  color: var(--ink-2);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.85rem;
+}
+.sdr-title {
+  font-size: clamp(2rem, 4vw, 3.4rem);
+  font-weight: 900;
+  font-style: italic;
+  font-stretch: 112%;
+  text-transform: uppercase;
+  line-height: 1;
+}
+.sdr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
+  gap: 0.4rem 0.8rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sdr-row {
+  display: grid;
+  grid-template-columns: 1.8rem minmax(0, 1fr) auto 4.4rem 1.6rem;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.9rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--r-m);
+  background: var(--panel);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08);
+  animation: rise-in 0.4s var(--ease) backwards;
+  animation-delay: calc(var(--i, 0) * 30ms);
+}
+.sdr-row.me {
+  background: linear-gradient(90deg, var(--pink), var(--pink-2));
+  color: var(--pink-ink);
+}
+/* Out: quieter colours, not lower opacity, so the names stay readable over the stage. */
+.sdr-row.out {
+  background: var(--well);
+  color: var(--ink-2);
+}
+.sdr-row.me.out {
+  background: var(--panel-solid);
+  box-shadow: inset 0 0 0 2px var(--pink);
+  color: var(--ink);
+}
+.sdr-rank {
+  text-align: center;
+  font-size: 1.05rem;
+}
+.sdr-rank svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  color: var(--gold);
+}
+.sdr-row.me .sdr-rank svg {
+  color: inherit;
+}
+.sdr-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 800;
+}
+.sdr-acc {
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-weight: 800;
+  font-style: italic;
+  font-size: 0.85rem;
+  color: var(--ink-2);
+}
+.sdr-row.me .sdr-acc {
+  color: inherit;
+}
+.sdr-acc.perfect {
+  box-shadow: inset 0 0 0 1.5px var(--gold);
+  color: var(--gold);
+}
+.sdr-share {
+  text-align: right;
+}
+.sdr-part svg {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+.sdr-cut {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.5rem 0;
+  color: var(--danger-2);
+}
+.sdr-cut svg {
+  width: 1.3rem;
+  height: 1.3rem;
+}
+.sdr-cut span {
+  flex: 1;
+  border-top: 2px dashed currentColor;
+  opacity: 0.7;
+}
+.sdr-earlier {
+  margin-top: 0.4rem;
+  font-size: 0.9rem;
+}
+.sdr-me {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+}
+.sdr-me-status {
+  font-size: clamp(1.4rem, 2.4vw, 2rem);
+  font-weight: 900;
+  font-style: italic;
+  font-stretch: 112%;
+  text-transform: uppercase;
+  line-height: 1.05;
+}
+.sdr-me.through .sdr-me-status {
+  color: var(--ok);
+}
+.sdr-me.win .sdr-me-status {
+  color: var(--gold);
+}
+.sdr-me.out .sdr-me-status {
+  color: var(--danger-2);
+}
+.sdr-stats {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.25rem 1rem;
+  margin: 0;
+  font-size: 0.95rem;
+}
+.sdr-stats dt {
+  color: var(--ink-2);
+}
+.sdr-stats dd {
+  margin: 0;
+  text-align: right;
+  font-weight: 800;
+}
+.sdr-next {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+}
+.sdr-count {
+  margin: 0.3rem 0;
+  font-weight: 800;
+  color: var(--ink-2);
+}
+.sdr-count .num {
+  font-size: 1.6rem;
+  color: var(--ink);
+  vertical-align: -0.1em;
+  margin-left: 0.3rem;
+}
+.sdr-count.held {
+  color: var(--ink-2);
+}
+
+/* ------------------------------------------------------------------------------------------- */
+/* Between a Showdown's songs: over the stage, two tabs that turn by themselves.                */
+
+.page.party.sd-between {
+  padding-top: calc(var(--safe-t) + clamp(0.8rem, 2vh, 1.4rem));
+}
+.sdb {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(0.8rem, 2.4vh, 1.6rem);
+}
+.sdb-tabs {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.sdb-tabs .tab-row {
+  background: var(--panel-solid);
+}
+.sdb-tabs .tab-label {
+  display: inline;
+}
+.sdb-tabs .tab.on {
+  background: var(--lit);
+}
+/* How long until the tab turns, under the tabs. */
+.sdb-progress {
+  position: absolute;
+  left: 50%;
+  bottom: -0.7rem;
+  translate: -50% 0;
+  width: 70%;
+  height: 0.25rem;
+  border-radius: 1rem;
+  background: rgb(255 255 255 / 0.15);
+  overflow: hidden;
+}
+.sdb-progress span {
+  display: block;
+  height: 100%;
+  width: calc(var(--p, 0) * 100%);
+  border-radius: inherit;
+  background: var(--lit);
+  transition: width 1s linear;
+}
+
+/* Results: the round, then everyone in two columns, the cut line and those out. */
+.sdb-results {
+  flex: 1;
+  min-height: 0;
+  width: min(100%, 66rem);
+  overflow-y: auto;
+  padding: 0.6rem 0.4rem 6rem;
+  animation: fade-in 0.3s var(--ease);
+}
+.sdb-results .sdr-head {
+  align-items: center;
+  text-align: center;
+  margin-bottom: 1rem;
+}
+.sdb-results .sdr-title {
+  text-shadow: 0 0.1em 0.6em rgb(0 0 0 / 0.6);
+}
+.sdb-results .sdr-kicker {
+  padding: 0.15rem 0.7rem;
+  border-radius: 999px;
+  background: var(--panel-solid);
+  color: var(--ink);
+}
+.sdb-results .sdr-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 24rem), 1fr));
+}
+.sdb-results .sdr-row:not(.me):not(.out) {
+  background: var(--panel-solid);
+}
+.sdb-results .sdr-cut {
+  margin: 0.9rem 0;
+  color: var(--ink);
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.8));
+}
+.sdb-results .sdr-earlier {
+  margin-top: 0.8rem;
+  padding: 0.3rem 0.8rem;
+  border-radius: var(--r-m);
+  background: var(--panel-solid);
+  color: var(--ink-2);
+  text-align: center;
+}
+
+/* Next up: the next song and your choices on the left, your card on the right, the stage between. */
+.sdb-next {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr) minmax(16rem, 21rem);
+  align-items: center;
+  padding-bottom: 6rem;
+  animation: fade-in 0.3s var(--ease);
+}
+.sdb-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+}
+.sdb-right {
+  grid-column: 3;
+  align-items: stretch;
+}
+.sdb-heading {
+  font-size: clamp(1.3rem, 2vw, 1.8rem);
+  font-weight: 900;
+  font-style: italic;
+  font-stretch: 112%;
+  text-transform: uppercase;
+  line-height: 1;
+  text-shadow: 0 0.1em 0.5em rgb(0 0 0 / 0.7);
+}
+.sdb-heading.small {
+  font-size: 1rem;
+  text-shadow: none;
+}
+.sdb-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.75rem 0.85rem;
+  border-radius: var(--r-m);
+  background: var(--panel-solid);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1);
+}
+.sdb-song {
+  display: grid;
+  grid-template-columns: 4.6rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.8rem;
+}
+.sdb-song .cover {
+  width: 100%;
+  border-radius: var(--r-s);
+}
+.sdb-parts {
+  display: flex;
+  gap: 0.45rem;
+  margin-top: 0.3rem;
+}
+.sdb-parts svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+.sdb-parts .off {
+  opacity: 0.3;
+}
+.sdb-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.9rem;
+}
+.sdb-card .diff-row,
+.sdb-card .part-row {
+  background: var(--well);
+}
+.sdb-card .choice.on {
+  background: var(--lit);
+}
+.sdb-card .part-row .choice svg {
+  width: 1.3rem;
+  height: 1.3rem;
+}
+.sdb-note {
+  color: var(--ink-2);
+}
+.sdb-note .song-title svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--gold);
+  vertical-align: -0.15em;
+}
+.sdb-me {
+  align-items: center;
+  text-align: center;
+}
+.sdb-me-name {
+  color: var(--ink-2);
+  font-weight: 800;
+}
+.sdb-me.through .sdr-me-status {
+  color: var(--ok);
+}
+.sdb-me.win .sdr-me-status {
+  color: var(--gold);
+}
+.sdb-me.out .sdr-me-status {
+  color: var(--danger-2);
+}
+.sdb-me-score {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.sdb-me-line {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 1.4rem;
+}
+.sdb-me-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.sdb-me-pick svg {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+.sdb-me-pick .board-diff {
+  width: 1.6rem;
+  height: 1.6rem;
+  font-size: 0.9rem;
+}
+.sdb-badge {
+  align-self: center;
+  padding: 0.2rem 0.9rem;
+  border-radius: 999px;
+  background: var(--panel-solid);
+  box-shadow: inset 0 0 0 2px var(--gold);
+  color: var(--gold);
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+}
+/* The countdown to the next song, in the corner above the action bar. */
+.sdb-count {
+  position: absolute;
+  left: 0;
+  bottom: 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0.5rem 0.9rem 0.5rem 0.6rem;
+  border-radius: var(--r-l);
+  background: var(--panel-solid);
+}
+.sdb-count svg {
+  width: 2.2rem;
+  height: 2.2rem;
+  color: var(--ink-2);
+  animation: spin 3s linear infinite;
+}
+.sdb-count.held svg {
+  animation: none;
+  color: var(--ink-3);
+}
+.sdb-count > span {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+}
+.sdb-count-label {
+  font-size: 0.8rem;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-2);
+}
+.sdb-count-num {
+  font-size: 2rem;
+}
+@media (max-width: 900px) {
+  .sdb-next {
+    grid-template-columns: 1fr;
+    align-items: start;
+    gap: 0.8rem;
+    overflow-y: auto;
+  }
+  .sdb-right {
+    grid-column: 1;
+  }
+}
+/* A few players: one column in the middle, the cut line as wide as it. */
+.sdb-results .sdr-grid.few {
+  grid-template-columns: minmax(0, 34rem);
+  justify-content: center;
+}
+.sdb-results .sdr-cut.few {
+  width: min(100%, 34rem);
+  margin-inline: auto;
+}
+
+/* The Online tab's windows: your account, an invite, and the server's tools. */
+.overlay.card.wide-card .dialog {
+  width: min(40rem, 100%);
+}
+.window-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  padding: 1.2rem;
+}
+.account-card .online-dot {
+  width: 0.8rem;
+  height: 0.8rem;
+}
+/* A long name never runs into what the player is doing. */
+.online-list .party-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.online-list li > .dim {
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+/* The leaderboard's songs, as a list to pick from under the chosen one's cover. */
+.boards-cover {
+  width: min(100%, 12rem);
+}
+.boards-songs {
+  flex: 1;
+  min-height: 6rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0 0.3rem 0 0;
+  list-style: none;
+}
+.boards-song-item {
+  display: grid;
+  grid-template-columns: 2.6rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--r-m);
+  background: var(--panel-solid);
+  text-align: left;
+}
+.boards-song-item .cover {
+  width: 100%;
+  border-radius: var(--r-s);
+}
+.boards-song-item .song-title,
+.boards-song-item .song-artist {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.boards-song-item.on {
+  background: var(--lit);
+  color: var(--lit-ink);
+}
+.boards-song-item.on .song-artist {
+  color: var(--lit-ink);
+  opacity: 0.75;
+}
+.online-you {
+  width: 100%;
+  color: inherit;
+  text-align: left;
+}
+
+/* How a replay was played: Versus or Showdown (solo shows nothing). */
+.mode-tag {
+  display: inline-block;
+  margin-right: 0.45rem;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  background: var(--well);
+  color: var(--ink);
+  font-size: 0.78em;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  vertical-align: 0.05em;
+}
+.mode-tag.showdown {
+  background: rgb(138 77 255 / 0.24);
+  color: var(--ink);
+}
+.mode-tag.versus {
+  background: rgb(255 77 157 / 0.2);
+  color: var(--pink-2);
+}
+.replay-badge .mode-tag {
+  margin: 0 0 0 0.5rem;
+}
+.replay-mark.hit {
+  color: var(--danger-2);
+}
+
+/* Cards in a scrolling area (the Online tab, a party's lobby) lift on hover and rise as they come
+   in. The area clips at its edges, so it keeps room for both: space above for the lift (taken back
+   with a negative margin, so nothing moves), and a rise short enough to stay inside its padding. */
+.online-panel,
+.lobby-body {
+  margin-top: -0.7rem;
+  padding-top: 0.7rem;
+  padding-inline: 0.5rem;
+  margin-inline: -0.5rem;
+  padding-bottom: 1.2rem;
+}
+.online-panel .tile,
+.lobby-body .tile {
+  animation-name: tile-rise-near, tile-fade;
+}
+@keyframes tile-rise-near {
+  from {
+    transform: translateY(0.9rem) scale(0.97);
+  }
+}
+
+/* The leaderboard picks the song first: the list fills the left column, the chosen song heads the board. */
+.boards-side .boards-songs {
+  flex: 1;
+  min-height: 0;
+}
+.boards-find {
+  flex: none;
+  min-height: var(--target);
+  padding: 0 0.9rem;
+  border: 0;
+  outline: none;
+  border-radius: var(--r-m);
+  background: var(--well);
+  color: var(--ink);
+  caret-color: var(--mint);
+  font: inherit;
+  font-weight: 700;
+}
+.boards-find::placeholder {
+  color: var(--ink-3);
+}
+.boards-song-item {
+  min-height: 3.4rem;
+}
+.boards-song-head {
+  display: grid;
+  grid-template-columns: 4.2rem minmax(0, 1fr) minmax(14rem, 18rem);
+  align-items: center;
+  gap: 1rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--r-l);
+  background: var(--panel-solid);
+  animation: fade-in 0.25s var(--ease);
+}
+.boards-song-head .cover {
+  width: 100%;
+  border-radius: var(--r-s);
+}
+.boards-song-head .boards-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 900px) {
+  .boards-song-head {
+    grid-template-columns: 3.4rem minmax(0, 1fr);
+  }
+  .boards-song-head .boards-option {
+    grid-column: 1 / -1;
+  }
+}
+
+/* A mode's card: how it plays in three steps; the cards fill the room's height. */
+.party-room .mode-tiles {
+  min-height: min(32rem, 62vh);
+}
+.party-room .mode-tile {
+  min-height: 100%;
+}
+.mode-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.4rem 0 0.2rem;
+  padding: 0;
+  list-style: none;
+}
+.mode-step {
+  display: grid;
+  grid-template-columns: 1.4rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+}
+.mode-step > span:last-child {
+  display: flex;
+  flex-direction: column;
+}
+.mode-step-head {
+  font-weight: 800;
+}
+.mode-step-text {
+  color: var(--ink-2);
+  font-size: 0.88rem;
+}
+.mode-steps.compact .mode-step {
+  padding: 0.35rem 0.6rem;
+}
+
+/* ------------------------------------------------------------------------------------------- */
+/* Showdown in a song, second pass: pills, faces, the strike banner, the struck pill, the burst. */
+
+/* A player's face: a disc in their look's colours with their initial. */
+.sd-face {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2.7rem;
+  height: 2.7rem;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 3px rgb(255 255 255 / 0.9),
+    0 0.2rem 0.6rem rgb(0 0 0 / 0.45);
+  color: #fff;
+  font-weight: 900;
+  font-style: italic;
+  font-size: 1.15rem;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.6);
+}
+
+/* The board: big pills, the name and score in the middle, the face on the right. */
+.sd-board {
+  width: clamp(15rem, 21vw, 20rem);
+  gap: 0.45rem;
+  top: 34%;
+}
+.sd-row {
+  display: grid;
+  grid-template-columns: 1.6rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+}
+.sd-row.me {
+  background: none;
+  color: inherit;
+  transform: none;
+}
+.sd-row.lead {
+  box-shadow: none;
+}
+.sd-rank {
+  font-size: 1.6rem;
+  color: #fff;
+  text-shadow: 0 0.08em 0.3em rgb(0 0 0 / 0.7);
+}
+.sd-pill {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 3.3rem;
+  padding: 0.25rem 0.3rem 0.25rem 1.1rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--showdown-1), var(--showdown-2) 70%, var(--showdown-3));
+  box-shadow: 0 0.3rem 1rem rgb(0 0 0 / 0.35);
+  color: #fff;
+}
+.sd-row.me .sd-pill {
+  background: var(--lit);
+  color: var(--lit-ink);
+}
+.sd-row.hit .sd-pill {
+  animation: sd-pill-hit 0.6s ease-in-out infinite alternate;
+}
+@keyframes sd-pill-hit {
+  to {
+    box-shadow:
+      0 0 0 2px var(--danger),
+      0 0 1.4rem rgb(255 90 114 / 0.7);
+  }
+}
+.sd-who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.1;
+}
+.sd-name {
+  max-width: 100%;
+  font-size: 1.05rem;
+  font-weight: 900;
+}
+.sd-row.hit:not(.me) .sd-name {
+  color: #fff;
+}
+.sd-share {
+  font-size: 0.85rem;
+  opacity: 0.9;
+}
+.sd-face-wrap {
+  position: relative;
+  flex: none;
+}
+.sd-crown {
+  position: absolute;
+  left: 50%;
+  top: -1.35rem;
+  translate: -50% 0;
+  width: 1.6rem;
+  height: 1.6rem;
+  color: #fff;
+  filter: drop-shadow(0 1px 3px rgb(0 0 0 / 0.7));
+}
+.sd-rank svg {
+  display: none;
+}
+/* The cut: scissors, a dashed line, and the gap in points, red below it, green above. */
+.sd-cut {
+  padding: 0.15rem 0 0.15rem 0.2rem;
+  color: #fff;
+}
+.sd-cut svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+.sd-cut-line {
+  border-top-width: 3px;
+  opacity: 0.9;
+}
+.sd-cut-margin {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0;
+  background: none;
+  font-size: 1.15rem;
+  font-weight: 900;
+  font-style: italic;
+  text-shadow: 0 0.06em 0.3em rgb(0 0 0 / 0.8);
+}
+.sd-cut-arrow {
+  font-style: normal;
+  font-size: 0.9em;
+}
+.sd-left {
+  margin-top: 0.2rem;
+}
+/* Your place: big and white, landing with a bounce when it changes. */
+.sd-place {
+  color: #fff;
+  font-size: clamp(3rem, 5.6vw, 5.2rem);
+  -webkit-text-stroke: 2px rgb(20 10 40 / 0.6);
+  text-shadow: 0 0.06em 0.4em rgb(0 0 0 / 0.55);
+  animation: sd-place-in 0.45s var(--ease) backwards;
+}
+.sd-place.danger {
+  color: #fff;
+}
+@keyframes sd-place-in {
+  from {
+    transform: scale(1.35) translateY(-0.2em);
+    opacity: 0;
+  }
+}
+
+/* The strike banner over the highway: a label, then the target's pill with its rank beside it. */
+.sd-ready {
+  top: calc(var(--safe-t) + 13vh);
+  gap: 0.35rem;
+}
+.sd-ready-label {
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+}
+.sd-ready-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+/* A puff of haze behind the banner. */
+.sd-ready-row::before {
+  content: '';
+  position: absolute;
+  inset: -1.6rem -2.4rem;
+  z-index: -1;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(255 255 255 / 0.28), rgb(196 166 255 / 0.12) 60%, transparent);
+  filter: blur(12px);
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+.sd-ready.ready .sd-ready-row::before,
+.sd-ready.striking .sd-ready-row::before {
+  opacity: 1;
+}
+.sd-ready-rank {
+  font-size: 1.9rem;
+  color: #fff;
+  text-shadow: 0 0.08em 0.3em rgb(0 0 0 / 0.7);
+}
+.sd-ready-target {
+  min-width: 18rem;
+  padding: 0.3rem 0.35rem 0.3rem 0.35rem;
+  gap: 0.7rem;
+  background: rgb(14 10 32 / 0.82);
+  animation: none;
+}
+.sd-ready.ready .sd-ready-target,
+.sd-ready.striking .sd-ready-target {
+  background: linear-gradient(90deg, #9b3dff, #ff4d9d);
+  animation: sd-ready-pulse 1.2s ease-in-out infinite;
+}
+.sd-ready.striking .sd-ready-target {
+  animation: sd-fire 0.5s var(--ease) both;
+}
+@keyframes sd-fire {
+  0% {
+    transform: scale(0.7);
+    filter: brightness(2.2);
+  }
+  60% {
+    transform: scale(1.08);
+  }
+}
+.sd-ready-target.lone {
+  min-width: 0;
+  padding: 0.4rem 1rem;
+}
+.sd-ready-target.lone svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+.sd-ready-mid {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+.sd-ready-name {
+  max-width: 100%;
+  font-size: 1.1rem;
+}
+.sd-ready:not(.ready):not(.striking) .sd-ready-name {
+  color: var(--ink);
+}
+.sd-ready-part {
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.9);
+  color: #7a2ad6;
+}
+.sd-ready-part svg {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+.sd-ready-charge {
+  display: none;
+}
+/* Segments: a charge filling up, or a hit draining away. */
+.sd-segs {
+  display: flex;
+  gap: 0.25rem;
+}
+.sd-segs span {
+  width: 2.3rem;
+  height: 0.38rem;
+  border-radius: 1rem;
+  background: linear-gradient(90deg, var(--od) calc(var(--fill, 0) * 100%), transparent 0), rgb(0 0 0 / 0.35);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.15);
+}
+.sd-segs.drain span {
+  background: linear-gradient(90deg, #6ee7ff calc(var(--fill, 0) * 100%), transparent 0), rgb(0 0 0 / 0.35);
+}
+
+/* Struck: a label and the striker's pill sliding in from the left, with the hit draining. */
+.sd-struck {
+  left: clamp(1rem, 2.4vw, 2.6rem);
+  top: auto;
+  bottom: calc(var(--safe-b) + 30vh);
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  animation: sd-struck-in 0.45s var(--ease) backwards;
+}
+.sd-struck.coming {
+  background: none;
+  color: inherit;
+}
+@keyframes sd-struck-in {
+  from {
+    transform: translateX(-120%);
+    opacity: 0;
+  }
+}
+.sd-struck-label {
+  padding-left: 0.6rem;
+  font-size: 1.05rem;
+  letter-spacing: 0.06em;
+  color: #fff;
+  text-shadow: 0 0.06em 0.3em rgb(0 0 0 / 0.8);
+}
+.sd-struck.coming .sd-struck-label {
+  color: #ffd0d8;
+  animation: sd-blink 0.25s steps(2) infinite;
+}
+@keyframes sd-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+.sd-struck-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  min-width: 16rem;
+  padding: 0.3rem 1.6rem 0.3rem 0.3rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff3d8b, #ff4d9d 55%, rgb(255 77 157 / 0.35));
+  box-shadow: 0 0.3rem 1.2rem rgb(255 61 139 / 0.4);
+}
+.sd-struck:not(.coming) .sd-struck-pill {
+  background: linear-gradient(90deg, #4a3dff, #7a4dff 55%, rgb(122 77 255 / 0.3));
+  box-shadow: 0 0.3rem 1.2rem rgb(90 70 255 / 0.4);
+}
+.sd-struck-name {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #fff;
+}
+.sd-struck .sd-segs {
+  padding-left: 0.6rem;
+}
+
+/* While a hit lasts: a violet glow around the edges instead of a hard red frame. */
+.showdown-edge {
+  box-shadow:
+    inset 0 0 6rem rgb(170 80 255 / 0.55),
+    inset 0 0 1.4rem rgb(255 255 255 / 0.25);
+  animation: sd-edge 1.6s ease-in-out infinite alternate;
+}
+@keyframes sd-edge {
+  to {
+    box-shadow:
+      inset 0 0 9rem rgb(200 90 255 / 0.65),
+      inset 0 0 2rem rgb(255 255 255 / 0.35);
+  }
+}
+
+/* The hit landing: a violet flash and bright streaks flying across the screen. */
+.sd-burst {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  overflow: hidden;
+  pointer-events: none;
+  animation: sd-flash 0.9s ease-out forwards;
+}
+@keyframes sd-flash {
+  0% {
+    background: radial-gradient(circle at 50% 55%, rgb(255 255 255 / 0.45), rgb(170 80 255 / 0.5) 45%, rgb(90 30 200 / 0.35));
+  }
+  100% {
+    background: transparent;
+  }
+}
+.sd-burst span {
+  position: absolute;
+  width: var(--w, 9rem);
+  height: calc(var(--w, 9rem) * 0.16);
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.95) 45%, #fff 80%, rgb(220 200 255 / 0.9));
+  filter: blur(1.5px) drop-shadow(0 0 0.6rem rgb(220 180 255 / 0.9));
+  transform: translate(-60vw, 45vh) rotate(-32deg);
+  opacity: 0;
+  animation-name: sd-streak;
+  animation-timing-function: cubic-bezier(0.3, 0.6, 0.4, 1);
+  animation-fill-mode: both;
+}
+@keyframes sd-streak {
+  0% {
+    transform: translate(-30vw, 30vh) rotate(-32deg) scaleX(0.4);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(40vw, -35vh) rotate(-32deg) scaleX(1.4);
+    opacity: 0;
+  }
+}
+:root[data-motion='reduced'] .sd-burst span {
+  display: none;
+}
+@media (max-width: 720px) {
+  .sd-board {
+    top: calc(var(--safe-t) + 4.5rem);
+  }
+  .sd-ready-target {
+    min-width: 0;
+  }
+  .sd-struck-pill {
+    min-width: 0;
+  }
+}
+/* The gap in points on its own dark pill: plain text over the stage is not readable. */
+.sd-cut-margin {
+  padding: 0.05rem 0.6rem;
+  border-radius: 999px;
+  background: rgb(12 8 28 / 0.85);
+}
+.sd-cut.danger .sd-cut-margin {
+  color: var(--danger-2);
+}
+.sd-cut.safe .sd-cut-margin {
+  color: var(--ok);
+}
+/* Places skipped between the leader and you: three small dots, centred under the pills. */
+.sd-gap {
+  width: auto;
+  height: 0.6rem;
+  margin: 0 0 0 2rem;
+  background: radial-gradient(circle, rgb(255 255 255 / 0.7) 1.5px, transparent 2px) center / 0.6rem 0.6rem repeat-x;
+  opacity: 0.8;
+}
+
+/* The Showdown pills in the game's own palette: smoked glass for the others, pink for you (pink
+   acts), gold for the leader (gold is earned), the lit lavender only as a thin edge. */
+.sd-pill {
+  background: var(--panel-solid);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.12),
+    inset 0 0 0 1.5px var(--glass-edge),
+    0 0.3rem 1rem rgb(0 0 0 / 0.4);
+  color: var(--ink);
+}
+.sd-row.lead .sd-pill {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.12),
+    inset 0 0 0 2px rgb(255 210 61 / 0.7),
+    0 0.3rem 1rem rgb(0 0 0 / 0.4);
+}
+.sd-row.lead .sd-crown {
+  color: var(--gold);
+}
+.sd-row.me .sd-pill {
+  background: linear-gradient(90deg, var(--pink), var(--pink-2));
+  box-shadow: 0 0 1.2rem rgb(255 77 157 / 0.45);
+  color: var(--pink-ink);
+}
+.sd-face {
+  box-shadow:
+    0 0 0 2.5px var(--lit),
+    0 0.2rem 0.6rem rgb(0 0 0 / 0.45);
+}
+.sd-row.me .sd-face {
+  box-shadow:
+    0 0 0 2.5px var(--pink-ink),
+    0 0.2rem 0.6rem rgb(0 0 0 / 0.3);
+}
+/* Over the highway and on the left: the same glass, lit pink once a Strike is ready or fired. */
+.sd-ready-target {
+  background: var(--panel-solid);
+  box-shadow: inset 0 0 0 1.5px var(--glass-edge);
+}
+.sd-ready.ready .sd-ready-target,
+.sd-ready.striking .sd-ready-target {
+  background: linear-gradient(90deg, var(--violet), var(--pink));
+}
+.sd-ready-part {
+  background: var(--lit);
+  color: var(--lit-ink);
+}
+.sd-struck-pill,
+.sd-struck:not(.coming) .sd-struck-pill {
+  background: var(--panel-solid);
+  box-shadow:
+    inset 0 0 0 2px var(--danger),
+    0 0 1.2rem rgb(255 90 114 / 0.35);
+}
+.sd-struck.coming .sd-struck-pill {
+  background: var(--danger);
+  box-shadow: 0 0 1.4rem rgb(255 90 114 / 0.6);
+}
+.sd-struck.coming .sd-struck-name {
+  color: #1a0710;
+}
+.sd-segs span {
+  background: linear-gradient(90deg, var(--lit) calc(var(--fill, 0) * 100%), transparent 0), rgb(0 0 0 / 0.35);
+}
+.sd-segs.drain span,
+.sd-struck .sd-segs span {
+  background: linear-gradient(90deg, var(--pink-2) calc(var(--fill, 0) * 100%), transparent 0), rgb(0 0 0 / 0.35);
+}
+
+/* A Showdown's options: three equal columns that keep their shape whatever the values say, each
+   chip with its label over its value, a long value cut short rather than wrapping the row. */
+.option-chips {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  flex-wrap: nowrap;
+}
+.option-chip {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 0.45rem;
+  row-gap: 0;
+  min-width: 0;
+  padding: 0.35rem 0.8rem 0.35rem 0.5rem;
+  border-radius: var(--r-m);
+  text-align: left;
+}
+.option-chip > :first-child {
+  grid-row: 1 / 3;
+  align-self: center;
+}
+.option-chip > svg {
+  grid-row: 1 / 3;
+  align-self: center;
+}
+.option-chip-label,
+.option-chip-value {
+  grid-column: 3;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+@media (max-width: 720px) {
+  .option-chips {
+    grid-template-columns: 1fr;
+  }
+}
+.option-chip > svg {
+  grid-column: 2;
+}
+.option-chip > :first-child:not(svg) {
+  grid-column: 1;
+}
+
+/* The board stands on your place: anchored at the bottom right, just above the big "2nd", and
+   growing upward as more players are shown, never past the top of the screen. */
+.sd-board {
+  top: auto;
+  bottom: calc(var(--safe-b) + clamp(5rem, 12vh, 8rem) + clamp(3.4rem, 6vw, 5.6rem));
+  max-height: calc(100% - var(--safe-t) - 5rem - clamp(5rem, 12vh, 8rem) - clamp(3.4rem, 6vw, 5.6rem));
+  justify-content: flex-end;
+  overflow: visible;
+}
+.sd-place {
+  right: clamp(0.8rem, 2vw, 2rem);
+  bottom: calc(var(--safe-b) + clamp(5rem, 12vh, 8rem));
+}
+@media (max-width: 720px) {
+  .sd-board {
+    top: auto;
+  }
+}
+
+/* The Online tab: playing together on the left, the player on stage in the middle under their
+   nametag, the week's best and who is online on the right. */
+.online-stage {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr) clamp(14rem, 20vw, 18rem);
+  gap: clamp(1rem, 2.4vw, 2.4rem);
+  align-items: start;
+}
+.online-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-width: 0;
+}
+.online-party {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.1rem;
+  border-radius: var(--r-l);
+  background: radial-gradient(120% 140% at 0% 100%, rgb(255 77 157 / 0.35), transparent 60%), var(--panel-solid);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1);
+  color: inherit;
+  text-align: left;
+  transition:
+    transform 0.25s var(--ease),
+    background 0.2s;
+}
+.online-party.is-focus,
+:root[data-input='mouse'] .online-party:hover {
+  transform: translateY(-0.2rem);
+}
+.online-party-art {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 3.6rem;
+  height: 3.6rem;
+  border-radius: var(--r-m);
+  background: var(--pink);
+  color: var(--pink-ink);
+}
+.online-party-art svg {
+  width: 1.9rem;
+  height: 1.9rem;
+}
+.online-party-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.online-party-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: clamp(1.25rem, 1.8vw, 1.6rem);
+  font-weight: 900;
+  font-style: italic;
+  font-stretch: 112%;
+  text-transform: uppercase;
+  line-height: 1;
+}
+.online-party .party-code-text {
+  font-size: clamp(1.6rem, 2.6vw, 2.2rem);
+}
+.online-join {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: var(--r-l);
+  background: var(--panel-solid);
+}
+.online-row-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 800;
+  color: var(--ink-2);
+}
+.online-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.online-link {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: var(--r-m);
+  background: var(--panel-solid);
+  color: inherit;
+  text-align: left;
+  transition: background 0.2s;
+}
+:root[data-input='mouse'] .online-link:hover {
+  background: var(--raised-hi);
+}
+.online-link > svg {
+  flex: none;
+  width: 1.4rem;
+  height: 1.4rem;
+  color: var(--ink-2);
+}
+.online-link-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.online-link-title {
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+}
+.online-link .dim {
+  font-size: 0.85rem;
+}
+/* The nametag floats over the player's band member, whom the stage's camera holds on. */
+.online-me {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: clamp(1rem, 6vh, 4rem);
+  pointer-events: none;
+}
+.nametag {
+  pointer-events: auto;
+  display: grid;
+  grid-template-columns: auto auto auto;
+  align-items: center;
+  column-gap: 0.55rem;
+  padding: 0.45rem 0.9rem 0.45rem 0.8rem;
+  border-radius: 999px;
+  background: var(--panel-solid);
+  box-shadow:
+    inset 0 0 0 1.5px var(--glass-edge),
+    0 0.6rem 1.6rem rgb(0 0 0 / 0.45);
+  color: var(--ink);
+  animation: rise-in 0.5s var(--ease) backwards;
+}
+.nametag .online-dot {
+  grid-row: 1 / 3;
+}
+.nametag-name {
+  font-size: 1.3rem;
+  font-weight: 900;
+  font-style: italic;
+  font-stretch: 112%;
+  line-height: 1.05;
+}
+.nametag-sub {
+  grid-column: 2;
+  color: var(--ink-3);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.nametag > :last-child:not(.nametag-sub) {
+  grid-column: 3;
+  grid-row: 1 / 3;
+}
+.nametag-pin {
+  width: 0;
+  height: 0;
+  border-left: 0.55rem solid transparent;
+  border-right: 0.55rem solid transparent;
+  border-top: 0.6rem solid var(--panel-solid);
+}
+@media (max-width: 1000px) {
+  .online-stage {
+    grid-template-columns: 1fr;
+  }
+  .online-me {
+    order: -1;
+    padding-top: 0;
+  }
+  .nametag-pin {
+    display: none;
+  }
+}
+
+/* The library's server section: a heading, then the songs on the server the player lacks. */
+.song-list-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+  padding: 0.4rem 0.6rem;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.song-list-head svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  color: var(--mint);
+}
+.song-list-head .dim {
+  margin-left: auto;
+  font-weight: 700;
+  font-style: normal;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.85rem;
+}
+.server-song .song-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.server-song-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  background: var(--well);
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+}
+.server-song-act svg {
+  width: 1rem;
+  height: 1rem;
+}
+/* How much of a song has come from the server: a ring that fills, spinning while its size is unknown. */
+.progress-ring {
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  transform: rotate(-90deg);
+}
+.progress-ring circle {
+  fill: none;
+  stroke-width: 2.6;
+}
+.progress-ring .track {
+  stroke: rgb(255 255 255 / 0.16);
+}
+.progress-ring .fill {
+  stroke: var(--lit);
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.2s ease-out;
+}
+.progress-ring.waiting {
+  animation-name: spin;
+  animation-duration: 0.9s;
+  animation-iteration-count: infinite;
+  animation-timing-function: linear;
+}
+.server-song.in-set .progress-ring .track {
+  stroke: rgb(29 18 99 / 0.25);
+}
+.server-song.in-set .progress-ring .fill {
+  stroke: var(--lit-ink);
+}
+.server-song.failed .server-song-act {
+  box-shadow: inset 0 0 0 2px var(--danger-2);
+}
+/* A streamed song in the setlist: its pill says where, lavender as the library's setlist badge is. */
+.server-song.in-set .server-song-act {
+  background: var(--lit);
+  color: var(--lit-ink);
+}
+/* A switch that is on is a chosen thing: the lavender sheet with dark ink (a mint ring would read as focus). */
+.btn.is-on {
+  background: var(--lit);
+  color: var(--lit-ink);
+}
+.btn.is-on:hover:not(:disabled) {
+  background: #fff;
+  color: var(--lit-ink);
+}
+.btn.is-on svg {
+  color: var(--lit-ink);
+}
+.btn.is-on .keycap-hint {
+  background: var(--lit-ink);
+  color: var(--lit);
+}
+
+/* The admin page's server library: a song renamed in place. */
+.admin-edit {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto auto;
+  gap: 0.4rem;
+}
+.admin-edit input {
+  min-width: 0;
+  min-height: 2.4rem;
+  padding: 0 0.7rem;
+  border: 0;
+  outline: none;
+  border-radius: var(--r-s);
+  background: var(--well);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+}
+
+/* The Online tab, signed in: the bento on the left, the player on the right. */
+.online-stage {
+  grid-template-columns: minmax(0, 1.35fr) minmax(16rem, 1fr);
+  align-items: stretch;
+}
+.online-bento {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.7rem, 1.6vh, 1.1rem);
+  min-width: 0;
+}
+.online-bento .party-tiles {
+  min-height: min(22rem, 46vh);
+}
+/* The week's best and who is online side by side under the bento. */
+.online-bento .online-side {
+  width: auto;
+  flex-direction: row;
+}
+.online-bento .online-side > * {
+  flex: 1;
+  min-width: 0;
+}
+.online-me {
+  padding-top: clamp(1rem, 9vh, 6rem);
+}
+@media (max-width: 1000px) {
+  .online-bento .online-side {
+    flex-direction: column;
+  }
+}
+.online-stage {
+  grid-template-columns: minmax(0, 1.6fr) minmax(15rem, 1fr);
+}
+.online-bento .tile-stack .tile.small .tile-title {
+  font-size: clamp(0.95rem, 1.15vw, 1.2rem);
+}
+.online-bento .tile.hero .mosaic {
+  max-width: 34%;
+}
+/* Three or four ways on beside the party (the boards, the look, invites, the server's tools): two
+   by two, each its icon over its name, so the column fits beside the party tile at 720px tall. */
+@media (min-width: 641px) {
+  .online-bento .party-tiles:has(.tile-stack.many) .tile.hero {
+    flex: 1 1 0;
+  }
+  .online-bento .party-tiles:has(.tile-stack.many) .tile.hero .mosaic {
+    max-width: 26%;
+  }
+  .online-bento .party-tiles:has(.tile-stack.many) .tile.hero .party-code-text {
+    font-size: clamp(1.6rem, 2.6vw, 2.4rem);
+    letter-spacing: 0.1em;
+    white-space: nowrap;
+  }
+  .online-bento .tile-stack.many {
+    flex: 1.15 1 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto;
+    grid-auto-rows: minmax(0, 1fr);
+  }
+  .online-bento .tile-stack.many > .party-join {
+    grid-column: 1 / -1;
+  }
+  .online-bento .tile-stack.many .tile.small {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 0.55rem;
+    padding: 0.8rem 0.9rem;
+  }
+  .online-bento .tile-stack.many .tile-icon {
+    width: 2.6rem;
+    margin-left: 0;
+  }
+  .online-bento .tile-stack.many .tile.small .tile-text {
+    flex: none;
+    padding: 0;
+  }
+  .online-bento .tile-stack.many .tile.small .tile-cap {
+    display: none;
+  }
+  /* An odd one out (three of them, for a player) takes the whole row. */
+  .online-bento .tile-stack.many.odd > .tile.small:last-child {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+  }
+}
+
+/* The player's portrait on the Online tab: a card of the game's light, a podium, the figure in it,
+   drawn above the menus (not the stage behind them). */
+.online-me {
+  padding-top: clamp(0.5rem, 4vh, 2.5rem);
+}
+.online-me .nametag {
+  position: relative;
+  z-index: 2;
+}
+.online-me .nametag-pin {
+  position: relative;
+  z-index: 2;
+}
+.portrait-card {
+  position: relative;
+  flex: 1;
+  width: min(100%, 26rem);
+  min-height: min(26rem, 52vh);
+  margin-top: -1.2rem;
+  border-radius: var(--r-l);
+  overflow: hidden;
+  background:
+    radial-gradient(60% 45% at 50% 38%, rgb(255 77 157 / 0.32), transparent 70%),
+    radial-gradient(80% 60% at 50% 100%, rgb(91 62 224 / 0.55), transparent 70%),
+    linear-gradient(180deg, rgb(26 15 76 / 0.85), rgb(8 6 18 / 0.92));
+  box-shadow:
+    inset 0 0 0 1.5px var(--glass-edge),
+    0 1.6rem 3rem -1.6rem rgb(0 0 0 / 0.7);
+  animation: rise-in 0.5s var(--ease) backwards;
+}
+.portrait-glow {
+  position: absolute;
+  inset: 8% 18% 30%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(239 234 255 / 0.16), transparent);
+  filter: blur(8px);
+  animation: portrait-breathe 4s ease-in-out infinite alternate;
+}
+@keyframes portrait-breathe {
+  to {
+    transform: scale(1.12);
+    opacity: 0.7;
+  }
+}
+.portrait-podium {
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  bottom: 6%;
+  height: 12%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(255 122 184 / 0.55), rgb(91 62 224 / 0.35) 60%, transparent);
+  box-shadow: 0 0 2.5rem rgb(255 77 157 / 0.35);
+}
+.avatar-portrait {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.nametag-sub {
+  text-transform: lowercase;
+}
+
+/* The Online tab's character, lobby style: standing over the menu at full height, no card. A
+   light falls on them from above, their shadow lies on the floor, and the nametag floats over
+   their head. */
+.online-me {
+  position: relative;
+  align-self: stretch;
+  min-height: min(34rem, 64vh);
+  padding-top: 0;
+  pointer-events: none;
+}
+.online-me .avatar-portrait {
+  position: absolute;
+  inset: 4.5rem auto 0 50%;
+  width: min(100%, 30rem);
+  height: calc(100% - 4.5rem);
+  translate: -50% 0;
+  z-index: 1;
+}
+.lobby-light {
+  position: absolute;
+  left: 50%;
+  top: -10%;
+  width: 70%;
+  height: 105%;
+  translate: -50% 0;
+  background: radial-gradient(50% 60% at 50% 40%, rgb(196 166 255 / 0.22), transparent 72%);
+  clip-path: polygon(38% 0, 62% 0, 100% 100%, 0 100%);
+  filter: blur(18px);
+  pointer-events: none;
+}
+.lobby-shadow {
+  position: absolute;
+  left: 50%;
+  bottom: 0.5%;
+  width: 68%;
+  height: 11%;
+  translate: -50% 0;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(0 0 0 / 0.55), rgb(91 62 224 / 0.25) 60%, transparent);
+  filter: blur(3px);
+}
+/* The nametag: no box, the name large over the head, the line under it small and quiet. */
+.online-me .nametag {
+  position: absolute;
+  left: 50%;
+  /* Inside the column (it may scroll, and would cut off what stood above it), clear of its float. */
+  top: 0.5rem;
+  translate: -50% 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.3rem 0.8rem;
+  border-radius: var(--r-m);
+  background: none;
+  box-shadow: none;
+  pointer-events: auto;
+  animation: nametag-float 4s ease-in-out infinite;
+}
+@keyframes nametag-float {
+  50% {
+    transform: translateY(-0.35rem);
+  }
+}
+:root[data-input='mouse'] .online-me .nametag:hover {
+  background: rgb(255 255 255 / 0.06);
+}
+.online-me .nametag-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: clamp(1.6rem, 2.4vw, 2.3rem);
+  font-weight: 900;
+  font-style: italic;
+  font-stretch: 112%;
+  line-height: 1;
+  color: #fff;
+  text-shadow:
+    0 0.06em 0 rgb(0 0 0 / 0.35),
+    0 0.1em 0.8em rgb(255 77 157 / 0.55);
+}
+.online-me .nametag-name .online-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  box-shadow: 0 0 0.6rem var(--ok);
+}
+.online-me .nametag-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.12rem 0.6rem;
+  border-radius: 999px;
+  background: rgb(8 6 18 / 0.55);
+  color: var(--ink-2);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+.online-me .nametag-sub .keycap-hint,
+.online-me .nametag-sub .hint-glyph {
+  transform: scale(0.85);
+}
+.online-me .nametag-pin,
+.online-me .portrait-card {
+  display: none;
+}
+
+/* The nametag, kept inside its column: centred by its margins (not shifted half its width, which
+   a long line pushed past the column's edge), each line cut short rather than overflowing. */
+.online-me .nametag {
+  left: 0;
+  right: 0;
+  translate: none;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
+  gap: 0.3rem;
+  padding: 0.3rem 0.6rem;
+}
+.online-me .nametag-name {
+  max-width: 100%;
+  min-width: 0;
+}
+.online-me .nametag-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.online-me .nametag-name .keycap-hint,
+.online-me .nametag-name .hint-glyph {
+  flex: none;
+  font-style: normal;
+  text-shadow: none;
+}
+.online-me .nametag-sub {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  background: none;
+  color: var(--ink-2);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 4px rgb(0 0 0 / 0.8);
+}
+
+/* A section of the admin page: a list to search and, for players, the one picked beside it. */
+.admin-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  animation: rise-in 0.3s var(--ease) backwards;
+}
+.admin-narrow {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  width: min(52rem, 100%);
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 1rem;
+}
+.admin-narrow > .btn {
+  align-self: flex-start;
+}
+.admin-search {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: var(--target);
+  padding: 0 0.9rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+  color: var(--ink-2);
+}
+.admin-search:focus-within {
+  box-shadow: inset 0 0 0 2px var(--pink);
+}
+.admin-search svg {
+  flex: none;
+  width: 1.15rem;
+  height: 1.15rem;
+}
+.admin-search input {
+  flex: 1;
+  min-width: 0;
+  min-height: 2.4rem;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+}
+.admin-list {
+  min-height: 0;
+}
+.admin-players {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(16rem, 0.8fr) minmax(0, 1.2fr);
+  gap: clamp(1rem, 2.6vw, 2.6rem);
+}
+.admin-list-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 0;
+}
+.admin-list-side .admin-list {
+  overflow-y: auto;
+  padding-bottom: 1rem;
+}
+.admin-user {
+  width: 100%;
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+  box-shadow: inset 0 0 0 1.5px transparent;
+  transition:
+    background 0.15s,
+    box-shadow 0.15s;
+}
+.admin-user:hover {
+  background: rgb(255 255 255 / 0.08);
+}
+.admin-user.on {
+  background: rgb(255 77 157 / 0.14);
+  box-shadow: inset 0 0 0 2px var(--pink);
+}
+/* A player's initial in a disc, with whether they are online on its edge. */
+.admin-initial {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--violet), var(--pink));
+  font-weight: 900;
+  font-style: italic;
+}
+.admin-initial .online-dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  box-shadow: 0 0 0 2px var(--deep);
+}
+.admin-role {
+  flex: none;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink-2);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.admin-role.owner {
+  color: var(--ink);
+}
+.admin-role.moderator {
+  color: var(--pink-2);
+}
+.admin-role.banned {
+  background: var(--danger);
+  color: var(--pink-ink);
+}
+.admin-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  min-height: 0;
+  overflow-y: auto;
+  padding: clamp(1rem, 1.7vw, 1.7rem);
+  border-radius: var(--r-l);
+  background: var(--panel);
+  align-self: start;
+}
+.admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.admin-ban .choice-pair {
+  grid-template-columns: repeat(4, auto);
+}
+.admin-ban {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+}
+/* An admin picks a player's role: player, moderator or admin. */
+.admin-role-pick {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  width: 100%;
+}
+.admin-role-pick .choice-pair {
+  grid-template-columns: repeat(3, auto);
+}
+.admin-note {
+  color: var(--ink);
+  font-weight: 700;
+  user-select: text;
+}
+@media (max-width: 760px) {
+  .admin-players {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+    overflow-y: auto;
+  }
+}
+
+/* An interlude: the highway leaves the screen (PlayController, breaks.highwayAway), and the deck's
+   controls go with it: the lane keys, the dial and overdrive, the note tags. The song, the score and
+   the countdown to the next note stay. */
+.hud :is(.lane-key, .hud-cluster, .hud-feedback) {
+  transition: opacity 0.5s var(--ease);
+}
+.hud.interlude :is(.lane-key, .hud-cluster, .hud-feedback) {
+  opacity: 0;
+}
+/* A narrow window has no room for the character beside the bento: the nametag stands alone above it
+   (still the way to the account by touch). */
+@media (max-width: 1000px) {
+  .online-stage {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    align-items: start;
+    align-content: start;
+  }
+  /* The bento's feature keeps its height above the tiles stacked under it. */
+  .online-bento .party-tiles .tile.hero {
+    flex: none;
+    min-height: 10rem;
+  }
+  .online-me {
+    min-height: auto;
+    order: -1;
+    display: flex;
+    justify-content: center;
+  }
+  .online-me :is(.avatar-portrait, .lobby-light, .lobby-shadow) {
+    display: none;
+  }
+  .online-me .nametag {
+    position: static;
+    translate: none;
+    animation: none;
+  }
+}
+
+/* Your look, edited in place on the Online tab: the editor takes the tiles' place and the character
+   beside it wears each choice at once. */
+.online-bento[hidden] {
+  display: none;
+}
+.look-editor {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.9rem, 2vh, 1.4rem);
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: clamp(1rem, 1.8vw, 1.6rem);
+  border-radius: var(--r-l);
+  background: var(--panel);
+  animation: rise-in 0.3s var(--ease) backwards;
+}
+.look-head .display {
+  font-size: clamp(1.6rem, 2.4vw, 2.3rem);
+}
+.look-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+.look-group > .label,
+.look-group-head > .label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.look-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.8rem;
+}
+.look-parts {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.look-parts .choice {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+}
+.look-parts .choice svg {
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
 /* Stage browser                                                                                */
 
 /* The stage is the point here: it shows at full strength, with only a little night at the top
@@ -7267,6 +11419,1165 @@ a.btn {
   flex: none;
   width: 1.1rem;
   height: 1.1rem;
+}
+/* What to colour: three cards, each with the colour it has now. */
+.look-slots {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+.look-slot {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: calc(var(--target) + 0.8rem);
+  padding: 0.5rem 0.8rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+  box-shadow: inset 0 0 0 1.5px transparent;
+  transition:
+    background 0.15s,
+    box-shadow 0.15s;
+}
+.look-slot:hover {
+  background: rgb(255 255 255 / 0.08);
+}
+.look-slot.on {
+  background: rgb(255 77 157 / 0.14);
+  box-shadow: inset 0 0 0 2px var(--pink);
+}
+.look-chip {
+  flex: none;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 50%;
+  background: var(--swatch);
+  box-shadow: inset 0 0 0 2px rgb(255 255 255 / 0.2);
+}
+/* The band member's own look: no colour of the player's. */
+.look-chip.own {
+  background: repeating-linear-gradient(135deg, rgb(255 255 255 / 0.18) 0 4px, transparent 4px 8px);
+}
+.look-slot-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.look-slot-label {
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.look-slot-value {
+  color: var(--ink-2);
+  font-size: 0.88rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.look-what {
+  margin: 0.1rem 0 0;
+}
+.look-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(2.6rem, 3.3rem));
+  gap: 0.6rem;
+}
+.look-swatches .avatar-swatch {
+  width: auto;
+  height: auto;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  color: #fff;
+}
+/* The tick shows on every colour, light or dark. */
+.look-swatches .avatar-swatch svg {
+  width: 45%;
+  height: 45%;
+  filter: drop-shadow(0 0 1.5px rgb(0 0 0 / 0.9)) drop-shadow(0 0 3px rgb(0 0 0 / 0.5));
+}
+.look-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: auto;
+}
+.look-note {
+  color: var(--ink);
+  font-weight: 700;
+}
+/* A short window (720px and under): the editor tightens so Save and the rest stay in view without scrolling. */
+@media (max-height: 820px) and (min-width: 1001px) {
+  .look-editor {
+    gap: 0.7rem;
+    padding-block: 0.9rem;
+  }
+  .look-head .display {
+    font-size: 1.6rem;
+  }
+  .look-head .hint {
+    margin-top: 0.2rem;
+  }
+  .look-swatches {
+    grid-template-columns: repeat(auto-fill, minmax(2.4rem, 2.8rem));
+  }
+}
+/* A narrow window shows the character while the look is edited, above the editor. */
+@media (max-width: 1000px) {
+  .online-panel.editing .online-me {
+    min-height: min(22rem, 42vh);
+  }
+  .online-panel.editing .online-me .nametag {
+    position: absolute;
+    top: 0.5rem;
+    left: 50%;
+    translate: -50% 0;
+  }
+  .online-panel.editing .online-me :is(.avatar-portrait, .lobby-light, .lobby-shadow) {
+    display: block;
+  }
+  .online-panel.editing .online-me .avatar-portrait {
+    inset: 3.5rem auto 0 50%;
+    height: calc(100% - 3.5rem);
+  }
+  .look-slots {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.admin-add {
+  flex: 1;
+  max-width: 28rem;
+}
+
+/* The server library (ui/ServerLibrary.tsx): a bar of counts, search, sort and Add; the list with
+   covers; the song picked beside it. */
+.srvlib {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+.srvlib-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.7rem 1rem;
+}
+.srvlib-stats {
+  margin: 0;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.srvlib-stats strong {
+  font-size: 1.25rem;
+  font-weight: 900;
+}
+.srvlib-search {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+.srvlib-clear {
+  display: grid;
+  place-items: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 50%;
+  color: var(--ink-2);
+}
+.srvlib-clear:hover {
+  background: rgb(255 255 255 / 0.08);
+}
+.srvlib-clear svg {
+  width: 1rem;
+  height: 1rem;
+}
+.srvlib-sort {
+  grid-template-columns: repeat(3, auto);
+}
+.srvlib-note {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 700;
+}
+.srvlib-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(17rem, 22rem);
+  gap: clamp(1rem, 2vw, 2rem);
+}
+.srvlib-list {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0 0.3rem 1rem 0;
+  list-style: none;
+}
+.srvlib-empty {
+  padding: 1.2rem;
+  border-radius: var(--r-l);
+  background: var(--well);
+}
+.srvlib-row,
+.srvlib-add-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.4rem 0.9rem 0.4rem 0.4rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+  color: var(--ink);
+  text-align: left;
+  box-shadow: inset 0 0 0 1.5px transparent;
+  transition:
+    background 0.15s,
+    box-shadow 0.15s;
+}
+.srvlib-row:hover,
+.srvlib-add-row:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.08);
+}
+.srvlib-row.on,
+.srvlib-add-row.on {
+  background: rgb(255 77 157 / 0.14);
+  box-shadow: inset 0 0 0 2px var(--pink);
+}
+.srvlib-cover {
+  width: 2.9rem;
+  height: 2.9rem;
+}
+.srvlib-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+.srvlib-title,
+.srvlib-artist {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.srvlib-title {
+  font-weight: 800;
+}
+.srvlib-artist {
+  color: var(--ink-2);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+.srvlib-by {
+  flex: none;
+  max-width: 9rem;
+  color: var(--ink-3);
+  font-size: 0.85rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.srvlib-len {
+  flex: none;
+  min-width: 2.8rem;
+  text-align: right;
+  color: var(--ink-2);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+/* The song picked: cover large, its facts, renaming, removing. */
+.srvlib-detail {
+  align-self: start;
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 1rem;
+  border-radius: var(--r-l);
+  background: var(--panel);
+  animation: rise-in 0.25s var(--ease) backwards;
+}
+.srvlib-detail.empty {
+  min-height: 10rem;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  border: 2px dashed var(--line);
+  background: transparent;
+  animation: none;
+}
+.srvlib-detail-cover {
+  width: min(100%, 12rem, 26vh);
+  height: auto;
+  border-radius: var(--r-m);
+  box-shadow: 0 1rem 2rem -1rem rgb(0 0 0 / 0.7);
+}
+.srvlib-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  color: var(--ink-2);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+.srvlib-facts span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.srvlib-facts svg {
+  width: 1rem;
+  height: 1rem;
+}
+.srvlib-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.srvlib-edit-row {
+  display: flex;
+  gap: 0.5rem;
+}
+.srvlib-remove {
+  align-self: flex-start;
+}
+/* Adding songs: a list to tick, with All, and the songs going up one after another. */
+.srvlib-add {
+  max-height: min(42rem, 82vh);
+}
+.srvlib-add-bar {
+  display: flex;
+  gap: 0.6rem;
+}
+.srvlib-add-bar .admin-search {
+  flex: 1;
+}
+.srvlib-add-list {
+  min-height: 0;
+  max-height: min(24rem, 46vh);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0 0.3rem 0 0;
+  list-style: none;
+}
+.srvlib-tick {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-left: 0.4rem;
+  border-radius: 0.45rem;
+  box-shadow: inset 0 0 0 2px var(--ink-3);
+  color: var(--pink-ink);
+}
+.srvlib-add-row.on .srvlib-tick {
+  background: var(--pink);
+  box-shadow: none;
+}
+.srvlib-tick svg {
+  width: 1rem;
+  height: 1rem;
+}
+.srvlib-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-weight: 700;
+}
+.srvlib-progress-bar {
+  height: 0.4rem;
+  border-radius: 1rem;
+  background: linear-gradient(90deg, var(--pink) calc(var(--p, 0) * 100%), var(--well) 0);
+  transition: background 0.3s;
+}
+.srvlib-add-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+@media (max-width: 900px) {
+  .srvlib-body {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+  }
+  .srvlib-list {
+    overflow: visible;
+  }
+  .srvlib-detail {
+    order: -1;
+    max-height: none;
+    overflow: visible;
+  }
+  .srvlib-detail.empty {
+    display: none;
+  }
+  .srvlib-detail-cover {
+    width: 8rem;
+  }
+  .srvlib-by {
+    display: none;
+  }
+}
+
+/* The admin page (ServerAdmin.tsx): the sections down the side, the one open beside them under a
+   header that says what it is for. */
+.admin-page {
+  gap: 0;
+}
+.admin-shell {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(15rem, 18.5rem) minmax(0, 1fr);
+  gap: clamp(1rem, 2.2vw, 2.2rem);
+  padding-bottom: 1rem;
+}
+.admin-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.5rem;
+  border-radius: var(--r-l);
+  background: var(--panel);
+  align-self: start;
+}
+.admin-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: var(--target);
+  padding: 0.4rem 0.7rem;
+  border-radius: var(--r-m);
+  color: var(--ink-2);
+  text-align: left;
+  font-weight: 800;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.admin-nav-item > svg {
+  flex: none;
+  width: 1.2rem;
+  height: 1.2rem;
+}
+.admin-nav-item:hover {
+  background: rgb(255 255 255 / 0.06);
+  color: var(--ink);
+}
+.admin-nav-item.on {
+  background: rgb(255 77 157 / 0.16);
+  color: #fff;
+  box-shadow: inset 3px 0 0 var(--pink);
+}
+.admin-nav-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.admin-count {
+  flex: none;
+  min-width: 1.6rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.1);
+  color: var(--ink);
+  font-weight: 900;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.admin-nav-item.alert .admin-count {
+  background: var(--danger);
+  color: var(--pink-ink);
+}
+.admin-main {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  animation: rise-in 0.25s var(--ease) backwards;
+}
+.admin-main-head {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.admin-main-title {
+  font-size: clamp(1.4rem, 2vw, 1.9rem);
+  font-weight: 900;
+  font-style: italic;
+  font-stretch: 112%;
+  text-transform: uppercase;
+  line-height: 1;
+}
+.admin-main-head .hint {
+  margin: 0;
+}
+/* The overview: four numbers to start from, then what happened lately. */
+.admin-overview {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-bottom: 0.5rem;
+}
+.admin-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+.admin-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--r-l);
+  background: var(--panel);
+  color: var(--ink);
+  text-align: left;
+  box-shadow: inset 0 0 0 1px var(--glass-edge);
+  transition:
+    background 0.15s,
+    transform 0.2s var(--ease);
+}
+.admin-stat:hover {
+  background: rgb(255 255 255 / 0.07);
+}
+.admin-stat:active {
+  transform: scale(0.98);
+}
+.admin-stat-top {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--ink-2);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.admin-stat-top svg {
+  width: 1rem;
+  height: 1rem;
+}
+.admin-stat-value {
+  font-size: clamp(1.8rem, 2.6vw, 2.6rem);
+  font-weight: 900;
+  font-style: italic;
+  font-stretch: 112%;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.admin-stat-sub {
+  min-height: 1.2em;
+  color: var(--ink-2);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+.admin-stat.alert {
+  background: linear-gradient(135deg, rgb(255 90 114 / 0.28), transparent 70%), var(--panel);
+  box-shadow: inset 0 0 0 1.5px var(--danger);
+}
+.admin-stat.alert .admin-stat-top,
+.admin-stat.alert .admin-stat-sub {
+  color: var(--danger-2);
+}
+.admin-panels {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 0.8rem;
+  align-items: start;
+}
+.admin-panel-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  min-width: 0;
+}
+.admin-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-width: 0;
+  padding: 1rem;
+  border-radius: var(--r-l);
+  background: var(--panel);
+}
+.admin-panel .hint {
+  margin: 0;
+}
+.admin-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.admin-panel-head h3 {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-2);
+}
+.admin-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: var(--r-s);
+  color: var(--pink-2);
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+.admin-link:hover {
+  background: rgb(255 77 157 / 0.12);
+}
+.admin-link svg {
+  width: 1rem;
+  height: 1rem;
+}
+/* Lines of a section or panel: a picture or a mark, two lines of text, a time or a button. */
+.admin-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-height: 0;
+}
+.admin-rows.scroll {
+  overflow-y: auto;
+  padding-right: 0.3rem;
+  padding-bottom: 1rem;
+}
+.admin-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  min-height: 3.4rem;
+  padding: 0.4rem 0.8rem 0.4rem 0.45rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+}
+/* Possible duplicates: the two songs side by side, what makes them alike above, what to do below. */
+.dup-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.6rem 1rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: var(--r-m);
+  background: var(--well);
+}
+.dup-pair > .admin-role,
+.dup-pair > .admin-actions {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+.dup-side {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+.dup-list {
+  gap: 0.6rem;
+}
+.dup-found {
+  margin: 0;
+  padding-left: 1.2rem;
+  text-align: left;
+}
+@media (max-width: 760px) {
+  .dup-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.admin-rows.compact .admin-row {
+  min-height: 2.8rem;
+  padding-left: 0.6rem;
+}
+.admin-row-cover {
+  width: 2.6rem;
+  height: 2.6rem;
+}
+.admin-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+.admin-row-title,
+.admin-row-sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.admin-row-title {
+  font-weight: 800;
+}
+.admin-row-sub {
+  color: var(--ink-2);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+.admin-row-meta {
+  flex: none;
+  color: var(--ink-3);
+  font-size: 0.85rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.admin-rank {
+  flex: none;
+  width: 1.6rem;
+  text-align: center;
+  color: var(--ink-3);
+  font-weight: 900;
+  font-style: italic;
+}
+.admin-pill {
+  flex: none;
+  min-width: 4.4rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: center;
+  white-space: nowrap;
+}
+.admin-pill.bad {
+  background: rgb(255 90 114 / 0.2);
+  color: var(--danger-2);
+}
+.admin-pill.good {
+  background: rgb(61 220 132 / 0.16);
+  color: var(--ok);
+}
+.admin-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.admin-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  background: var(--well);
+  font-weight: 800;
+}
+/* A section with nothing in it, or that the server could not give: said plainly, with its icon. */
+.admin-empty {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 1.2rem 1.3rem;
+  border-radius: var(--r-l);
+  border: 2px dashed var(--line);
+  color: var(--ink-2);
+  font-weight: 700;
+}
+.admin-empty svg {
+  flex: none;
+  width: 1.6rem;
+  height: 1.6rem;
+}
+.admin-empty p {
+  margin: 0;
+}
+.admin-empty.good svg {
+  color: var(--ok);
+}
+/* A section's own page: a toolbar, then its list. */
+.admin-page-body {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+.admin-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+.admin-toolbar-stats {
+  margin: 0;
+  font-weight: 700;
+}
+.admin-toolbar-stats strong {
+  font-size: 1.25rem;
+  font-weight: 900;
+}
+.admin-kinds {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+.admin-kind {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--r-l);
+  background: var(--well);
+  color: var(--ink);
+  text-align: left;
+  box-shadow: inset 0 0 0 1.5px transparent;
+}
+.admin-kind:hover {
+  background: rgb(255 255 255 / 0.08);
+}
+.admin-kind.on {
+  background: rgb(255 77 157 / 0.14);
+  box-shadow: inset 0 0 0 2px var(--pink);
+}
+.admin-kind-label {
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+}
+.admin-kind-about {
+  color: var(--ink-2);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+.admin-link-text {
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: all;
+}
+@media (max-width: 1100px) {
+  .admin-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .admin-panels {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 800px) {
+  .admin-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  /* The sections become a row of tabs to scroll along. */
+  .admin-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    align-self: stretch;
+  }
+  .admin-nav-item {
+    flex: none;
+  }
+  .admin-nav-item.on {
+    box-shadow: inset 0 -3px 0 var(--pink);
+  }
+  .admin-kinds {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Signing in through the browser (Connect, PartyScreen.tsx): the way in, and waiting for it. */
+.connect-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.connect-browser .hint {
+  margin: 0 0 0.2rem;
+}
+.connect-wait {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.8rem 0.9rem;
+  border-radius: var(--r-m);
+  background: rgb(255 77 157 / 0.12);
+  font-weight: 700;
+}
+.connect-wait svg {
+  flex: none;
+  width: 1.2rem;
+  height: 1.2rem;
+  color: var(--pink-2);
+}
+
+/* The Online tab signed out (OnlinePanel.tsx, SignedOut): the whole page, the way in on the left
+   with the address typed right there, what playing online brings on the right. */
+.online-panel.signed-out {
+  flex: 1;
+}
+.online-landing {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(18rem, 1fr);
+  gap: clamp(1.2rem, 3.5vw, 4rem);
+  align-items: center;
+  padding-bottom: 1rem;
+}
+.landing-hero {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.8rem, 1.8vh, 1.2rem);
+  max-width: 40rem;
+  animation: rise-in 0.4s var(--ease) backwards;
+}
+.landing-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--pink-2);
+  font-size: 0.85rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.landing-eyebrow svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+.landing-title {
+  margin: 0;
+  font-size: clamp(2.6rem, 6vw, 5.4rem);
+  font-weight: 900;
+  font-style: italic;
+  font-stretch: 112%;
+  text-transform: uppercase;
+  line-height: 0.92;
+  text-shadow: 0 0.06em 0.6em rgb(255 77 157 / 0.35);
+}
+.landing-lead {
+  margin: 0;
+  max-width: 34rem;
+  color: var(--ink-2);
+  font-size: clamp(1rem, 1.15vw, 1.15rem);
+  line-height: 1.5;
+}
+/* The address and Connect, as one bar. */
+.landing-connect,
+.landing-back {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
+}
+.landing-field {
+  flex: 1 1 18rem;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: calc(var(--target) + 0.5rem);
+  padding: 0 1rem;
+  border-radius: var(--r-m);
+  background: var(--panel-solid);
+  box-shadow: inset 0 0 0 1.5px var(--glass-edge);
+  color: var(--ink-2);
+}
+.landing-field:focus-within {
+  box-shadow: inset 0 0 0 2px var(--pink);
+}
+.landing-field svg {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+}
+.landing-field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+.landing-go {
+  min-height: calc(var(--target) + 0.5rem);
+  padding-inline: 1.4rem;
+}
+.landing-server {
+  flex: 1 1 16rem;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.6rem 1rem;
+  border-radius: var(--r-m);
+  background: var(--panel-solid);
+  box-shadow: inset 0 0 0 1.5px var(--glass-edge);
+}
+.landing-server-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.landing-server-name {
+  font-weight: 900;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.landing-small {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 0.9rem;
+}
+.landing-small code {
+  padding: 0.05rem 0.35rem;
+  border-radius: 0.35rem;
+  background: var(--well);
+  color: var(--ink-2);
+}
+/* What playing online brings, and running a server of one's own. */
+.landing-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-width: 0;
+}
+.landing-features {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.landing-feature,
+.landing-own {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--r-l);
+  background: var(--panel);
+  box-shadow: inset 0 0 0 1px var(--glass-edge);
+  animation:
+    tile-rise 0.5s var(--ease-soft) backwards,
+    tile-fade 0.25s ease-out backwards;
+  animation-delay: calc(var(--i, 0) * 60ms + 80ms);
+}
+.landing-feature-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2.8rem;
+  height: 2.8rem;
+  border-radius: var(--r-m);
+  background: linear-gradient(135deg, rgb(91 62 224 / 0.55), rgb(255 77 157 / 0.4));
+  color: #fff;
+}
+.landing-feature-icon svg {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+.landing-feature-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.landing-feature-title {
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+}
+.landing-feature-cap {
+  color: var(--ink-2);
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+.landing-own {
+  --i: 4;
+  width: 100%;
+  margin-top: 0.3rem;
+  color: var(--ink);
+  text-align: left;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--line);
+  border: 0;
+  transition: background 0.15s;
+}
+.landing-own:hover {
+  background: rgb(255 255 255 / 0.06);
+}
+.landing-own .landing-feature-icon {
+  background: var(--well);
+  color: var(--ink-2);
+}
+.landing-own-out {
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--ink-3);
+}
+@media (max-width: 1000px) {
+  .online-landing {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+}
+/* A short window (720px and under): the five cards beside the way in tighten so the last one,
+   Run your own server, is not cut off by the action bar. */
+@media (max-height: 820px) and (min-width: 1001px) {
+  .landing-side,
+  .landing-features {
+    gap: 0.4rem;
+  }
+  .landing-feature,
+  .landing-own {
+    padding: 0.55rem 0.9rem;
+  }
+  .landing-feature-icon {
+    width: 2.4rem;
+    height: 2.4rem;
+  }
+  .landing-feature-cap {
+    font-size: 0.86rem;
+    line-height: 1.3;
+  }
 }
 
 /* Your stages, then the templates: two groups in one row that runs sideways. */

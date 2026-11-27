@@ -3,6 +3,7 @@ import type { Part } from '../../chart/types';
 import type { GraphicsSettings } from '../../game/graphics';
 import type { Cast, FireworkSpec, Fixture } from '../aurora/assets';
 import type { Figures, Person } from '../aurora/figures';
+import type { DeckInfo } from '../aurora/materials';
 import type { Shot, Vec3 } from '../stage/Director';
 import type { Rgb, ShowState } from '../stage/LightShow';
 
@@ -109,6 +110,11 @@ export interface Venue {
   update(f: VenueFrame): void;
   /** A beam group's own motion; undefined leaves the beam to the show's looks. */
   beam?(group: string, index: number, f: VenueFrame): BeamPose | undefined;
+  /**
+   * Room for a Showdown's ring of podiums (aurora/ring.ts): the deck it stands on, and what makes way
+   * for it (the band's own island and podiums). A venue without it keeps its band in a Showdown.
+   */
+  ring?: { deck: DeckInfo; makeWay(on: boolean): void };
   /** How far the camera rises with the shot on screen (a close-up of a player on a lift). */
   cameraLift?(shot: string): number;
   dispose(): void;
