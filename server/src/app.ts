@@ -21,6 +21,7 @@ import { joinPage } from './joinPage.ts';
 import { Songs } from './songs.ts';
 import { PartySongs } from './partySongs.ts';
 import { clientMessage } from './validate.ts';
+import { RateLimit, Uploads } from './limits.ts';
 
 /** The most bytes an HTTP request's body may have (everything it carries is small). */
 const BODY_MAX = 64 * 1024;
@@ -28,6 +29,10 @@ const BODY_MAX = 64 * 1024;
 const NOTIFY_MS = 250;
 /** A run's inputs are bigger: a long song at a high frame rate. */
 const RUN_MAX = 8 * 1024 * 1024;
+/** Uploads read at once, on the whole server and per player; and how many a player may have waiting. */
+const UPLOADS_AT_ONCE = 4;
+const UPLOADS_EACH = 1;
+const UPLOADS_WAITING = 20;
 
 type Handler = (
   req: IncomingMessage,
@@ -70,25 +75,31 @@ class Binary {
   }
 }
 
-/** A bucket of attempts per address: `burst` at once, refilled at `perMinute`. */
-class RateLimit {
-  private readonly buckets = new Map<string, { tokens: number; at: number }>();
-  private readonly burst: number;
-  private readonly perMinute: number;
-  constructor(burst: number, perMinute: number) {
-    this.burst = burst;
-    this.perMinute = perMinute;
+/**
+ * A request's body, refused past `limit`. With its length known up front (`size`) it is read
+ * straight into one buffer of that size, so a big upload is held once, not twice.
+ */
+async function bodyOf(req: IncomingMessage, limit: number, size?: number): Promise<Buffer> {
+  if (size !== undefined) {
+    const out = Buffer.allocUnsafe(size);
+    let at = 0;
+    for await (const c of req) {
+      const piece = c as Buffer;
+      if (at + piece.length > size) throw new Refusal(400, 'That request is longer than it says.');
+      piece.copy(out, at);
+      at += piece.length;
+    }
+    if (at !== size) throw new Refusal(400, 'That request is cut short.');
+    return out;
   }
-  take(key: string, now = Date.now()): boolean {
-    const b = this.buckets.get(key) ?? { tokens: this.burst, at: now };
-    b.tokens = Math.min(this.burst, b.tokens + ((now - b.at) / 60_000) * this.perMinute);
-    b.at = now;
-    this.buckets.set(key, b);
-    if (this.buckets.size > 10_000) this.buckets.clear();
-    if (b.tokens < 1) return false;
-    b.tokens--;
-    return true;
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const c of req) {
+    total += (c as Buffer).length;
+    if (total > limit) throw new Refusal(413, 'That request is too big.');
+    chunks.push(c as Buffer);
   }
+  return Buffer.concat(chunks, total);
 }
 
 export interface RunningServer {
@@ -127,6 +138,11 @@ export async function startServer(config: Config, store: Store, log: (line: stri
   // players behind one home address all signing in at once must not run out.
   const challengeLimit = new RateLimit(60, 60);
   const writeLimit = new RateLimit(30, 30);
+  // Signing in with a key and refreshing a sign-in happen once a session and once every quarter of
+  // an hour; the limits only stop someone trying many in a row.
+  const keyLimit = new RateLimit(30, 30);
+  const refreshLimit = new RateLimit(60, 60);
+  const uploads = new Uploads(UPLOADS_AT_ONCE, UPLOADS_EACH, UPLOADS_WAITING);
 
   /** Closes a player's connection, telling them why. */
   /*
@@ -191,8 +207,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       partySongs: config.partySongs,
       id: accounts.identities.serverId,
     }),
-    'POST /songs': async (req, _body, ip, _p, raw) => {
-      if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many songs at once. Wait a minute.');
+    'POST /songs': async (req, _body, _ip, _p, raw) => {
       const force = new URL(req.url ?? '/', 'http://x').searchParams.get('force') === '1';
       const shared = await songs.share(me(req), raw, force);
       notify(['songs']);
@@ -213,23 +228,16 @@ export async function startServer(config: Config, store: Store, log: (line: stri
         .filter((p) => p.name)
         .sort((a, b) => a.name.localeCompare(b.name));
     },
-    'POST /auth/signup': async (_req, body, ip) => {
-      if (!authLimit.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
+    'POST /auth/signup': async (_req, body) => {
       const session = await accounts.signUp(body);
       notify(['users']);
       return session;
     },
     'POST /auth/refresh': (_req, body) => accounts.refresh(body.refresh),
     // Signing in with an identity: a challenge, then the challenge signed (identity.ts).
-    'POST /auth/challenge': (_req, _body, ip) => {
-      if (!challengeLimit.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
-      return { nonce: accounts.identities.challenge() };
-    },
+    'POST /auth/challenge': () => ({ nonce: accounts.identities.challenge() }),
     'POST /auth/key': (_req, body) => accounts.keySignIn(body),
-    'POST /auth/recover': (_req, body, ip) => {
-      if (!authLimit.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
-      return accounts.recover(body.code, body);
-    },
+    'POST /auth/recover': (_req, body) => accounts.recover(body.code, body),
     'POST /me/name': (req, body) => {
       const you = accounts.rename(me(req), body.name);
       notify(['users', 'presence', 'boards', 'replays', 'log']);
@@ -269,8 +277,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       parties.setAvatar(u.id, a ?? undefined);
       return { avatar: a };
     },
-    'POST /scores': async (req, body, ip) => {
-      if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many scores at once. Wait a minute.');
+    'POST /scores': async (req, body) => {
       const taken = await scores.submit(me(req), body);
       notify(['boards'], typeof body.songId === 'string' ? [body.songId] : []);
       return taken;
@@ -350,8 +357,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     [
       'PUT',
       /^\/songs\/([0-9a-f]{64})\/copies\/(medium|low)$/,
-      async (req, _b, ip, [id, quality], raw) => {
-        if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many songs at once. Wait a minute.');
+      async (req, _b, _ip, [id, quality], raw) => {
         await songs.putCopy(me(req), id, quality as 'medium' | 'low', raw);
         notify(['songs']);
         return { ok: true };
@@ -360,9 +366,8 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     [
       'PUT',
       /^\/party\/songs\/([0-9a-f]{64})$/,
-      async (req, _b, ip, [id], raw) => {
+      async (req, _b, _ip, [id], raw) => {
         const u = me(req);
-        if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many songs at once. Wait a minute.');
         if (!parties.inSet(u.id, id)) throw new Refusal(403, 'Only a song in your party’s set can be sent.');
         await partySongs.put(id, raw);
         parties.songCached(id);
@@ -439,6 +444,15 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     ],
   ];
 
+  /** The requests with a body that need no sign-in, each with the rate limit its address is held to. */
+  const OPEN: Record<string, RateLimit> = {
+    'POST /auth/signup': authLimit,
+    'POST /auth/recover': authLimit,
+    'POST /auth/challenge': challengeLimit,
+    'POST /auth/key': keyLimit,
+    'POST /auth/refresh': refreshLimit,
+  };
+
   const me = (req: IncomingMessage): UserRow => {
     const auth = req.headers.authorization;
     return accounts.authenticate(auth?.startsWith('Bearer ') ? auth.slice(7) : undefined);
@@ -486,32 +500,43 @@ export async function startServer(config: Config, store: Store, log: (line: stri
         break;
       }
     if (!route) return reply(res, 404, { error: 'There is nothing here.' });
+    const key = `${req.method} ${path}`;
     const upload =
       (req.method === 'POST' && path === '/songs') ||
       (req.method === 'PUT' && (path.startsWith('/party/songs/') || /^\/songs\/[0-9a-f]{64}\/copies\//.test(path)));
     const limit = path === '/scores' ? RUN_MAX : upload ? config.songMaxMb * 1024 * 1024 + 1 : BODY_MAX;
+    const ip = addressOf(req);
+    let release: (() => void) | undefined;
+    let read = false;
     try {
       let body: Record<string, unknown> = {};
-      let raw = Buffer.alloc(0);
+      let raw: Buffer = Buffer.alloc(0);
       if (req.method === 'POST' || req.method === 'PUT') {
-        const chunks: Buffer[] = [];
-        let size = 0;
-        for await (const c of req) {
-          size += (c as Buffer).length;
-          if (size > limit) throw new Refusal(413, 'That request is too big.');
-          chunks.push(c as Buffer);
+        // Everything that can be checked from the headers is checked before the body is read, so
+        // a body is only ever held for someone allowed to send it, and never past its limit.
+        const declared = Number(req.headers['content-length'] ?? NaN);
+        if (declared > limit) throw new Refusal(413, 'That request is too big.');
+        const open = OPEN[key];
+        if (open) {
+          if (!open.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
+        } else {
+          const u = me(req);
+          if ((upload || path === '/scores') && !writeLimit.take(u.id))
+            throw new Refusal(429, upload ? 'Too many songs at once. Wait a minute.' : 'Too many scores at once. Wait a minute.');
+          if (upload) release = await uploads.enter(u.id, res);
         }
-        raw = Buffer.concat(chunks);
-        if (size && !upload) {
+        raw = await bodyOf(req, limit, upload && Number.isSafeInteger(declared) ? declared : undefined);
+        read = true;
+        if (raw.length && !upload) {
           try {
-            const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+            const parsed: unknown = JSON.parse(raw.toString('utf8'));
             if (typeof parsed === 'object' && parsed && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
           } catch {
             throw new Refusal(400, 'That request is not JSON.');
           }
         }
-      }
-      const answer = await route(req, body, addressOf(req), params, raw);
+      } else read = true;
+      const answer = await route(req, body, ip, params, raw);
       if (answer instanceof Binary) {
         res.writeHead(200, {
           'Content-Type': answer.type,
@@ -525,9 +550,13 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       }
       reply(res, 200, answer);
     } catch (e) {
+      // A body left unread is not read to its end: the connection closes once the answer is sent.
+      if (!read) res.setHeader('Connection', 'close');
       if (e instanceof Refusal) return reply(res, e.status, { error: e.message });
       log(`Error on ${req.method} ${path}: ${(e as Error).stack ?? e}`);
       reply(res, 500, { error: 'Something went wrong on the server.' });
+    } finally {
+      release?.();
     }
   });
 

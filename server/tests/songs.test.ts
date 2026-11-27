@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
+import { request, type ServerResponse } from 'node:http';
 import { crc32, gzipSync } from 'node:zlib';
 import { WebSocket } from 'ws';
 import { PROTOCOL_VERSION, type DuplicatePair, type ServerInfo, type ServerMessage, type SharedSong } from '../../src/net/protocol.ts';
@@ -7,6 +9,7 @@ import { readSoundwave, writeSoundwave } from '../../src/storage/soundwaveFile.t
 import { startServer, type RunningServer } from '../src/app.ts';
 import { DEFAULTS, type Config } from '../src/config.ts';
 import { Store } from '../src/db.ts';
+import { Uploads } from '../src/limits.ts';
 import { players } from './identity.ts';
 
 let server: RunningServer;
@@ -16,6 +19,7 @@ const start = async (over: Partial<Config> = {}) => {
   server = await startServer({ ...DEFAULTS, port: 0, host: '127.0.0.1', mode: 'public', dataDir: ':memory:', ...over }, store, () => {});
 };
 afterEach(async () => {
+  if (!store?.db.isOpen) return;
   await server.close();
   store.close();
 });
@@ -128,6 +132,26 @@ describe('shared songs', () => {
     await start({ songSharing: 'songs', quotaMb: 0.001 });
     const bo = await signUp('Bo');
     expect((await api('POST', '/songs', (await songFile(7)).bytes, bo.access)).status).toBe(413);
+  });
+
+  it('refuse an upload from its headers alone, before its body is read', async () => {
+    await start({ songSharing: 'songs', songMaxMb: 10 });
+    const ana = await signUp('Ana');
+    // Says it is 9 MB but sends a few bytes: an answer that comes now did not wait for the body.
+    const early = (headers: Record<string, string | number>) =>
+      new Promise<number>((resolve, reject) => {
+        const r = request(`${server.url}/songs`, { method: 'POST', headers }, (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        });
+        r.on('error', reject);
+        r.write(Buffer.alloc(1000));
+      });
+    expect(await early({ 'Content-Length': 9 * 1024 * 1024 })).toBe(401);
+    expect(await early({ 'Content-Length': 9 * 1024 * 1024, Authorization: 'Bearer nonsense' })).toBe(401);
+    expect(await early({ 'Content-Length': 11 * 1024 * 1024, Authorization: `Bearer ${ana.access}` })).toBe(413);
+    // The server still answers as ever.
+    expect((await api<SharedSong>('POST', '/songs', (await songFile(3)).bytes, ana.access)).status).toBe(200);
   });
 
   it('take a song whose analysis is a gzip bomb without inflating it past the limit', async () => {
@@ -293,5 +317,36 @@ describe('shared songs', () => {
   it('do not pass a party’s songs on where the owner turned that off', async () => {
     await start({ partySongs: false });
     expect((await api<ServerInfo>('GET', '/info')).body.partySongs).toBe(false);
+  });
+});
+
+describe('the line for uploads', () => {
+  const res = () => new EventEmitter() as unknown as ServerResponse;
+  it('reads a few at once, lets the rest wait their turn, and refuses past the line', async () => {
+    const line = new Uploads(2, 1, 1);
+    const a = await line.enter('a', res());
+    const b = await line.enter('b', res());
+    let third = false;
+    const c = line.enter('c', res()).then((done) => ((third = true), done));
+    // One of a player's own waits; a second is refused.
+    const a2 = line.enter('a', res());
+    await expect(line.enter('a', res())).rejects.toMatchObject({ status: 429 });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(third).toBe(false);
+    b();
+    (await c)();
+    a();
+    (await a2)();
+  });
+
+  it('lets go of a place in line when the player gives up', async () => {
+    const line = new Uploads(1, 1, 5);
+    const done = await line.enter('a', res());
+    const gone = res();
+    const waiting = line.enter('b', gone);
+    (gone as unknown as EventEmitter).emit('close');
+    await expect(waiting).rejects.toMatchObject({ status: 499 });
+    done();
+    (await line.enter('c', res()))();
   });
 });
