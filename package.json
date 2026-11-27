@@ -1,6 +1,6 @@
 {
   "name": "soundwave",
-  "version": "1.5.1",
+  "version": "2.0.0",
   "description": "Rhythm game that charts your own songs",
   "scripts": {
     "dev": "node scripts/copy-models.mjs && vite",
