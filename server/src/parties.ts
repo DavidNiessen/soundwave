@@ -96,6 +96,8 @@ export interface Player {
 }
 
 type Send = (to: string, msg: ServerMessage) => void;
+/** One message to several players: the server turns it into text once for all of them. */
+type SendAll = (to: string[], msg: ServerMessage) => void;
 
 interface Song {
   index: number;
@@ -163,8 +165,17 @@ export class Parties {
   /** Whether the server holds a song for parties (server/src/partySongs.ts). */
   private readonly cached: (songId: string) => boolean;
 
-  constructor(send: Send, now: () => number, rotation: () => SetSong[] = () => [], cached: (songId: string) => boolean = () => false) {
+  private readonly sendAll: SendAll;
+
+  constructor(
+    send: Send,
+    now: () => number,
+    rotation: () => SetSong[] = () => [],
+    cached: (songId: string) => boolean = () => false,
+    sendAll: SendAll = (to, msg) => to.forEach((id) => send(id, msg)),
+  ) {
     this.send = send;
+    this.sendAll = sendAll;
     this.now = now;
     this.rotation = rotation;
     this.cached = cached;
@@ -299,7 +310,7 @@ export class Parties {
         const now = this.now();
         if (now - (party.cheered.get(player.id) ?? -Infinity) < CHEER_EVERY_MS) return;
         party.cheered.set(player.id, now);
-        for (const id of song.playing.keys()) this.send(id, { type: 'cheer', from: player.name });
+        this.sendAll([...song.playing.keys()], { type: 'cheer', from: player.name });
         return;
       }
       case 'finish':
@@ -521,8 +532,7 @@ export class Parties {
     song.hits.set(target, { at, until: at + ms });
     song.lastHit.set(target, now);
     this.send(target, { type: 'hit', songIndex, from: player.name, at, ms });
-    for (const m of party.state.members)
-      if (m.connected) this.send(m.id, { type: 'strikeFired', songIndex, from: player.id, to: target, at });
+    this.sendAll(this.online(party), { type: 'strikeFired', songIndex, from: player.id, to: target, at });
     this.sendBoard(party);
   }
 
@@ -574,7 +584,7 @@ export class Parties {
         return { ...l, aim: aims.get(l.id), hit: !!h && now < h.until };
       });
     }
-    for (const m of party.state.members) if (m.connected) this.send(m.id, { type: 'board', songIndex: song.index, lines });
+    this.sendAll(this.online(party), { type: 'board', songIndex: song.index, lines });
   }
 
   /** Runs every few tens of ms: the board, results that waited long enough, and players who did not come back. */
@@ -681,9 +691,14 @@ export class Parties {
     this.maybeEndSong(party);
   }
 
+  /** The members of a party who are connected now. */
+  private online(party: Party): string[] {
+    return party.state.members.filter((m) => m.connected).map((m) => m.id);
+  }
+
   /** Sends everyone in a party its state as it is now. */
   private share(party: Party) {
-    for (const m of party.state.members) if (m.connected) this.send(m.id, { type: 'party', party: party.state });
+    this.sendAll(this.online(party), { type: 'party', party: party.state });
   }
 
   private newCode(): string {

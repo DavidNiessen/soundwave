@@ -29,6 +29,9 @@ const BODY_MAX = 64 * 1024;
 const NOTIFY_MS = 250;
 /** A run's inputs are bigger: a long song at a high frame rate. */
 const RUN_MAX = 8 * 1024 * 1024;
+/** The biggest message a connection may send before its hello, and the most connections one address may have. */
+const HELLO_MAX = 4 * 1024;
+const SOCKETS_PER_ADDRESS = 40;
 /** Uploads read at once, on the whole server and per player; and how many a player may have waiting. */
 const UPLOADS_AT_ONCE = 4;
 const UPLOADS_EACH = 1;
@@ -124,12 +127,21 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     const ws = sockets.get(to);
     if (ws && ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
   };
+  /** One message to several players, turned into text once: a party's state goes to all its players at once. */
+  const sendAll = (to: string[], msg: ServerMessage) => {
+    let text: string | undefined;
+    for (const id of to) {
+      const ws = sockets.get(id);
+      if (ws && ws.readyState === ws.OPEN) ws.send((text ??= JSON.stringify(msg)));
+    }
+  };
   const parties = new Parties(
     send,
     clock,
     () => rotation.songs(),
     // A song in the server's own library is there for a party as much as one a host sent.
     (id) => partySongs.has(id) || songs.hasFile(id),
+    sendAll,
   );
   /** What each player online says they are doing. */
   const activity = new Map<string, string>();
@@ -577,29 +589,50 @@ export async function startServer(config: Config, store: Store, log: (line: stri
   /* Parties, over WebSocket ----------------------------------------------------------------- */
 
   const wss = new WebSocketServer({ server: http, path: '/ws', maxPayload: MESSAGE_MAX });
-  wss.on('connection', (ws) => {
+  /** Each connection's address, to hold every address to a few connections. */
+  const addresses = new WeakMap<WebSocket, string>();
+  /** The receiver's limit on one message (ws keeps it per connection, unexported: set where it is there). */
+  const setMaxPayload = (ws: WebSocket, bytes: number) => {
+    const receiver = (ws as unknown as { _receiver?: { _maxPayload?: number } })._receiver;
+    if (receiver && typeof receiver._maxPayload === 'number') receiver._maxPayload = bytes;
+  };
+  wss.on('connection', (ws, req) => {
     let user: UserRow | null = null;
+    const address = addressOf(req);
+    const mine = [...wss.clients].filter((c) => addresses.get(c) === address);
+    // A household or a LAN party shares one address, but no more than a few parties' worth of it.
+    if (mine.length >= SOCKETS_PER_ADDRESS) return void ws.close(4009, 'too many');
+    addresses.set(ws, address);
+    // Before it says who it is, a connection may send only small messages: a hello is a few hundred bytes.
+    setMaxPayload(ws, HELLO_MAX);
     // A connection that does not say hello in time is closed.
     const helloTimer = setTimeout(() => !user && ws.close(4001, 'hello'), 10_000);
-    // At most 60 messages a second on average (a song sends 10).
+    // At most 60 messages a second on average (a song sends 10), and of those that change
+    // something for others (a party's state, the presence list) 5 a second.
     let budget = 120;
+    let changes = 20;
     let budgetAt = performance.now();
     const say = (msg: ServerMessage) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(msg));
 
     ws.on('message', (data, isBinary) => {
       const now = performance.now();
-      budget = Math.min(120, budget + ((now - budgetAt) / 1000) * 60);
+      const since = (now - budgetAt) / 1000;
+      budget = Math.min(120, budget + since * 60);
+      changes = Math.min(20, changes + since * 5);
       budgetAt = now;
       if (--budget < 0) return void ws.close(4008, 'too fast');
       if (isBinary) return;
+      if (!user && (data as Buffer).length > HELLO_MAX) return void ws.close(1009, 'hello');
       let msg;
       try {
         msg = clientMessage(JSON.parse(data.toString()));
       } catch {
         msg = undefined;
       }
+      if (!msg && !user) return void ws.close(4001, 'hello');
       if (!msg) return say({ type: 'error', message: 'The server did not understand that message. Is the game up to date?' });
       if (msg.type === 'ping') return say({ type: 'pong', t: msg.t, serverT: performance.now() });
+      if (msg.type !== 'progress' && msg.type !== 'hello' && --changes < 0) return;
       if (!user) {
         if (msg.type !== 'hello') return;
         if (msg.protocol !== PROTOCOL_VERSION) {
@@ -619,6 +652,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
           return void ws.close(4003, 'auth');
         }
         clearTimeout(helloTimer);
+        setMaxPayload(ws, MESSAGE_MAX);
         const before = sockets.get(user.id);
         if (before && before !== ws) {
           before.send(JSON.stringify({ type: 'bye', reason: 'You signed in to this server somewhere else.' } satisfies ServerMessage));

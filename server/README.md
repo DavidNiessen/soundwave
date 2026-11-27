@@ -310,6 +310,11 @@ JSON unless said otherwise. A proof is `{ publicKey, nonce, signature }` (see
 The messages are in [src/net/protocol.ts](../src/net/protocol.ts), shared with the game. A game and a
 server with different `PROTOCOL_VERSION`s refuse each other with a sentence saying which one to update.
 
+A connection's first message is its `hello`, at most 4 KB, within ten seconds; anything else before
+it closes the connection. One address may hold 40 connections. Each connection sends at most 60
+messages a second on average, and of those that change something for others (everything but
+`progress` and `ping`) 5 a second; the rest of those are dropped.
+
 **Live updates.** Every game online hears, over its WebSocket, what changed on the server: a
 `changed` message names the topics (`songs`, `rotation`, `replays`, `boards`, `presence`, and for the
 owner and moderators `users`, `log` and `reports`), gathered over a quarter of a second, and the game
