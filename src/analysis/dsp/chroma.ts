@@ -1,8 +1,11 @@
 import type { HarmonicEvent } from '../types';
 import { binHz, type Spectrogram } from './stft';
 
+/** The highest frequency the chroma reads. */
+export const CHROMA_TOP_HZ = 4200;
+
 /** Per-frame 12-bin chroma (pitch class energy) from a magnitude spectrogram. */
-export function chromagram(spec: Float32Array, s: Spectrogram, loHz = 55, hiHz = 4200): Float32Array {
+export function chromagram(spec: Float32Array, s: Spectrogram, loHz = 55, hiHz = CHROMA_TOP_HZ): Float32Array {
   const hz = binHz(s);
   const lo = Math.max(1, Math.ceil(loHz / hz));
   const hi = Math.min(s.bins - 1, Math.floor(hiHz / hz));

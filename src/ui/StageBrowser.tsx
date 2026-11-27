@@ -494,6 +494,9 @@ export function useStageBrowser({ stages, settings, on, onChange }: Options): {
       selected={selected.has(d.id)}
       onFocus={() => setFocusId(d.id)}
       onPick={(e) => {
+        // The stage behind the menu follows the card in focus, and a tap does not always move focus
+        // (Safari on iPhone and iPad never focuses a tapped button): the card pressed is shown.
+        setFocusId(d.id);
         // Ctrl (Cmd on a Mac) picks one stage more or less, Shift a run of them.
         if (e.ctrlKey || e.metaKey) return pick(d.id);
         if (e.shiftKey && !isBuiltIn(d.id)) return pickRange(d.id);

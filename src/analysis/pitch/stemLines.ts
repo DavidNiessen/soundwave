@@ -81,13 +81,29 @@ const level = (env: Envelope, from: number, to: number) => {
   return s / (b - a) / env.ref;
 };
 
-/** Audible attacks in a stem: flux peaks in a band, moved to the attack in the filtered waveform. */
-export function attacks(signal: Float32Array, sr: number, loHz: number, hiHz: number, delta = 0.08): Attack[] {
+/** A stem's sound in one band: its flux (normalised) and the waveform filtered to the band. */
+interface Band {
+  flux: Float32Array;
+  filtered: Float32Array;
+}
+
+function band(signal: Float32Array, sr: number, loHz: number, hiHz: number): Band {
   const spec = stft(signal, sr, 2048, HOP);
-  const flux = normalize(bandFlux(spec.mag, spec, loHz, hiHz));
+  return { flux: normalize(bandFlux(spec.mag, spec, loHz, hiHz)), filtered: highpass(lowpass(signal, sr, hiHz), sr, loHz) };
+}
+
+/** Audible attacks in a stem: flux peaks in a band, moved to the attack in the filtered waveform. */
+export function attacks(
+  signal: Float32Array,
+  sr: number,
+  loHz: number,
+  hiHz: number,
+  delta = 0.08,
+  heard = band(signal, sr, loHz, hiHz),
+): Attack[] {
+  const { flux, filtered } = heard;
   const fps = sr / HOP;
   const peaks = pickPeaks(flux, { maxWin: 2, avgWin: Math.round(0.2 * fps), delta, wait: Math.round(MIN_IOI * fps) });
-  const filtered = highpass(lowpass(signal, sr, hiHz), sr, loHz);
   const out: Attack[] = [];
   for (const f of peaks) {
     const t = refineOnset(filtered, sr, f / fps, 0.03, 0.09);
@@ -112,11 +128,12 @@ function isOnset(env: Envelope, t: number, minLevel: number, keep = 0.9): boolea
 
 /**
  * End of a held pitch: transcribers split long notes (vibrato, breathy tone) into back-to-back
- * pieces of the same pitch, so follow the chain of same-pitch pieces.
+ * pieces of the same pitch, so follow the chain of same-pitch pieces. `byTime` is the notes in
+ * order of their starts.
  */
-function heldUntil(notes: PitchedNote[], start: PitchedNote): number {
+function heldUntil(byTime: PitchedNote[], start: PitchedNote): number {
   let end = start.t + start.dur;
-  for (const n of [...notes].sort((a, b) => a.t - b.t)) {
+  for (const n of byTime) {
     if (n.midi !== start.midi || n.t <= start.t) continue;
     if (n.t - end > 0.12) break;
     end = Math.max(end, n.t + n.dur);
@@ -205,7 +222,7 @@ export function vocalLineFromStem({ signal, sr, notes, mixLoudness }: StemInput)
     if (!pitch && level(env, e.t, e.t + 0.1) >= BORROW_MIN_LEVEL) pitch = dominantPitch(voiced, e.t - BORROW_WINDOW, e.t + BORROW_WINDOW);
     if (!pitch) continue;
     // A borrowed pitch (from a note that ended before this syllable) sets the pitch, not the length.
-    const held = Math.max(heldUntil(voiced, pitch) + 0.1, e.t + 0.1);
+    const held = Math.max(heldUntil(sorted, pitch) + 0.1, e.t + 0.1);
     const end = Math.min(next - 0.02, held, fadeEnd(env, e.t, next, 0.3));
     if (end - e.t < MIN_SYLLABLE) continue;
     out.push({
@@ -223,11 +240,36 @@ export function vocalLineFromStem({ signal, sr, notes, mixLoudness }: StemInput)
 
 /**
  * Singers slide and drift: a held E can read as E one time and F the next. Within a phrase, notes
- * whose fine pitches lie within PITCH_MERGE semitones are one sung note; each group gets the median
- * of its fine pitches, corrected by the song's overall tuning, rounded. Repeated notes then stay in
- * one lane and real steps still move.
+ * whose fine pitches lie within PITCH_MERGE semitones of each other are one sung note; each group
+ * gets the median of its fine pitches, corrected by the song's overall tuning, rounded. Repeated
+ * notes then stay in one lane and real steps still move.
+ *
+ * A group never spans more than PITCH_SPAN: in a long phrase the fine pitches of neighbouring notes
+ * (a step sung a little flat, a slide between them) fill the gaps between semitones, and chaining
+ * them would make the whole phrase one pitch. A group that is too wide splits at its widest gap.
  */
 const PITCH_MERGE = 0.5;
+const PITCH_SPAN = 1;
+
+/** Splits ascending values into runs at gaps over PITCH_MERGE, then each run at its widest gaps until it spans at most PITCH_SPAN. */
+function pitchGroups(sorted: number[], fine: (i: number) => number): number[][] {
+  const runs: number[][] = [];
+  for (const i of sorted) {
+    const run = runs[runs.length - 1];
+    if (run && fine(i) - fine(run[run.length - 1]) <= PITCH_MERGE) run.push(i);
+    else runs.push([i]);
+  }
+  const out: number[][] = [];
+  const split = (g: number[]) => {
+    if (g.length < 2 || fine(g[g.length - 1]) - fine(g[0]) <= PITCH_SPAN) return void out.push(g);
+    let at = 1;
+    for (let k = 2; k < g.length; k++) if (fine(g[k]) - fine(g[k - 1]) > fine(g[at]) - fine(g[at - 1])) at = k;
+    split(g.slice(0, at));
+    split(g.slice(at));
+  };
+  runs.forEach(split);
+  return out;
+}
 
 export function stabilizePitches(notes: PitchedNote[]): PitchedNote[] {
   const withFine = notes.filter((n) => n.fine !== undefined);
@@ -248,19 +290,11 @@ export function stabilizePitches(notes: PitchedNote[]): PitchedNote[] {
     while (end < out.length && out[end].t - (out[end - 1].t + out[end - 1].dur) < 0.8) end++;
     const idx = Array.from({ length: end - start }, (_, k) => start + k).filter((i) => out[i].fine !== undefined);
     const sorted = [...idx].sort((a, b) => out[a].fine! - out[b].fine!);
-    let group: number[] = [];
-    const flush = () => {
-      if (!group.length) return;
-      const vals = group.map((i) => out[i].fine!).sort((a, b) => a - b);
+    for (const group of pitchGroups(sorted, (i) => out[i].fine!)) {
+      const vals = group.map((i) => out[i].fine!);
       const midi = Math.round(vals[vals.length >> 1] - tuning);
       for (const i of group) out[i].midi = midi;
-      group = [];
-    };
-    for (const i of sorted) {
-      if (group.length && out[i].fine! - out[group[group.length - 1]].fine! > PITCH_MERGE) flush();
-      group.push(i);
     }
-    flush();
     start = end;
   }
   return out;
@@ -299,12 +333,10 @@ function voicing(pitches: number[]): { top: number; chord?: number[] } {
  * Only at eighth-note grid positions where the instrument is playing: a small dip-and-recovery
  * in the flux close to the grid counts there, where it would be noise anywhere else.
  */
-function gridStrums(signal: Float32Array, sr: number, env: Envelope, beats: number[], heard: Attack[]): Attack[] {
-  const spec = stft(signal, sr, 2048, HOP);
-  const flux = normalize(bandFlux(spec.mag, spec, 150, 8000));
+function gridStrums(sound: Band, sr: number, env: Envelope, beats: number[], heard: Attack[]): Attack[] {
+  const { flux, filtered } = sound;
   const fps = sr / HOP;
   const out: Attack[] = [];
-  const filtered = highpass(lowpass(signal, sr, 8000), sr, 150);
   for (let i = 0; i + 1 < beats.length; i++) {
     for (const frac of [0, 0.5]) {
       const g = beats[i] + frac * (beats[i + 1] - beats[i]);
@@ -337,8 +369,9 @@ const GRID_STRUM_RATIO = 1.5;
  * eighth-note grid (re-strummed distorted chords barely change the sound level).
  */
 function instrumentAttacks(signal: Float32Array, sr: number, env: Envelope, beats?: number[]): Attack[] {
-  const heard = attacks(signal, sr, 150, 8000).filter((a) => isOnset(env, a.t, 0.1));
-  if (beats && beats.length > 1) heard.push(...gridStrums(signal, sr, env, beats, heard));
+  const sound = band(signal, sr, 150, 8000);
+  const heard = attacks(signal, sr, 150, 8000, 0.08, sound).filter((a) => isOnset(env, a.t, 0.1));
+  if (beats && beats.length > 1) heard.push(...gridStrums(sound, sr, env, beats, heard));
   heard.sort((a, b) => a.t - b.t);
   const out = heard;
   return out.filter((a, i) => i === 0 || a.t - out[i - 1].t >= MIN_IOI);
@@ -398,6 +431,13 @@ export function leadLineFromStem({ signal, sr, notes, beats, mixLoudness }: Stem
   return out;
 }
 
+/**
+ * How long after a bass attack (s) its transcribed pitch may start. On electric and picked bass the
+ * transcription starts within a few hundredths of a second of the attack; on 808 and sub-bass most
+ * notes start 0.13 to 0.27 s late (measured on separated bass stems).
+ */
+const BASS_LAG = 0.3;
+
 /** Bass line: one note per audible attack in the bass stem, lowest struck pitch, octave-folded. */
 export function bassLineFromStem({ signal, sr, notes, mixLoudness }: StemInput): PitchedNote[] {
   const env = envelope(signal, sr, mixLoudness);
@@ -408,7 +448,11 @@ export function bassLineFromStem({ signal, sr, notes, mixLoudness }: StemInput):
     const h = hits[i];
     const next = hits[i + 1]?.t ?? h.t + 2;
     const struck = low.filter((n) => n.t >= h.t - 0.06 && n.t <= h.t + 0.1);
-    const pool = struck.length ? struck : soundingAt(low, h.t + 0.05);
+    // Sub-bass (808s, synth bass) is recognised late: the transcribed note can start a fifth of a
+    // second after the attack is heard. A note starting that late, before the next attack, is this one.
+    const late = struck.length ? [] : low.filter((n) => n.t > h.t + 0.1 && n.t <= Math.min(h.t + BASS_LAG, next - 0.03));
+    const first = late.length ? Math.min(...late.map((n) => n.t)) : 0;
+    const pool = struck.length ? struck : late.length ? late.filter((n) => n.t - first < 0.05) : soundingAt(low, h.t + 0.05);
     if (!pool.length) continue;
     const lowest = pool.reduce((m, n) => (n.midi < m.midi ? n : m));
     const end = Math.min(next - 0.02, fadeEnd(env, h.t, next, 0.3));

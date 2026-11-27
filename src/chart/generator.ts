@@ -1,5 +1,5 @@
 import type { AnalysisResult, DrumKind, PitchedNote } from '../analysis/types';
-import { PROFILES, type DifficultyProfile } from './profiles';
+import { atLeastAt120, barCap, PROFILES, sustainMinBeats, type DifficultyProfile } from './profiles';
 import { DIFFICULTIES, type Chart, type Difficulty, type Note, type Part } from './types';
 
 export const CHART_VERSION = 2;
@@ -249,23 +249,35 @@ function reduceRhythm(evs: Ev[], p: DifficultyProfile, spb: number, drums: boole
     bars.set(b, [...(bars.get(b) ?? []), entry]);
   }
   const keep = new Set<number>();
-  for (const entries of bars.values()) {
+  for (const [b, entries] of bars) {
     const ranked = [...entries].sort((x, y) => weight(y[0] / 48, y[1]) - weight(x[0] / 48, x[1]) || x[0] - y[0]);
-    for (const [k] of ranked.slice(0, p.maxPerBar)) keep.add(k);
+    for (const [k] of ranked.slice(0, barCap(p, barBeats(b, downbeats)))) keep.add(k);
   }
   return out.filter(([k]) => keep.has(k)).flatMap(([, list]) => list);
 }
 
-/** How rhythmically important a position is: downbeat > beat 3 > other beats > eighths > the rest. */
+/**
+ * How rhythmically important a position is: the bar line > the middle of an even bar (beat 3 of
+ * four, beat 4 of six) > other beats > eighths > the rest. Bars of three, five or seven beats have
+ * no strong middle.
+ */
 function metricWeight(pos: number, downbeats: number[]): number {
   if (isMultiple(pos, 1)) {
     const b = barIndex(pos, downbeats);
     if (b < 0) return 1.5;
     const inBar = pos - downbeats[b];
     if (Math.abs(inBar) < EPS) return 2;
-    return Math.abs(inBar - 2) < EPS ? 1.7 : 1.5;
+    const len = barBeats(b, downbeats);
+    return len >= 4 && len % 2 === 0 && Math.abs(inBar - len / 2) < EPS ? 1.7 : 1.5;
   }
   return isMultiple(pos, 0.5) ? 1.2 : 1;
+}
+
+/** Beats in a bar (the one before the first bar line, and the last, count as long as their neighbour). */
+function barBeats(b: number, downbeats: number[]): number {
+  if (downbeats.length < 2) return 4;
+  const i = Math.max(0, Math.min(downbeats.length - 2, b));
+  return Math.max(1, Math.round(downbeats[i + 1] - downbeats[i]));
 }
 
 /** Index of the bar containing a beat position (-1 before the first downbeat). */
@@ -282,12 +294,25 @@ function barIndex(pos: number, downbeats: number[]): number {
   return lo;
 }
 
-function reduceDrums(evs: Ev[], d: Difficulty): Ev[] {
+/**
+ * Fewest kicks and snares on the beat in a bar for easy to leave out its hi-hats. Where the hats
+ * carry the groove (trap, house, a verse with only a hat), dropping them would leave easy all but empty.
+ */
+const EASY_KIT_MIN = 2;
+
+function reduceDrums(evs: Ev[], d: Difficulty, downbeats: number[]): Ev[] {
   if (d === 'expert') return evs;
+  const kitOnBeat = new Map<number, number>();
+  for (const e of evs) {
+    if (e.kind === 'hat' || !isMultiple(e.pos, 1)) continue;
+    const b = barIndex(e.pos, downbeats);
+    kitOnBeat.set(b, (kitOnBeat.get(b) ?? 0) + 1);
+  }
   return evs.filter((e) => {
     if (e.kind !== 'hat') return true;
-    // Hi-hats thin out first: none on easy, quarters on medium, eighths on hard.
-    if (d === 'easy') return false;
+    // Hi-hats thin out first: on easy only on the beat where the kick and snare leave the bar
+    // nearly empty, quarters on medium, eighths on hard.
+    if (d === 'easy') return isMultiple(e.pos, 1) && (kitOnBeat.get(barIndex(e.pos, downbeats)) ?? 0) < EASY_KIT_MIN;
     return d === 'medium' ? isMultiple(e.pos, 1) : isMultiple(e.pos, 0.5);
   });
 }
@@ -535,7 +560,9 @@ export function generateAll(a: AnalysisResult, part: Part, seedKey = ''): Record
   let source = expertEvs;
   for (const d of [...DIFFICULTIES].reverse()) {
     const p = PROFILES[d];
-    const evs = drums ? reduceRhythm(reduceDrums(source, d), p, spb, true, a.downbeats) : reduceRhythm(source, p, spb, false, a.downbeats);
+    const evs = drums
+      ? reduceRhythm(reduceDrums(source, d, a.downbeats), p, spb, true, a.downbeats)
+      : reduceRhythm(source, p, spb, false, a.downbeats);
     const notes = drums
       ? drumNotes(evs, p, d)
       : pitchedNotes(
@@ -545,7 +572,8 @@ export function generateAll(a: AnalysisResult, part: Part, seedKey = ''): Record
           a.downbeats,
           sectionStarts,
           { lanes: p.pitchedLanes, partLo, partHi, memo: new Map() },
-          part === 'vocals' ? { spb } : undefined,
+          spb,
+          part === 'vocals',
         );
     const timed: Note[] = notes.map((n) => ({ ...n, t: grid.time(n.t), dur: n.dur > 0 ? grid.time(n.t + n.dur) - grid.time(n.t) : 0 }));
     timed.sort((x, y) => x.t - y.t || x.lane - y.lane);
@@ -647,9 +675,10 @@ function pitchedNotes(
   downbeats: number[],
   sectionStarts: number[],
   ctx: PhraseCtx,
-  walk?: { spb: number },
+  spb: number,
+  walk: boolean,
 ): Note[] {
-  const lanes = walk ? walkLanes(evs, ctx, walk.spb) : assignPitchedLanes(evs, downbeats, sectionStarts, ctx);
+  const lanes = walk ? walkLanes(evs, ctx, spb) : assignPitchedLanes(evs, downbeats, sectionStarts, ctx);
   // Chord budget: the most important stabs (beat position, then length) up to the profile's rate.
   // A score threshold instead of a count keeps repeated stabs consistent.
   const chordScore = (e: Ev) => metricWeight(e.pos, downbeats) + 0.5 * Math.min(1, e.len / 2);
@@ -665,7 +694,8 @@ function pitchedNotes(
     const next = evs[i + 1];
     // Chords and their sustains are reserved for the right places on each difficulty.
     const chordHere = eligible.includes(e) && chordScore(e) >= threshold;
-    const minLen = chordHere ? Math.max(p.sustainBeats, 1.5) : p.sustainBeats;
+    const hold = sustainMinBeats(p, spb);
+    const minLen = chordHere ? Math.max(hold, atLeastAt120(1.5, spb)) : hold;
     let len = e.len >= minLen ? e.len : 0;
     if (len && next) len = Math.min(len, next.pos - e.pos - p.sustainGapBeats);
     if (len < minLen * 0.75) len = 0;

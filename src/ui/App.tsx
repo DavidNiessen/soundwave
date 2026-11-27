@@ -10,6 +10,7 @@ import {
 } from '../app/discord';
 import { findStage } from '../game/stages';
 import { setActiveStage } from '../render/stage/showStage';
+import { analysisHold } from '../analysis/hold';
 import { analysisManager, canPlay } from '../analysis/manager';
 import { stemModel } from '../analysis/separation/model';
 import { analysisDevice, isHandheld, type AnalysisDevice } from '../analysis/separation/support';
@@ -25,7 +26,17 @@ import { emptyEdits } from '../editor/edits';
 import type { Results } from '../game/GameSession';
 import type { ReplayInputs } from '../game/replay';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { applyDisplayMode, canExit, exitApp, inDesktopApp, isFullscreenToggle, toggledMode } from '../game/displayMode';
+import {
+  applyDisplayMode,
+  canExit,
+  exitApp,
+  followDisplayMode,
+  inDesktopApp,
+  isFullscreenToggle,
+  onFullscreenShortcut,
+  onMac,
+  toggledMode,
+} from '../game/displayMode';
 import {
   loadPick,
   loadSetlist,
@@ -97,7 +108,6 @@ import { StageBackdrop } from './StageBackdrop';
 import type { SongActions } from './SongMenu';
 import { SongSheet } from './SongSheet';
 import { MetadataSheet } from './MetadataSheet';
-import { Toasts, useToasts } from './Toasts';
 import { PartyBoard, PartyScreen, type LastRun } from './PartyScreen';
 import { setMenuAvatars, setMenuRing } from '../render/aurora/menuStage';
 import type { Avatars } from '../render/stage/Stage';
@@ -112,6 +122,8 @@ import { serverSongs, sharedMeta } from '../net/serverSongs';
 import { identity } from '../net/identity';
 import { IdentityDialog } from './IdentityDialog';
 import { PARTY_MAX, type SharedSong, type WireChart } from '../net/protocol';
+import { notify } from './notify';
+import { Notifications } from './Notifications';
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { installUiSounds } from './uiSounds';
 
@@ -268,8 +280,6 @@ export function App() {
     setSettings(s);
     saveSettings(s);
   }, []);
-  const toasts = useToasts();
-  const { push: toast } = toasts;
 
   const setSetlist = useCallback((next: string[]) => {
     setSetlistState(next);
@@ -320,23 +330,40 @@ export function App() {
   if (settings.displayMode !== 'windowed') lastFullMode.current = settings.displayMode;
   useEffect(() => {
     const desktop = inDesktopApp();
+    const toggle = () => {
+      const s = settingsNow.current;
+      updateSettings({ ...s, displayMode: toggledMode(s.displayMode, lastFullMode.current) });
+    };
     const key = (e: KeyboardEvent) => {
       if (!isFullscreenToggle(e, desktop)) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       if (e.repeat) return;
-      if (desktop) {
-        const s = settingsNow.current;
-        updateSettings({ ...s, displayMode: toggledMode(s.displayMode, lastFullMode.current) });
-      } else if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+      if (desktop) toggle();
+      else if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
       else void document.documentElement.requestFullscreen?.().catch(() => {});
     };
     window.addEventListener('keydown', key, true);
-    return () => window.removeEventListener('keydown', key, true);
+    // On a Mac, the menu bar's Toggle Full Screen (Control+Command+F) does the same.
+    const stopMenu = onFullscreenShortcut(toggle);
+    // The system can change the mode by itself too (the green button): the setting follows.
+    const stopFollow = followDisplayMode((mode) => {
+      const s = settingsNow.current;
+      if (s.displayMode !== mode) updateSettings({ ...s, displayMode: mode });
+    });
+    return () => {
+      window.removeEventListener('keydown', key, true);
+      stopMenu();
+      stopFollow();
+    };
   }, [updateSettings]);
   // In Window mode the menus' background moves the window (see windowDrag). Not in a song or the
   // editor, where the mouse plays and edits.
   const windowed = inDesktopApp() && settings.displayMode === 'windowed';
+  // A Mac window shows its title bar buttons over the game (see .mac-titlebar).
+  useEffect(() => {
+    document.documentElement.classList.toggle('mac-titlebar', windowed && onMac());
+  }, [windowed]);
   useEffect(() => {
     if (!windowed) return;
     const press = (e: MouseEvent) => {
@@ -369,14 +396,14 @@ export function App() {
       setSongs(await listSongs());
     } catch (e) {
       setSongs([]);
-      toast(
+      notify.error(
         e instanceof StorageBlockedError
           ? e.message
           : 'Song storage is unavailable in this browser window. Imported songs will not be saved.',
       );
     }
     setLoaded((l) => (l.songs ? l : { ...l, songs: true }));
-  }, [toast]);
+  }, []);
   const refreshScores = useCallback(async () => {
     try {
       setScores(await listAllScores());
@@ -420,8 +447,8 @@ export function App() {
     const was = modelWas.current;
     modelWas.current = model.state;
     // The download itself shows in the progress bar of the song waiting for it; only a failure is news.
-    if (was !== model.state && model.state === 'error' && model.error) toast(model.error);
-  }, [model, toast]);
+    if (was !== model.state && model.state === 'error' && model.error) notify.error(model.error);
+  }, [model]);
 
   const analysisStatus = useSyncExternalStore(analysisManager.subscribe, analysisManager.snapshot);
   const status: Record<string, SongStatus> = analysisStatus;
@@ -523,7 +550,10 @@ export function App() {
   const importFiles = useCallback(
     async (files: File[]): Promise<SongMeta[]> => {
       const usable = files.filter((f) => isSoundwaveFile(f) || isAudioFile(f));
-      if (usable.length < files.length) toast(`Skipped ${files.length - usable.length} file(s) that are not audio or Soundwave songs.`);
+      const skipped = files.length - usable.length;
+      if (skipped === 1)
+        notify.warning(`Skipped ${files.find((f) => !usable.includes(f))!.name}: it is not an audio file or a Soundwave song.`);
+      else if (skipped > 1) notify.warning(`Skipped ${skipped} files that are not audio files or Soundwave songs.`);
       setImporting((n) => n + usable.length);
       const got: SongMeta[] = [];
       for (const f of usable) {
@@ -532,7 +562,7 @@ export function App() {
           const { meta } = song;
           const had = await getSong(meta.id);
           if (had) {
-            toast(`"${had.title}" is already in your library.`);
+            notify.info(`"${had.title}" is already in your library.`);
             got.push(had);
             continue;
           }
@@ -544,7 +574,7 @@ export function App() {
           playSfx('add');
           got.push(meta);
         } catch (e) {
-          toast(`Could not import ${f.name}: ${(e as Error).message}`);
+          notify.error(`Could not import ${f.name}: ${(e as Error).message}`);
         } finally {
           setImporting((n) => n - 1);
         }
@@ -552,7 +582,7 @@ export function App() {
       await refresh();
       return got;
     },
-    [refresh, toast],
+    [refresh],
   );
   // Song files the desktop app is opened with (double-clicked in Explorer) are added, and a single
   // one opens on its page.
@@ -572,10 +602,10 @@ export function App() {
     if (recovery)
       return void online.recover(recovery.server, recovery.code).then(
         () => {
-          toast(`Your account on ${online.snapshot().info?.name ?? 'the server'} is back, with this game’s identity.`);
+          notify.success(`Your account on ${online.snapshot().info?.name ?? 'the server'} is back, with this game’s identity.`);
           if (!['play', 'replay', 'export', 'editor'].includes(viewRef.current.name)) goOnline();
         },
-        (e: Error) => toast(e.message),
+        (e: Error) => notify.error(e.message),
       );
     const invite = parseInvite(text);
     if (!invite) return;
@@ -583,7 +613,7 @@ export function App() {
       () => {
         if (!['play', 'replay', 'export', 'editor'].includes(viewRef.current.name)) setView({ name: 'party' });
       },
-      (e: Error) => toast(e.message),
+      (e: Error) => notify.error(e.message),
     );
   };
   const invitesWatched = useRef(false);
@@ -610,16 +640,14 @@ export function App() {
       .catch(() => {});
     return () => stop();
   }, [booted]);
-  const exportSong = useCallback(
-    async (song: SongMeta) => {
-      try {
-        if (await saveSongFile(await songFile(song.id), soundwaveFileName(song))) toast(`Saved "${song.title}" as a Soundwave song file.`);
-      } catch (e) {
-        toast(`Could not export "${song.title}": ${(e as Error).message}`);
-      }
-    },
-    [toast],
-  );
+  const exportSong = useCallback(async (song: SongMeta) => {
+    try {
+      if (await saveSongFile(await songFile(song.id), soundwaveFileName(song)))
+        notify.success(`Saved "${song.title}" as a Soundwave song file.`);
+    } catch (e) {
+      notify.error(`Could not export "${song.title}": ${(e as Error).message}`);
+    }
+  }, []);
   const addSongs = useCallback(() => fileInput.current?.click(), []);
 
   /* The track editor ---------------------------------------------------------------------- */
@@ -711,9 +739,10 @@ export function App() {
   }, [takesDrops, importFiles]);
 
   const toggle = (song: SongMeta) => {
-    if (!setlist.includes(song.id) && !playable(song.id)) return toast('No notes were found in this song, so it cannot go in a set.');
+    if (!setlist.includes(song.id) && !playable(song.id))
+      return notify.warning('No notes were found in this song, so it cannot go in a set.');
     if (!setlist.includes(song.id) && setlist.length >= SET_MAX)
-      return toast(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
+      return notify.warning(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
     setSetlist(toggleSong(setlist, song.id));
   };
 
@@ -724,7 +753,7 @@ export function App() {
       const next = [...setlist];
       for (const song of list) if (next.length < SET_MAX && !next.includes(song.id) && playable(song.id)) next.push(song.id);
       if (next.length !== setlist.length) setSetlist(next);
-      if (list.some((song) => !next.includes(song.id))) toast(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
+      if (list.some((song) => !next.includes(song.id))) notify.warning(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
     },
     removeFromSet: (list) => setSetlist(setlist.filter((id) => !list.some((song) => song.id === id))),
     analyze: (list) => list.forEach((song) => analysisManager.enqueue(song.id, true)),
@@ -773,7 +802,7 @@ export function App() {
       setTimeout(() => setLaunch(null), 860);
     } catch (e) {
       setLaunch(null);
-      toast((e as Error).message);
+      notify.error((e as Error).message);
     }
   };
   const playAt = (run: Run, index: number, started = false) =>
@@ -797,14 +826,27 @@ export function App() {
   };
   // Videos are made in the menus and while a replay is watched, never beside a song or the editor.
   const holdVideos = view.name === 'play' || view.name === 'editor' || view.name === 'export';
+  // While a song or a replay is on screen, notifications stand along the top edge, clear of the
+  // highway and the score, and come without a sound or a pulse.
+  const songOnScreen = view.name === 'play' || view.name === 'replay' || view.name === 'export';
   useEffect(() => videoExports.hold(holdVideos), [holdVideos]);
+  // Analyzing waits the same way, so the stem model never shares the card with a song being played.
+  const holdAnalysis =
+    view.name === 'play'
+      ? 'Paused while you play'
+      : view.name === 'editor'
+        ? 'Paused while the editor is open'
+        : view.name === 'export'
+          ? 'Paused while the video is made'
+          : null;
+  useEffect(() => analysisHold.set(holdAnalysis), [holdAnalysis]);
   useEffect(
     () =>
       videoExports.onFinished((item) => {
-        if (item.state === 'saved') toast(`The video of ${item.title} is saved as ${item.fileName}.`);
-        else if (item.state === 'failed') toast(`The video of ${item.title} could not be exported: ${item.error}`);
+        if (item.state === 'saved') notify.success(`The video of ${item.title} is saved as ${item.fileName}.`);
+        else if (item.state === 'failed') notify.error(`The video of ${item.title} could not be exported: ${item.error}`);
       }),
-    [toast],
+    [],
   );
   /** The replay whose video is being set up (the export dialog is open). */
   const [exportAsk, setExportAsk] = useState<ReplayMeta | null>(null);
@@ -861,7 +903,7 @@ export function App() {
             playSfx('add');
           } catch (e) {
             await target.abort().catch(() => {});
-            toast(`The video could not be exported: ${(e as Error).message}`);
+            notify.error(`The video could not be exported: ${(e as Error).message}`);
           }
           return;
         }
@@ -872,7 +914,7 @@ export function App() {
           return { name: 'export', meta, data, buffer, video, plan, target, fileName, back, key: Date.now() };
         });
       })
-      .catch((e) => toast(`The video could not be saved: ${(e as Error).message}`));
+      .catch((e) => notify.error(`The video could not be saved: ${(e as Error).message}`));
   };
   const replayActions = {
     watch: watchReplay,
@@ -881,7 +923,7 @@ export function App() {
       try {
         await updateReplay(meta.id, { kept });
       } catch {
-        toast('The replay could not be changed: the library is unavailable.');
+        notify.error('The replay could not be changed: the library is unavailable.');
       }
       await refreshReplays();
     },
@@ -889,7 +931,7 @@ export function App() {
       try {
         await deleteReplays(list.map((r) => r.id));
       } catch {
-        toast('The replay could not be deleted: the library is unavailable.');
+        notify.error('The replay could not be deleted: the library is unavailable.');
       }
       await refreshReplays();
     },
@@ -932,7 +974,7 @@ export function App() {
       });
       if (!entries.length) {
         setLaunch(null);
-        return toast('No notes were found in these songs at this difficulty.');
+        return notify.warning('No notes were found in these songs at this difficulty.');
       }
       await playAt(
         {
@@ -949,7 +991,7 @@ export function App() {
       );
     } catch (e) {
       setLaunch(null);
-      toast((e as Error).message);
+      notify.error((e as Error).message);
     }
   };
 
@@ -1010,7 +1052,7 @@ export function App() {
       );
       await refreshReplays();
     } catch {
-      toast('This replay could not be saved: the library is out of room or unavailable.');
+      notify.error('This replay could not be saved: the library is out of room or unavailable.');
     }
   };
 
@@ -1063,9 +1105,9 @@ export function App() {
           fullCombo: results.fullCombo,
         },
       });
-      if (r.best && r.rank) toast(`Number ${r.rank} on ${online.snapshot().info?.name ?? 'the server'}’s board for this chart.`);
+      if (r.best && r.rank) notify.success(`Number ${r.rank} on ${online.snapshot().info?.name ?? 'the server'}’s board for this chart.`);
     } catch (e) {
-      toast(`Your score did not reach the server: ${(e as Error).message}`);
+      notify.error(`Your score did not reach the server: ${(e as Error).message}`);
     }
   };
 
@@ -1137,7 +1179,7 @@ export function App() {
     if (!party || !song) return;
     if (!byId.has(song.id)) await serverSongs.ensure([song.id]);
     if (!(byId.has(song.id) && canPlay(analysisStatus[song.id])) && !serverSongs.snapshot().held[song.id] && !partySongs.songs()[song.id])
-      return toast(`You need "${song.title}" in your library, with notes, to start it: everyone plays your charts.`);
+      return notify.warning(`You need "${song.title}" in your library, with notes, to start it: everyone plays your charts.`);
     try {
       const made = new Map<string, Chart | null>();
       const chartFor = async (p: Part, d: Pick['difficulty']) => {
@@ -1162,12 +1204,12 @@ export function App() {
           break;
         }
       }
-      if (!Object.keys(assign).length) return toast(`No notes were found in "${song.title}" at the difficulties picked.`);
+      if (!Object.keys(assign).length) return notify.warning(`No notes were found in "${song.title}" at the difficulties picked.`);
       playSfx('launch');
       menuPulse('launch');
       online.start(index, charts, assign);
     } catch (e) {
-      toast((e as Error).message);
+      notify.error((e as Error).message);
     }
   };
 
@@ -1186,7 +1228,7 @@ export function App() {
     const busy = !stale && ['play', 'replay', 'export', 'editor'].includes(v.name);
     if (!meta || !chart || busy) {
       online.quit(start.songIndex);
-      return toast(
+      return notify.warning(
         busy
           ? `The party started "${song.title}" while you were busy here, so you sit it out. You can join the next song.`
           : `"${song.title}" could not be played here, so you sit it out.`,
@@ -1222,7 +1264,7 @@ export function App() {
     const party = online.snapshot().party;
     if (party) setView({ name: 'party' });
     else goOnline();
-    toast(party ? 'The party moved on without you, so you are back with it.' : 'The party is over.');
+    notify.info(party ? 'The party moved on without you, so you are back with it.' : 'The party is over.');
   };
   useEffect(() => {
     if (!playingParty || onlineState.status !== 'online') return;
@@ -1292,9 +1334,9 @@ export function App() {
     void serverSongs.share(
       songs.filter((x) => canPlay(analysisStatus[x.id])),
       (id) => songFile(id),
-      (message) => toast(`Your songs could not all be shared: ${message}`),
+      (message) => notify.error(`Your songs could not all be shared: ${message}`),
     );
-  }, [serverSharing, settings.shareLibrary, server.ready, songs, analysisStatus, toast]);
+  }, [serverSharing, settings.shareLibrary, server.ready, songs, analysisStatus]);
   const origin = (song: SharedSong) => ({ url: serverSongs.url ?? '', uid: song.uid, hash: song.hash });
   // The server is the single point of truth for songs downloaded from it: one whose copy there
   // changed (its hash) takes the server's details over.
@@ -1328,10 +1370,10 @@ export function App() {
         // It remembers where it came from, so it follows the server's copy from now on.
         await updateSongMeta(got[0].id, { title: got[0].title, artist: got[0].artist, album: got[0].album, server: origin(song) });
         await refresh();
-        toast(`"${got[0].title}" is in your library.`);
+        notify.info(`"${got[0].title}" is in your library.`);
         return;
       }
-      if (setlistRef.current.length >= SET_MAX) return toast(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
+      if (setlistRef.current.length >= SET_MAX) return notify.warning(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
       // In the setlist at once; it comes in the background, its progress on it.
       setSetlist([...setlistRef.current, song.id]);
       await serverSongs.stream(song).catch((e: Error) => {
@@ -1339,7 +1381,7 @@ export function App() {
         throw new Error(`"${song.title}" could not be streamed: ${e.message}`);
       });
     } catch (e) {
-      toast((e as Error).message);
+      notify.error((e as Error).message);
     }
   };
   /**
@@ -1381,7 +1423,7 @@ export function App() {
   partyAdd.current = async (file) => {
     const got = await importFiles([file]);
     if (!got.length) throw new Error(`"${file.name.replace(/\.soundwave$/, '')}" could not be added.`);
-    toast(`"${got[0].title}" is in your library.`);
+    notify.success(`"${got[0].title}" is in your library.`);
   };
   useEffect(() => {
     partySongs.update({
@@ -1549,7 +1591,8 @@ export function App() {
     if (!song || run.charts[index]?.part === part) return;
     try {
       const chart = await analysisManager.chart(song.id, part, run.pick.difficulty);
-      if (!chart || chart.notes.length === 0) return toast(`No ${PART_LABEL[part].toLowerCase()} notes were found in ${song.title}.`);
+      if (!chart || chart.notes.length === 0)
+        return notify.warning(`No ${PART_LABEL[part].toLowerCase()} notes were found in ${song.title}.`);
       const charts = [...run.charts];
       charts[index] = chart;
       // Still on this screen (the player may have moved on while the chart was fetched).
@@ -1557,7 +1600,7 @@ export function App() {
         v.name === 'results' && v.run.songs === run.songs && v.run.index === run.index ? { ...v, run: { ...v.run, charts } } : v,
       );
     } catch (e) {
-      toast((e as Error).message);
+      notify.error((e as Error).message);
     }
   };
 
@@ -1582,7 +1625,7 @@ export function App() {
     () =>
       onDiscordJoin((secret) => {
         const party = parseJoinSecret(secret);
-        if (!party) return toastRef.current('Discord sent a party this game cannot read. Update Soundwave, or join with the party’s code.');
+        if (!party) return notify.error('Discord sent a party this game cannot read. Update Soundwave, or join with the party’s code.');
         // The party screen opens once the party is there (signing in to its server may come first).
         joiningRef.current = party.code;
         online.joinFrom(party.server, party.code);
@@ -1591,8 +1634,6 @@ export function App() {
       }),
     [],
   );
-  const toastRef = useRef(toast);
-  toastRef.current = toast;
   // A party joined from Discord: its lobby opens as soon as the server has let this player in.
   const joiningRef = useRef<string | null>(null);
   useEffect(() => {
@@ -1617,9 +1658,9 @@ export function App() {
   const answerAsk = (ask: JoinRequest, accept: boolean) => {
     setJoinAsks((asks) => asks.filter((a) => a.id !== ask.id));
     void answerDiscordJoin(ask.id, accept && joinableRef.current).then(
-      () => accept && toast(`${ask.name} is on their way. Their game opens and joins your party.`),
+      () => accept && notify.success(`${ask.name} is on their way. Their game opens and joins your party.`),
       (e: Error) => {
-        toast(`${ask.name} could not be let in: ${e.message}`);
+        notify.error(`${ask.name} could not be let in: ${e.message}`);
         // Letting them in failed: the ask stays, to try again.
         if (accept) setJoinAsks((asks) => (asks.some((a) => a.id === ask.id) ? asks : [ask, ...asks]));
       },
@@ -1944,7 +1985,6 @@ export function App() {
             onAnalyze: (song) => analysisManager.enqueue(song.id, true),
             onScratch: startFromScratch,
             onOpen: (song) => setView({ name: 'editor', song, back: view }),
-            toast,
           }}
           replays={replays}
           replayActions={replayActions}
@@ -2011,7 +2051,7 @@ export function App() {
           )}
         </Dialog>
       )}
-      {backingUp && <IdentityDialog kind="export" onClose={() => setBackingUp(false)} onDone={(m) => toast(m)} />}
+      {backingUp && <IdentityDialog kind="export" onClose={() => setBackingUp(false)} onDone={(m) => notify.success(m)} />}
       {metaSong && (
         <MetadataSheet
           song={byId.get(metaSong.id) ?? metaSong}
@@ -2150,7 +2190,12 @@ export function App() {
           <span />
         </div>
       )}
-      <Toasts items={toasts.items} onDismiss={toasts.dismiss} />
+      <Notifications
+        settings={settings}
+        place={songOnScreen ? 'top' : 'bar'}
+        quiet={songOnScreen}
+        shortcut={!songOnScreen && view.name !== 'editor'}
+      />
       <input
         ref={fileInput}
         type="file"

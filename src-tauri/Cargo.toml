@@ -1,12 +1,12 @@
 [package]
 name = "soundwave"
-version = "1.3.3"
+version = "1.5.1"
 description = "Rhythm game that charts your own songs"
 authors = []
 license = "Apache-2.0"
 repository = "https://github.com/DavidNiessen/soundwave"
 edition = "2024"
-rust-version = "1.90"
+rust-version = "1.92"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -27,7 +27,9 @@ tauri-plugin-dialog = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-deep-link = "2"
 cpal = "0.16"
-hidapi = "2"
+# Shared on macOS: by default hidapi seizes a device there, and the web view would stop
+# seeing the controller it reads the touchpad and sets the light bar of.
+hidapi = { version = "2", features = ["macos-shared-device"] }
 discord-rich-presence = "1.1"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
@@ -37,6 +39,11 @@ tauri-plugin-updater = "2"
 # The player's identity is kept in the system's store for secrets (src/identity.rs; a file on Linux).
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]
 keyring = { version = "3.6", features = ["apple-native", "windows-native"] }
+
+# The analysis models, run by the app itself on Apple silicon, with Core ML (models.rs). The prebuilt
+# library is fetched when the app is built. (Its Linux build needs a newer glibc than Ubuntu 22.04's.)
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "download-binaries", "tls-rustls", "copy-dylibs", "api-31", "coreml"] }
 
 # The Windows webview's own settings (browser shortcuts off in release builds: see lib.rs).
 [target.'cfg(windows)'.dependencies]

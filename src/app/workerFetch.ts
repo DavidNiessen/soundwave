@@ -14,7 +14,7 @@ interface Ask {
   type: typeof TYPE;
   id: number;
   url: string;
-  init?: { method?: string; headers?: [string, string][] };
+  init?: { method?: string; headers?: [string, string][]; body?: ArrayBuffer };
 }
 
 interface Answer {
@@ -31,17 +31,19 @@ export const fetchesThroughPage = (protocol = globalThis.location?.protocol ?? '
  * In the worker: sends its fetches to the page, when it needs to. `post` sends a message to the
  * page; the returned function takes the page's messages, and says whether one was an answer.
  */
-export function proxyWorkerFetch(post: (m: Ask) => void): (data: unknown) => boolean {
+export function proxyWorkerFetch(post: (m: Ask, transfer: Transferable[]) => void): (data: unknown) => boolean {
   if (!fetchesThroughPage()) return () => false;
   let next = 1;
   const waiting = new Map<number, { resolve(r: Response): void; reject(e: Error): void }>();
-  globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, globalThis.location.href).href;
     const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+    // A body (the app's model runs send one) goes along as bytes, handed over rather than copied.
+    const body = init?.body != null ? await new Response(init.body).arrayBuffer() : undefined;
     const id = next++;
     return new Promise<Response>((resolve, reject) => {
       waiting.set(id, { resolve, reject });
-      post({ type: TYPE, id, url, init: { method: init?.method ?? 'GET', headers: [...headers.entries()] } });
+      post({ type: TYPE, id, url, init: { method: init?.method ?? 'GET', headers: [...headers.entries()], body } }, body ? [body] : []);
     });
   };
   return (data: unknown) => {
@@ -59,7 +61,7 @@ export function proxyWorkerFetch(post: (m: Ask) => void): (data: unknown) => boo
 export function serveWorkerFetch(worker: Pick<Worker, 'postMessage'>, data: unknown, get: typeof fetch = fetch): boolean {
   const ask = data as Ask | null;
   if (!ask || ask.type !== TYPE) return false;
-  void get(ask.url, { method: ask.init?.method, headers: ask.init?.headers }).then(
+  void get(ask.url, { method: ask.init?.method, headers: ask.init?.headers, body: ask.init?.body }).then(
     async (r) => {
       const body = await r.arrayBuffer();
       const answer: Answer = {

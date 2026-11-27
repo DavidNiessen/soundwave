@@ -274,3 +274,77 @@ describe('drum chords below expert', () => {
     }
   });
 });
+
+describe('holds at any tempo', () => {
+  /** A bass note on every beat, each sounding for `share` of the beat, at `bpm`. */
+  const quarters = (bpm: number, share: number): AnalysisResult => {
+    const a = fakeAnalysis();
+    const spb = 60 / bpm;
+    a.tempo = bpm;
+    a.beats = Array.from({ length: 200 }, (_, i) => 1 + i * spb);
+    a.downbeats = a.beats.map((_, i) => i).filter((i) => i % 4 === 0);
+    a.duration = 1 + 200 * spb;
+    a.bass = a.beats.map((t, i) => ({ t, dur: spb * share, midi: 40 + (i % 4) * 2, strength: 0.7 }));
+    return a;
+  };
+  const held = (a: AnalysisResult) => {
+    const notes = generateChart(a, 'bass', 'expert', 's').notes;
+    return notes.filter((n) => n.dur > 0).length / notes.length;
+  };
+
+  it('holds notes of most of a beat at 120 BPM', () => {
+    expect(held(quarters(120, 0.7))).toBeGreaterThan(0.8);
+  });
+
+  it('does not make every note of a fast song a hold', () => {
+    // At 180 BPM the same share of a beat is under a quarter of a second.
+    expect(held(quarters(180, 0.7))).toBe(0);
+    // A note held as long in time as at 120 BPM still is a hold.
+    expect(held(quarters(180, 1.05))).toBeGreaterThan(0.8);
+  });
+});
+
+describe('easy drums', () => {
+  /** A hi-hat on every eighth, and a kick and snare in only some bars. */
+  const kit = (kickAndSnare: (bar: number) => boolean): AnalysisResult => {
+    const a = fakeAnalysis();
+    a.drums = a.beats.flatMap((t, i) => [
+      { t, kind: 'hat' as const, strength: 0.7 },
+      { t: t + 0.25, kind: 'hat' as const, strength: 0.5 },
+      ...(kickAndSnare(Math.floor(i / 4)) ? [{ t, kind: (i % 2 ? 'snare' : 'kick') as 'snare' | 'kick', strength: 0.9 }] : []),
+    ]);
+    return a;
+  };
+  const perBar = (a: AnalysisResult) => {
+    const c = generateChart(a, 'drums', 'easy', 's');
+    return c.notes.length / c.downbeats.length;
+  };
+
+  it('keeps a groove carried by the hi-hat', () => {
+    // Kick and snare only every fourth bar: the hats are the rhythm, and easy still plays it.
+    expect(perBar(kit((bar) => bar % 4 === 0))).toBeGreaterThan(1.5);
+  });
+
+  it('leaves the hats out where kick and snare play', () => {
+    const a = kit(() => true);
+    const c = generateChart(a, 'drums', 'easy', 's');
+    const hatLane = c.notes.filter((n) => n.lane === 3).length;
+    expect(hatLane).toBe(0);
+    expect(perBar(a)).toBeGreaterThan(1.5);
+  });
+});
+
+describe('bars of three', () => {
+  it('keep three quarters of a bar of four on the difficulties that thin out', () => {
+    const a = fakeAnalysis();
+    a.downbeats = a.beats.map((_, i) => i).filter((i) => i % 3 === 0);
+    for (const d of ['easy', 'medium', 'hard'] as const) {
+      const c = generateChart(a, 'lead', d, 's');
+      const bars = new Map<number, Set<number>>();
+      const bar = (t: number) => a.downbeats.filter((i) => a.beats[i] <= t + 1e-3).length;
+      for (const n of c.notes) bars.set(bar(n.t), (bars.get(bar(n.t)) ?? new Set()).add(n.t));
+      const most = Math.max(...[...bars.values()].map((s) => s.size));
+      expect(most).toBeLessThanOrEqual(Math.max(1, Math.round((PROFILES[d].maxPerBar * 3) / 4)));
+    }
+  });
+});

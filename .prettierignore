@@ -13,3 +13,7 @@ local-audio/
 *.min.js
 *.wxs
 *.nsh
+
+# Written by the Readme Studio workflow and the studio export
+README.md
+readme.config.json

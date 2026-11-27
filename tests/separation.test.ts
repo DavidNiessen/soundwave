@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { MODEL_STEMS, separate, type SegmentModel } from '../src/analysis/separation/separate';
+import {
+  joinParts,
+  MODEL_STEMS,
+  pairOutput,
+  segmentOffsets,
+  separate,
+  separatePart,
+  type SegmentModel,
+  type StemPart,
+} from '../src/analysis/separation/separate';
 import { addInverse, addInversePair, BINS, FRAMES, SEGMENT, spectrogram } from '../src/analysis/separation/stft';
+import { HELPERS, separateWithHelpers, serveHelper, type PairModel } from '../src/analysis/separation/transform';
 
 const PLANE = BINS * FRAMES;
 const tone = (i: number) => Math.fround(Math.sin(0.01 * i) + 0.5 * Math.sin(0.37 * i + 1));
@@ -109,6 +119,70 @@ describe('separating a song', () => {
     }
     expect(worst).toBeLessThan(0.02);
   }, 120_000);
+
+  it('runs no segment after the first one that reaches the end of the song', () => {
+    const stride = Math.floor(0.75 * SEGMENT);
+    expect(segmentOffsets(0)).toEqual([]);
+    expect(segmentOffsets(SEGMENT)).toEqual([0]);
+    // The second segment already ends past the song: Demucs would start a third, nearly all silence.
+    expect(segmentOffsets(2 * stride + 1000)).toEqual([0, stride]);
+    expect(segmentOffsets(stride + SEGMENT + 1)).toEqual([0, stride, 2 * stride]);
+  });
+
+  it('gives the same stems when the song is separated in runs of a few segments', async () => {
+    const length = Math.round(SEGMENT * 4.3);
+    const l = Float32Array.from({ length }, (_, i) => 0.3 * tone(i));
+    const r = Float32Array.from({ length }, (_, i) => 0.2 * tone(i * 3));
+    const whole = await separate(l, r, quarter);
+    const count = segmentOffsets(length).length;
+    const parts: StemPart[] = [];
+    for (let first = 0; first < count; first += 2) parts.push(await separatePart(l, r, quarter, first, Math.min(2, count - first)));
+    const joined = joinParts(l, r, parts);
+    let worst = 0;
+    for (let s = 0; s < 4; s++) for (let i = 0; i < length; i += 31) worst = Math.max(worst, Math.abs(joined[s][i] - whole[s][i]));
+    expect(worst).toBeLessThan(1e-6);
+  }, 120_000);
+
+  it('gives exactly the same stems when helpers do the work around the model', async () => {
+    let seed = 3;
+    const noise = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) * 2 - 1;
+    const length = Math.round(SEGMENT * 3.3);
+    const l = Float32Array.from({ length }, () => noise() * 0.3);
+    const r = Float32Array.from({ length }, () => noise() * 0.3);
+    // A stand-in whose output differs from stem to stem and channel to channel.
+    const model: SegmentModel = {
+      async run(x, xt) {
+        const out = new Float32Array(16 * PLANE);
+        for (let i = 0; i < out.length; i++) out[i] = x[i % x.length] * ((i % 7) - 3) * 0.1;
+        const wave = new Float32Array(8 * SEGMENT);
+        for (let i = 0; i < wave.length; i++) wave[i] = xt[i % xt.length] * ((i % 5) - 2) * 0.2;
+        return { x: out, xt: wave };
+      },
+    };
+    const alone = await separate(l, r, model);
+    const pairs: PairModel = async (x, xt, outs) => {
+      const whole = await model.run(x, xt);
+      // Read back later, as the graphics card does.
+      return async () =>
+        outs.forEach((o, p) => {
+          const share = pairOutput(whole, p);
+          o.x.set(share.x);
+          o.xt.set(share.xt);
+        });
+    };
+    const ports = Array.from({ length: HELPERS }, () => {
+      const channel = new MessageChannel();
+      serveHelper(channel.port1);
+      return channel.port2;
+    });
+    const count = segmentOffsets(length).length;
+    const seen: number[] = [];
+    const part = await separateWithHelpers(l.slice(), r.slice(), pairs, 0, count, ports, (p) => seen.push(p));
+    const helped = joinParts(l, r, [part]);
+    for (let s = 0; s < 4; s++) expect(Buffer.from(helped[s].buffer).equals(Buffer.from(alone[s].buffer))).toBe(true);
+    expect(seen).toHaveLength(count);
+    expect(seen[seen.length - 1]).toBe(1);
+  });
 
   it('stops when the analysis is cancelled', async () => {
     const l = new Float32Array(SEGMENT);

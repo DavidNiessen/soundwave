@@ -3,6 +3,10 @@ mod browser;
 mod discord;
 mod haptics;
 mod identity;
+mod lightbar;
+#[cfg(target_os = "macos")]
+mod mac_menu;
+mod models;
 mod song_files;
 mod touchpad;
 
@@ -67,6 +71,24 @@ pub fn run() {
             .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(tauri_plugin_process::init());
     }
+    // The menu bar's full-screen item goes through the game's display mode (mac_menu.rs).
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .menu(mac_menu::build)
+            .on_menu_event(|app, event| mac_menu::on_event(app, event.id().as_ref()))
+            // WebKit ends the page's process when it uses far more memory than the system allows,
+            // and on a crash. The game then starts again where it begins, instead of a blank window.
+            .on_web_content_process_terminate(|webview| {
+                log::warn!("the page's process ended; loading the game again");
+                if let Ok(mut url) = webview.url() {
+                    url.set_path("/");
+                    url.set_query(None);
+                    url.set_fragment(None);
+                    let _ = webview.navigate(url);
+                }
+            });
+    }
     builder
         .plugin(tauri_plugin_dialog::init())
         // The game's sound, streamed from the page and played by this process (audio_out.rs).
@@ -74,14 +96,28 @@ pub fn run() {
             let audio = ctx.app_handle().state::<audio_out::NativeAudio>();
             responder.respond(audio_out::handle(&audio, &request));
         })
+        // The analysis models, run by the app (models.rs).
+        .register_asynchronous_uri_scheme_protocol("swmodel", |ctx, request, responder| {
+            let app = ctx.app_handle();
+            let dir = app
+                .path()
+                .app_cache_dir()
+                .unwrap_or_else(|_| std::env::temp_dir().join("soundwave"))
+                .join("models");
+            let models = app.state::<std::sync::Arc<models::NativeModels>>();
+            models.handle(dir, request, responder);
+        })
+        .manage(std::sync::Arc::new(models::NativeModels::default()))
         .manage(audio_out::NativeAudio::default())
         .manage(discord::Discord::default())
         .manage(haptics::Haptics::default())
         .manage(touchpad::Touchpad::default())
+        .manage(lightbar::Lightbar::default())
         .manage(song_files::Opened::default())
         .manage(song_files::Saving::default())
         .invoke_handler(tauri::generate_handler![
             exit_app,
+            models::models_available,
             audio_out::audio_devices,
             audio_out::audio_set_device,
             discord::discord_presence,
@@ -94,6 +130,8 @@ pub fn run() {
             haptics::haptics_play,
             haptics::haptics_update,
             haptics::haptics_release,
+            lightbar::lightbar_set,
+            lightbar::lightbar_pads,
             touchpad::touchpad_watch,
             touchpad::touchpad_finger,
             song_files::take_opened_files,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { AnalysisHold } from '../src/analysis/hold';
 import { AnalysisManager, DIED, type Assist, type LocalAnalyzer } from '../src/analysis/manager';
 import type { StemAnalyzer } from '../src/analysis/separation/analyzer';
 import { ANALYSIS_VERSION, type AnalysisResult } from '../src/analysis/types';
@@ -122,6 +123,67 @@ describe('AnalysisManager', () => {
     for (let i = 1; i < seen.length; i++) expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1]);
     expect(seen[0]).toBeCloseTo(0.2);
     expect(seen[seen.length - 1]).toBeLessThan(1);
+  });
+
+  it('begins on the mix while the song is separated, and lets go of it when separating fails', async () => {
+    const wav = () => new ArrayBuffer(8);
+    const events: string[] = [];
+    const local: LocalAnalyzer = Object.assign(
+      (id: string) => {
+        events.push(`analyze ${id}`);
+        return Promise.resolve(result());
+      },
+      {
+        begin(id: string) {
+          events.push(`begin ${id}`);
+          return () => events.push(`let go ${id}`);
+        },
+      },
+    );
+    const m = new AnalysisManager(local, async (id) => {
+      events.push(`separate ${id}`);
+      if (id === 'broken') throw new Error('The song could not be separated into stems.');
+      return { stems: { drums: wav(), bass: wav(), vocals: wav(), other: wav() }, notes: { bass: [], vocals: [], other: [] } };
+    });
+    m.enqueue('song');
+    m.enqueue('broken');
+    for (let i = 0; i < 10 && m.snapshot().broken?.state !== 'error'; i++) await tick();
+    expect(events).toEqual(['begin song', 'separate song', 'analyze song', 'begin broken', 'separate broken', 'let go broken']);
+  });
+
+  it('waits while it is held: no song starts, and one under way waits after its stems', async () => {
+    const wav = () => new ArrayBuffer(8);
+    const hold = new AnalysisHold();
+    const events: string[] = [];
+    let separated: () => void = () => {};
+    const m = new AnalysisManager(
+      async (id) => (events.push(`analyze ${id}`), result()),
+      (id) =>
+        new Promise((resolve) => {
+          events.push(`separate ${id}`);
+          separated = () =>
+            resolve({ stems: { drums: wav(), bass: wav(), vocals: wav(), other: wav() }, notes: { bass: [], vocals: [], other: [] } });
+        }),
+      { olderAnalyses: async () => [], canAnalyze: async () => true, hold },
+    );
+    hold.set('Paused while you play');
+    m.enqueue('first');
+    for (let i = 0; i < 5; i++) await tick();
+    expect(events).toEqual([]);
+    expect(m.snapshot().first?.state).toBe('queued');
+    hold.set(null);
+    for (let i = 0; i < 5; i++) await tick();
+    expect(events).toEqual(['separate first']);
+    // Held again while it separates: the rest of its analysis waits, and the bar says why.
+    hold.set('Paused while you play');
+    separated();
+    for (let i = 0; i < 5; i++) await tick();
+    expect(events).toEqual(['separate first']);
+    expect(m.snapshot().first?.step).toBe('Paused while you play');
+    hold.set(null);
+    for (let i = 0; i < 10 && m.snapshot().first?.state !== 'ready'; i++) await tick();
+    expect(events).toEqual(['separate first', 'analyze first']);
+    expect(m.snapshot().first?.state).toBe('ready');
   });
 
   it('does not chart a song it could not separate', async () => {

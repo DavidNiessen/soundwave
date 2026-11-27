@@ -10,6 +10,7 @@ import { ReplayPlayback, ReplayRecorder, replayResults, showdownMarks, type Repl
 import { feedbackFor, ShowPulse } from './showPulse';
 import { FINALE_SECONDS, REPLAY_START } from './timing';
 import { BufferAnalyser } from '../audio/bufferAnalyser';
+import { LightShow } from '../input/lightbar';
 import { Rumbler } from '../input/rumble';
 import { barsLeft, findBreaks, highwayAway, interludes, type Break } from './breaks';
 import { GamepadInput, KeyboardInput, TouchInput, type InputHandlers } from './input';
@@ -120,6 +121,8 @@ export class PlayController {
   private readonly touchInput: TouchInput | null = null;
   private readonly observer: ResizeObserver;
   private readonly rumble: Rumbler;
+  /** The PlayStation controller's light bar; none while a replay is watched. */
+  private readonly light: LightShow | null;
   private raf = 0;
   private phase: PlayPhase = 'countdown';
   /** When the latest beat landed (performance.now ms), for the highway's swell of light. */
@@ -290,6 +293,7 @@ export class PlayController {
     const padBindings = chart.lanes === 5 ? settings.pad5 : settings.pad4;
     // A replay is watched, not played: the controller stays still.
     this.rumble = new Rumbler(this.rumbleSettings(settings), chart.lanes, padBindings);
+    this.light = this.playback ? null : new LightShow(settings);
     this.wire();
 
     // The canvas changes size with the window and when the touch pads take the bottom of the screen.
@@ -304,6 +308,11 @@ export class PlayController {
     const keys = chart.lanes === 5 ? settings.keys5 : settings.keys4;
     const handlers: InputHandlers = {
       press: (lane, ts) => {
+        // The light flashes for every press, a note there or not, from the countdown on (not under
+        // the menu a party song's pause opens over the live song).
+        if ((this.phase === 'playing' || this.phase === 'countdown') && !this.menu) {
+          this.light?.press(lane, this.clock);
+        }
         if (this.phase !== 'playing' || this.menu) return;
         recorder.press(lane, this.engine.time(ts));
       },
@@ -543,6 +552,7 @@ export class PlayController {
     this.engine.volume = s.volume;
     this.highway.speed = highwaySpeed(s.trackSpeed);
     this.rumble.update(this.rumbleSettings(s));
+    this.light?.update(s);
     const key = JSON.stringify(resolveGraphics(s.graphics));
     const venue = stageVenue(s.stage);
     if (key === this.graphicsKey && venue === this.venue) return;
@@ -794,6 +804,12 @@ export class PlayController {
     const f = this.show.frame(t, now, this.session.overdriveActive, !!this.stage);
     if (this.phase === 'playing' && this.session.overdriveActive)
       this.rumble.overdriveTick(this.session.overdrive / this.odMeterAtStart, f.beat);
+    this.light?.frame(
+      now,
+      multiplierFor(this.session.streak) >= MAX_MULTIPLIER,
+      this.session.overdriveActive,
+      this.phase === 'playing' && f.beat !== 'none',
+    );
     return f;
   }
 
@@ -978,6 +994,7 @@ export class PlayController {
     this.input?.dispose();
     this.padInput?.dispose();
     this.rumble.dispose();
+    this.light?.dispose();
     this.engine.stop();
     this.engine.onEnded = null;
     this.highway.dispose();

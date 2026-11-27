@@ -374,11 +374,11 @@ components:
   cover:
     backgroundColor: '{colors.deep}'
     rounded: '{rounded.s}'
-  toast:
-    backgroundColor: '#4a1a52'
+  notification:
+    backgroundColor: '{colors.panel-solid}'
     textColor: '{colors.ink}'
     rounded: '{rounded.m}'
-    padding: '0.8rem 1rem'
+    padding: '0.6rem 0.6rem 0.65rem 0.7rem'
   hud-panel:
     backgroundColor: 'rgb(16 9 50 / 0.76)'
     textColor: '{colors.ink}'
@@ -431,7 +431,7 @@ A violet night with four lights that have fixed jobs, and five lane colours that
 ### Primary
 
 - **Hot Pink** (pink): the one forward action on a screen or dialog: Ready up in the library's action bar, the hold-to-start button, Add to setlist in the song sheet, Resume on pause, Next song and Done on results. Also anything that is sounding or listening right now: the mark on the song whose preview plays, a key binding while it waits for a press, the calibration dot on the beat. And progress through audio: the HUD's song progress bar and the played part of the editor's waveform. It glows behind the wordmark and the countdown numbers, fills the "New best" tag and is the first sheet of the launch wipe. Text on pink is **Pink Ink** (pink-ink), never white.
-- **Pink Light** (pink-2): the hover state of a pink button, the set position in the HUD title ("2/4"), the toast icon and the dashed outline of the file-drop target.
+- **Pink Light** (pink-2): the hover state of a pink button, the set position in the HUD title ("2/4") and the dashed outline of the file-drop target.
 
 ### Secondary
 
@@ -535,14 +535,14 @@ On touch the lanes themselves are the controls. The deck runs to the foot of the
 
 ## Elevation & Depth
 
-Depth comes from layers of night, not from shadows. From back to front: the indigo ground with a violet glow rising from below, the live stage, a veil that darkens it (thinner on Ready up, Results and the summary so the stage shows more), then the panels. Panels are flat violet sheets with no border and no shadow at rest; they separate from the night by fill alone, and rows and wells separate from panels the same way. (The direction called for a lit top edge on panels; the build does not draw one.) The few shadows mark things that sit above a screen: the focus ring's glow, the selection sheet, dialogs and toasts. Overlays dim the screen to 74% and blur it 8px.
+Depth comes from layers of night, not from shadows. From back to front: the indigo ground with a violet glow rising from below, the live stage, a veil that darkens it (thinner on Ready up, Results and the summary so the stage shows more), then the panels. Panels are flat violet sheets with no border and no shadow at rest; they separate from the night by fill alone, and rows and wells separate from panels the same way. (The direction called for a lit top edge on panels; the build does not draw one.) The few shadows mark things that sit above a screen: the focus ring's glow, the selection sheet, dialogs and notifications. Overlays dim the screen to 74% and blur it 8px.
 
 ### Shadow Vocabulary
 
 - **Ring glow** (`outline: 3px solid var(--mint); outline-offset: 3px; box-shadow: 0 12px 28px -4px rgb(93 242 214 / 0.42)`): the travelling focus ring.
 - **Selection sheet** (`box-shadow: 0 8px 18px -8px rgb(0 0 0 / 0.6)`): under the lavender selection.
 - **Dialog** (`box-shadow: 0 30px 60px -20px rgb(0 0 0 / 0.7)`): sheets and cards over the dimmed screen.
-- **Toast** (`box-shadow: 0 16px 30px -14px rgb(0 0 0 / 0.8)`).
+- **Notification** (`box-shadow: 0 18px 34px -16px rgb(0 0 0 / 0.85)`).
 - **Lane underline** (`box-shadow: inset 0 -3px 0 var(--lane)`, 4px on settings caps): the lane colour of a bound key. The same inset in gold marks a full combo in the best-scores table.
 - **Text glow** (wordmark `0 0.08em 0.5em rgb(255 77 157 / 0.55)`, countdown `0 0 40px var(--pink)`): the only glows in the menus.
 - **Gameplay glow** (`0 0 14px` to `0 0 26px` in Overdrive Ice; `drop-shadow(0 0 8px)` on the break ring): the overdrive meter when ready or active, and the break ring.
@@ -636,9 +636,18 @@ Pills and tags are small uppercase labels (0.85rem, 0.45rem radius): a neutral l
 
 A dialog dims and blurs the screen, takes focus and directional navigation (a control that focus moves to keeps 1.2rem clear of the dialog's edge, and a move up or down with no control further that way scrolls the panel on, so what lies past the last control can be read), keeps Tab inside, and closes on Esc, the controller's back button, its round close button or a press outside; focus returns where it was. The **sheet** variant sits at the right edge on wide screens and rises from the foot on phones. The **card** variant is centred (pause, calibration). Calibration shows a 9rem round pad with a dot that turns pink on every other click, and a tap count.
 
-### Toasts
+### Notifications
 
-Plum cards (#4a1a52, 0.75rem radius) with a Pink Light alert icon, stacked at the bottom right above the action bar (full width on phones), rising in over 0.35s, dismissed on press or after 6s. Each one plays the error sound and an error pulse.
+Short news that comes and goes by itself (`ui/notify.ts` raises them, `ui/Notifications.tsx` shows them). Each is a Solid Panel card (0.75rem radius, the glass edge and blur, the notification shadow) with a round icon on a wash of its tone's colour, the message in body type, a close mark (the Dismiss a notification key on the newest one for a keyboard, Z by default) and a 2px line along its foot in the tone's colour that runs out with the time it has left. A faint wash of the tone lights the card from the left. The tone says what kind of news it is, and never trades places:
+
+- **Error** (soft pink-red #ffa3b4, a circled cross): something the player asked for failed. The error sound and pulse. Stays 8s.
+- **Warning** (soft amber #ffc98a, a triangle): the game did not do something, for a reason the player can act on (the setlist is full, no notes at this difficulty). The back sound and pulse. Stays 6s.
+- **Done** (Ready Green, a circled tick): something that finishes out of sight is done (a file saved, a video made). The toggle-on sound and a select pulse. Stays 5s.
+- **News** (Ink 2 on a lavender wash, a circled i): worth knowing, nothing went wrong. The move sound, no pulse. Stays 5s.
+
+A longer message stays longer (about 55ms a character, at most 14s). The same message again is not a second card: the one on screen counts it (a small pill, "×2" in the tone's colour), bumps and starts its time over. At most three are kept, and they fold: only the newest is read, the older ones stand as edges behind it, each a little smaller and darker, so the stack never covers more than one card. The pointer resting on the stack unfolds it, newest nearest the edge, and stops every clock (as does the window going out of sight); unfolded, the gaps between the cards belong to the stack and it folds only 0.35s after the pointer leaves, so the pointer can travel up to the older cards. Pressing a card dismisses it; the key dismisses the newest and brings the next forward.
+
+They stand centred, 30rem wide at most: above the action bar in the menus, along the top on a phone (where the foot holds the setlist and the thumbs), and along the top edge while a song or replay plays, where they make no sound or pulse. They rise in 0.8rem toward their edge over 0.38s and fade out in 0.2s; with calm motion they appear in place and the time line is hidden.
 
 ### Results
 
@@ -700,6 +709,8 @@ What is on screen while the game loads, drawn by the page itself (`index.html`, 
 The menus have a cinematic theme: a 96-second loop in B minor at 100 BPM. It comes in from nothing, with no opening hit: the first time, two bars rise out of silence before the tune starts (a separate file, played once, that hands over to the loop). Big drums and low strings drive straight eighth notes, snares and short, high violins run in sixteenths over them, and above that the harmony and the melody move slowly in long held notes: the energy is in the rhythm, and the tune never hurries. The five eight-bar sections differ in how many players are in (horns as the orchestra arrives, then violins, a second theme with trumpets, an interlude that builds back, everyone), and the last bar ebbs so the loop returns to the quiet opening. It plays behind every menu at its own volume and fades out for a song preview, the calibration clicks, the launch and the song. A song previews by itself: the one whose row has the focus in the music library or on the Edit tab (with a mouse, the row under the pointer), or the one whose page is open, starts after 0.4 seconds of staying put (so moving down a list starts nothing), from a third of the way in, fades in over 0.7 seconds, goes round the same half minute, and fades across to the next song. It stops the moment the player is on no row: the search field, a toolbar button, the tabs, the pointer off the list. With Song previews switched off (Settings, Audio, Menus) nothing previews, no row is marked, and the theme keeps playing. A small speaker in Pink Light marks its row. It plays at the songs' volume, a little under a song that is played, and the stage behind the menus moves to it. After a short interruption it fades back in where it left off; after a song it starts again from the top. The menu backdrop moves with it.
 
 Every interface sound is a short recording of the same orchestra in the theme's key (B minor / D major), so a press never clashes with the music underneath. The sounds have their own volume, separate from the music and the songs. Everything the game plays leaves through one master output: Settings → Audio can send it to a chosen output device (System default unless the player picks one; a device that is unplugged falls back to the default and is taken up again when it returns) and mutes it while the window is in the background (on by default). Pulses play only on the controller in use, scaled by the player's rumble setting; a keyboard, mouse or touch player feels nothing. In a song a hit's rumble tells its timing apart: great and good are short taps on the lane's side (50ms and 45ms, at 60% and 40%), a perfect hit is a punch at full strength for 130ms in both grips, with a low thump under the click on a DualSense.
+
+The light bar of a PlayStation controller (desktop app, USB cable) lights up with the player during a song: off between flashes so that each one stands out, a flash in the lane's colour every time a lane is pressed, a note there or not (fading out over 360ms), gold while the streak holds the top multiplier, light blue in overdrive, each winning over the ones before. Gold and blue hold their colour: a press, and in overdrive each beat, only brighten them from about 60% to full. The LED's colours are its own, pushed apart from the screen's (its green and red outshine its blue), so yellow, gold and Overdrive Ice read as themselves and not as white. When the song ends the controller is given back its resting dim blue.
 
 - **Move** (focus change or pointer entering a control): one soft damped harp note, in three takes that rotate; light centred pulse (22ms). Rate-limited so held directions do not pile up.
 - **Select:** two harp notes rising a fifth with a glockenspiel on top and a plucked cello under them; medium pulse (45ms).

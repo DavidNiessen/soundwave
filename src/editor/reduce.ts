@@ -5,7 +5,7 @@
  * holds become taps and a fifth lane folds into four. It works on notes in beats and knows nothing
  * about pitch, so it suits charts written by hand.
  */
-import { PROFILES } from '../chart/profiles';
+import { barCap, PROFILES, sustainMinBeats } from '../chart/profiles';
 import type { Difficulty } from '../chart/types';
 
 export interface BeatNote {
@@ -30,6 +30,12 @@ const on = (pos: number, step: number) => Math.abs(pos / step - Math.round(pos /
 function weight(pos: number, bars: Bars): number {
   if (on(pos, 1)) return bars.isBar(Math.round(pos)) ? 4 : 3;
   return on(pos, 0.5) ? 2 : 1;
+}
+
+/** Beats from a bar line to the next (four when none follows within sixteen). */
+function barLength(bar: number, bars: Bars): number {
+  for (let k = 1; k <= 16; k++) if (bars.isBar(Math.round(bar) + k)) return k;
+  return 4;
 }
 
 export function reduceNotes(notes: readonly BeatNote[], fromLanes: number, to: Difficulty, bars: Bars): BeatNote[] {
@@ -62,8 +68,8 @@ export function reduceNotes(notes: readonly BeatNote[], fromLanes: number, to: D
     byBar.set(bar, [...(byBar.get(bar) ?? []), m]);
   }
   const kept = new Set<(typeof moments)[number]>();
-  for (const list of byBar.values()) {
-    const ranked = [...list].sort((a, b) => b.w - a.w || a.pos - b.pos).slice(0, p.maxPerBar);
+  for (const [bar, list] of byBar) {
+    const ranked = [...list].sort((a, b) => b.w - a.w || a.pos - b.pos).slice(0, barCap(p, barLength(bar, bars)));
     for (const m of ranked) kept.add(m);
   }
   const fold = (lane: number) =>
@@ -78,7 +84,7 @@ export function reduceNotes(notes: readonly BeatNote[], fromLanes: number, to: D
     if (chord.length > p.maxChord) chord = p.maxChord === 1 ? [chord[0]] : [chord[0], ...chord.slice(-(p.maxChord - 1))];
     chord = chord.filter((n) => n.lane - chord[0].lane <= p.maxChordSpread);
     for (const n of chord) {
-      const long = n.len >= p.sustainBeats - 1e-3;
+      const long = n.len >= sustainMinBeats(p, bars.secondsPerBeat) - 1e-3;
       out.push({
         pos: n.pos,
         lane: n.lane,
