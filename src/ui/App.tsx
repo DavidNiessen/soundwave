@@ -1930,6 +1930,7 @@ export function App() {
     } else if (view.name === 'library') {
       screen = (
         <LibraryScreen
+          forParty={view.name === 'library' && view.from === 'party'}
           songs={songs}
           status={status}
           setlist={setlist}
