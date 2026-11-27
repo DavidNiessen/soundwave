@@ -7,19 +7,15 @@
 
 <p align="center">
 <a href="https://github.com/DavidNiessen/soundwave/releases/tag/v1.5.1"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-version-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-version-light.svg"><img alt="version: v1.5.1" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-version-dark.svg" height="28"></picture></a>
-<a href="https://github.com/DavidNiessen/soundwave/actions/runs/45861544765"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-ci-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-ci-light.svg"><img alt="pre-release: passing" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-ci-dark.svg" height="28"></picture></a>
+<a href="https://github.com/DavidNiessen/soundwave/actions/runs/46051267990"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-ci-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-ci-light.svg"><img alt="pre-release: running" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-ci-dark.svg" height="28"></picture></a>
 <a href="https://github.com/DavidNiessen/soundwave/blob/main/LICENSE"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-license-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-license-light.svg"><img alt="license: Apache-2.0" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-license-dark.svg" height="28"></picture></a>
 <a href="https://github.com/DavidNiessen/soundwave/stargazers"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-stars-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-stars-light.svg"><img alt="stars: 3" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-stars-dark.svg" height="28"></picture></a>
-<a href="https://github.com/DavidNiessen/soundwave/commits/main"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-commit-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-commit-light.svg"><img alt="last commit: 18 h ago" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-commit-dark.svg" height="28"></picture></a>
+<a href="https://github.com/DavidNiessen/soundwave/commits/main"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-commit-dark.svg"><source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-commit-light.svg"><img alt="last commit: just now" src="https://raw.githubusercontent.com/DavidNiessen/soundwave/readme-studio/shields-commit-dark.svg" height="28"></picture></a>
 </p>
-
-<div align="center">
 
 **[Play in your browser](https://soundwave.niessen.dev)** · **[Download the app](https://github.com/DavidNiessen/soundwave/releases/latest)** for Windows, macOS and Linux
 
 ![Soundwave in play: the note highway in front of the night-time stage, with the crowd, the lights and the score](docs/screenshot.webp)
-
-</div>
 
 A rhythm game for your own music. Drop in a song (MP3, WAV, FLAC, OGG, M4A). The game analyzes its percussive, melodic and harmonic content and generates **Lead**, **Bass**, **Drums** and **Vocals** charts at four difficulties:
 
@@ -48,6 +44,8 @@ Menus, controllers, audio output and replays are covered in the [playing guide](
 
 - [Playing](docs/playing.md): the game, menus, keyboard, controller and touch, audio output, replays and video export
 - [Track editor](docs/track-editor.md): changing any chart or writing one from nothing
+- [Playing together](docs/playing-together.md): parties, Showdown, leaderboards and Join from Discord on a self-hosted server
+- [Running a server](docs/server-setup.md): setting one up step by step ([server/README.md](server/README.md) is its reference)
 - [How analysis works](docs/analysis.md): stem separation, transcription, beats and bars, charting
 - [The 3D stage](docs/stage.md): how the stage, the band and the crowd are built and drawn
 - [Song files](docs/song-files.md): the `.soundwave` format and library backups
