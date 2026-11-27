@@ -94,7 +94,9 @@ per player and two servers cannot tell they see the same player.
   never sees it.
 - **A lost identity**: an admin makes a one-time **recovery link** (Admin → Players → Recovery link,
   `POST /mod/recovery`), good for a week. Opened in the game, it gives the account that game's
-  identity (`POST /auth/recover` with the code and a proof) and ends every sign-in the old one had.
+  identity (`POST /auth/recover` with the code and a proof) and ends every sign-in the old one had:
+  its tokens stop working at once, and a game still online with it is signed out. A banned account
+  takes no new identity.
   An admin's own link, when there are several admins, comes from the server's command line (see
   [Command line](#command-line)), never from another admin.
 

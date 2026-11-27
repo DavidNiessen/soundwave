@@ -52,6 +52,8 @@ export interface AccessClaims {
   sub: string;
   exp: number;
   kind: 'access';
+  /** The account's sign-in epoch it was made in (db.ts): a token from before the last raise is refused. */
+  ep?: number;
 }
 
 /** A name players are shown by: 2 to 24 letters, digits, spaces, dots, dashes or underscores. */

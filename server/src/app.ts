@@ -259,7 +259,12 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     // Signing in with an identity: a challenge, then the challenge signed (identity.ts).
     'POST /auth/challenge': () => ({ nonce: accounts.identities.challenge() }),
     'POST /auth/key': (_req, body) => accounts.keySignIn(body),
-    'POST /auth/recover': (_req, body) => accounts.recover(body.code, body),
+    'POST /auth/recover': (_req, body) => {
+      const session = accounts.recover(body.code, body);
+      // The old identity's game, if it is still online somewhere, is signed out at once.
+      drop(session.user.id, 'Your account was recovered on another device, so you were signed out here.');
+      return session;
+    },
     'POST /me/name': (req, body) => {
       const you = accounts.rename(me(req), body.name);
       notify(['users', 'presence', 'boards', 'replays', 'log']);

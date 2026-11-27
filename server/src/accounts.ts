@@ -144,9 +144,10 @@ export class Accounts {
     if (!user) throw new Refusal(403, 'That recovery link has run out or was used. Ask an admin for a new one.');
     const other = this.store.userByKey(pubkey);
     if (other && other.id !== user.id) throw new Refusal(409, `Your identity has another account here already: ${other.name}.`);
+    // A banned account takes no new identity: the ban is checked before anything changes.
+    this.checkBan(user);
     this.store.setKey(user.id, pubkey);
     this.store.dropRefreshes(user.id);
-    this.checkBan(user);
     return this.issue(this.store.userById(user.id)!);
   }
 
@@ -162,7 +163,9 @@ export class Accounts {
   /** The account an access token belongs to, if it is valid and not banned. */
   authenticate(token: string | undefined): UserRow {
     const claims = token ? this.signer.verify<AccessClaims>(token) : undefined;
-    const user = claims?.kind === 'access' && claims.exp > this.now() ? this.store.userById(claims.sub) : undefined;
+    const found = claims?.kind === 'access' && claims.exp > this.now() ? this.store.userById(claims.sub) : undefined;
+    // A token from before the account's sign-ins were ended (a recovery, a ban) is refused.
+    const user = found && (claims!.ep ?? 0) === found.epoch ? found : undefined;
     if (!user) throw new Refusal(401, 'You were signed out. Sign in again.');
     this.checkBan(user);
     return user;
@@ -177,7 +180,7 @@ export class Accounts {
 
   private issue(user: UserRow): Session {
     const now = this.now();
-    const access = this.signer.sign({ sub: user.id, exp: now + ACCESS_TTL_MS, kind: 'access' } satisfies AccessClaims);
+    const access = this.signer.sign({ sub: user.id, exp: now + ACCESS_TTL_MS, kind: 'access', ep: user.epoch } satisfies AccessClaims);
     const refresh = randomToken(32);
     this.store.addRefresh(sha256(refresh), user.id, now + REFRESH_TTL_MS);
     return { user: account(user), access, refresh };

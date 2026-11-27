@@ -331,9 +331,16 @@ describe('accounts', () => {
     expect(page).toContain(`soundwave://join?server=${encodeURIComponent('https://play.example.com')}&amp;recover=${rec.body.code}`);
 
     const lost = newKey();
+    // The old identity's game is still online somewhere: it is signed out the moment the link is used.
+    const old = await connect(ana);
+    const bye = old.next('bye');
     const back = await api<Session>('POST', '/auth/recover', { code: rec.body.code, ...(await proof(server.url, lost)) });
     expect(back.status).toBe(200);
     expect(back.body.user).toEqual(ana.user);
+    expect((await bye).reason).toMatch(/recovered/);
+    // Its access token no longer works either, while the new one does.
+    expect((await api('GET', '/me', undefined, ana.access)).status).toBe(401);
+    expect((await api('GET', '/me', undefined, back.body.access)).status).toBe(200);
     // Once only.
     expect((await api('POST', '/auth/recover', { code: rec.body.code, ...(await proof(server.url, newKey())) })).status).toBe(403);
     // The new key signs in; the old one has no account any more, and the old sign-ins ended.
@@ -342,6 +349,17 @@ describe('accounts', () => {
     expect((await api('POST', '/auth/refresh', { refresh: ana.refresh })).status).toBe(401);
     const log = await api<{ action: string; target: string }[]>('GET', '/mod/audit', undefined, owner.access);
     expect(log.body[0]).toMatchObject({ action: 'recovery link', target: 'Ana' });
+  });
+
+  it('give a banned player’s account no new identity through a recovery link', async () => {
+    await start();
+    const owner = await signUp('Owner', { invite: server.accounts.ownerCode });
+    await signUp('Ana');
+    const rec = await api<Recovery>('POST', '/mod/recovery', { name: 'Ana' }, owner.access);
+    expect((await api('POST', '/mod/ban', { name: 'Ana', hours: 5 }, owner.access)).status).toBe(200);
+    const key = newKey();
+    expect((await api('POST', '/auth/recover', { code: rec.body.code, ...(await proof(server.url, key)) })).status).toBe(403);
+    expect(store.userByName('Ana')!.pubkey).toBe(who.keyOf('Ana').publicKey);
   });
 
   it('make admins’ recovery links on the server’s command line, not from another admin', async () => {
