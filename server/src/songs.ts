@@ -25,6 +25,7 @@ import { coarseEnergy, likeness, nameKey, type Fingerprint } from '../../src/net
 import { Refusal } from './accounts.ts';
 import type { Config } from './config.ts';
 import type { Store, UserRow } from './db.ts';
+import { contentsOf, hashOf } from './soundwave.ts';
 
 const MB = 1024 * 1024;
 const canModerate = (u: UserRow) => u.role === 'owner' || u.role === 'moderator';
@@ -217,15 +218,8 @@ export class Songs {
     if (this.sharing === 'off' && !curator)
       throw new Refusal(403, 'This server does not take shared songs. Its owner can turn sharing on.');
     if (body.length > this.config.songMaxMb * MB) throw new Refusal(413, `A shared song can be at most ${this.config.songMaxMb} MB here.`);
-    let c;
-    try {
-      c = await readSoundwave(new Blob([new Uint8Array(body)]));
-    } catch (e) {
-      throw new Refusal(400, (e as Error).message || 'That is not a Soundwave song file.');
-    }
-    const id = createHash('sha256')
-      .update(new Uint8Array(await c.audio.arrayBuffer()))
-      .digest('hex');
+    const c = await contentsOf(body);
+    const id = await hashOf(c.audio);
     const had = this.row(id);
     if (had) return this.shared({ ...had, name: this.store.userById(had.uploader ?? '')?.name });
     // The same recording in another file is not taken twice (an admin may add it anyway).
@@ -306,12 +300,8 @@ export class Songs {
     if (r.uploader !== actor.id && !canModerate(actor))
       throw new Refusal(403, 'Only whoever shared a song, the owner and moderators send its smaller copies.');
     if (body.length >= r.size) throw new Refusal(400, 'A smaller copy has to be smaller than the song.');
-    let c;
-    try {
-      c = await readSoundwave(new Blob([new Uint8Array(body)]));
-    } catch (e) {
-      throw new Refusal(400, (e as Error).message || 'That is not a Soundwave song file.');
-    }
+    // Only its details are needed: its analysis is not inflated.
+    const c = await contentsOf(body, false);
     if (c.meta.copyOf !== id) throw new Refusal(400, 'That copy is of another song.');
     if (Math.abs(c.meta.duration - r.duration) > 2) throw new Refusal(400, 'That copy is not as long as the song.');
     writeFileSync(this.copyPath(id, quality), body);

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
+import { crc32, gzipSync } from 'node:zlib';
 import { WebSocket } from 'ws';
 import { PROTOCOL_VERSION, type DuplicatePair, type ServerInfo, type ServerMessage, type SharedSong } from '../../src/net/protocol.ts';
 import { readSoundwave, writeSoundwave } from '../../src/storage/soundwaveFile.ts';
@@ -127,6 +128,29 @@ describe('shared songs', () => {
     await start({ songSharing: 'songs', quotaMb: 0.001 });
     const bo = await signUp('Bo');
     expect((await api('POST', '/songs', (await songFile(7)).bytes, bo.access)).status).toBe(413);
+  });
+
+  it('take a song whose analysis is a gzip bomb without inflating it past the limit', async () => {
+    await start({ songSharing: 'charts' });
+    const ana = await signUp('Ana');
+    const audio = new Uint8Array(4000).map((_, i) => (i * 3) % 251);
+    const good = new Uint8Array(
+      await (
+        await writeSoundwave({ meta: { title: 'Bomb', artist: 'Band', duration: 30, fileName: 'b.mp3' }, audio: new Blob([audio]) })
+      ).arrayBuffer(),
+    );
+    // An ANLS chunk of a few hundred KB that inflates to 200 MB of JSON.
+    const payload = Buffer.concat([Buffer.from([1, 0]), gzipSync(Buffer.alloc(200 * 1024 * 1024, 0x20), { level: 1 })]);
+    const head = Buffer.alloc(8);
+    head.write('ANLS', 0, 'ascii');
+    head.writeUInt32LE(payload.length, 4);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32LE(crc32(Buffer.concat([Buffer.from('ANLS'), payload])), 0);
+    const file = Buffer.concat([good.subarray(0, 12), head, payload, crc, good.subarray(12)]);
+    expect(file.length).toBeLessThan(2 * 1024 * 1024);
+    const id = createHash('sha256').update(audio).digest('hex');
+    expect((await api<SharedSong>('POST', '/songs', new Uint8Array(file), ana.access)).body).toMatchObject({ id, title: 'Bomb' });
+    expect((await api<{ analysis: unknown }>('GET', `/songs/${id}/charts`, undefined, ana.access)).body.analysis).toBeNull();
   });
 
   it('pass a party’s songs on through the server, to the party’s players only', async () => {

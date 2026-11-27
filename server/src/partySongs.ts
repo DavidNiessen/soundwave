@@ -10,13 +10,12 @@
  * Files live in the data folder as party-songs/<id>.soundwave, where <id> is the hash of the audio
  * inside: checked here, so nobody can put a song under another song's id.
  */
-import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readSoundwave } from '../../src/storage/soundwaveFile.ts';
 import { Refusal } from './accounts.ts';
 import type { Config } from './config.ts';
+import { songIdOf } from './soundwave.ts';
 
 const MB = 1024 * 1024;
 const DAY = 24 * 60 * 60 * 1000;
@@ -53,14 +52,9 @@ export class PartySongs {
     if (!this.on) throw new Refusal(403, 'This server does not pass songs on to parties. Its owner can turn that on.');
     if (body.length > this.config.songMaxMb * MB) throw new Refusal(413, `A song can be at most ${this.config.songMaxMb} MB here.`);
     if (this.has(id)) return this.touch(id);
-    let audio: ArrayBuffer;
-    try {
-      audio = await (await readSoundwave(new Blob([new Uint8Array(body)]))).audio.arrayBuffer();
-    } catch (e) {
-      throw new Refusal(400, (e as Error).message || 'That is not a Soundwave song file.');
-    }
-    const hash = createHash('sha256').update(new Uint8Array(audio)).digest('hex');
-    if (hash !== id) throw new Refusal(400, 'That file holds a different song.');
+    // Only the audio's hash is checked: the analysis inside is not inflated here, and the games
+    // that download the file read it with the format's own limits.
+    if ((await songIdOf(body)) !== id) throw new Refusal(400, 'That file holds a different song.');
     writeFileSync(this.path(id), body);
     this.prune();
   }
