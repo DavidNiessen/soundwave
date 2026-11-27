@@ -236,6 +236,10 @@ export function normalizeSettings(raw: Partial<Settings>): Settings {
   delete (s as unknown as { keepPartySongs?: boolean }).keepPartySongs;
   s.shareLibrary = s.shareLibrary === true;
   s.shareAsked = Array.isArray(s.shareAsked) ? s.shareAsked.filter((x): x is string => typeof x === 'string').slice(-50) : [];
+  // Settings from before the game kept where the offset was set: an offset already set came from a
+  // calibration on the output used then.
+  if (!('calibratedOn' in raw) && typeof s.offsetMs === 'number' && s.offsetMs !== 0)
+    s.calibratedOn = typeof s.outputDevice === 'string' ? s.outputDevice : '';
   if (typeof s.calibratedOn !== 'string') s.calibratedOn = null;
   if (typeof s.outputDevice !== 'string') s.outputDevice = '';
   if (typeof s.outputDeviceName !== 'string' || !s.outputDevice) s.outputDeviceName = '';
