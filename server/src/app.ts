@@ -21,7 +21,7 @@ import { joinPage } from './joinPage.ts';
 import { Songs } from './songs.ts';
 import { PartySongs } from './partySongs.ts';
 import { clientMessage } from './validate.ts';
-import { RateLimit, Uploads } from './limits.ts';
+import { addressKey, RateLimit, Uploads } from './limits.ts';
 
 /** The most bytes an HTTP request's body may have (everything it carries is small). */
 const BODY_MAX = 64 * 1024;
@@ -184,14 +184,22 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     notify(['users', 'presence']);
   };
 
+  /**
+   * The address a request is rate-limited by. Behind a proxy it is the last X-Forwarded-For entry,
+   * the one the proxy itself added: those before it are whatever the client sent, and anyone can
+   * send any. IPv6 addresses count by their /64 (limits.ts).
+   */
   const addressOf = (req: IncomingMessage) =>
-    (config.trustProxy
-      ? String(req.headers['x-forwarded-for'] ?? '')
-          .split(',')[0]
-          .trim()
-      : '') ||
-    req.socket.remoteAddress ||
-    '?';
+    addressKey(
+      (config.trustProxy
+        ? String(req.headers['x-forwarded-for'] ?? '')
+            .split(',')
+            .at(-1)!
+            .trim()
+        : '') ||
+        req.socket.remoteAddress ||
+        '?',
+    );
 
   const routes: Record<string, Handler> = {
     // For a container's healthcheck (Docker, Coolify): the server answers, and its database too.

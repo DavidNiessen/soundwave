@@ -53,7 +53,7 @@ export class Accounts {
       store.setMeta('secret', secret);
     }
     this.signer = new Signer(Buffer.from(secret, 'base64url'));
-    this.identities = new Identities(store, now);
+    this.identities = new Identities(store, Buffer.from(secret, 'base64url'), now);
     if (!store.hasOwner()) {
       let code = store.getMeta('owner-code');
       if (!code || !store.invite(code)) {

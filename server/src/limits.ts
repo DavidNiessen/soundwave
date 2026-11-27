@@ -5,6 +5,28 @@
 import type { ServerResponse } from 'node:http';
 import { Refusal } from './accounts.ts';
 
+/** The most keys a rate limit remembers: past it, the one heard from longest ago is forgotten. */
+const KEYS_MAX = 50_000;
+
+/**
+ * The key an address is rate-limited by. An IPv6 home or server usually has a whole /64 of
+ * addresses to pick from, so one is held to its /64; an IPv4 address (mapped into IPv6 too) is
+ * held to itself.
+ */
+export function addressKey(address: string): string {
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address);
+  if (mapped) return mapped[1];
+  if (!address.includes(':')) return address;
+  const [head, tail = ''] = address.split('%')[0].toLowerCase().split('::');
+  const left = head ? head.split(':') : [];
+  const right = address.includes('::') ? (tail ? tail.split(':') : []) : [];
+  const groups = [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill('0'), ...right];
+  return `${groups
+    .slice(0, 4)
+    .map((g) => g.replace(/^0+(?=.)/, ''))
+    .join(':')}::/64`;
+}
+
 /** A bucket of attempts per key (an address, a player): `burst` at once, refilled at `perMinute`. */
 export class RateLimit {
   private readonly buckets = new Map<string, { tokens: number; at: number }>();
@@ -18,8 +40,11 @@ export class RateLimit {
     const b = this.buckets.get(key) ?? { tokens: this.burst, at: now };
     b.tokens = Math.min(this.burst, b.tokens + ((now - b.at) / 60_000) * this.perMinute);
     b.at = now;
+    // Kept in the order they were last heard from, so the one to forget is the first. Forgetting
+    // only that one (never all at once) means a flood of new addresses cannot wipe the others clean.
+    this.buckets.delete(key);
     this.buckets.set(key, b);
-    if (this.buckets.size > 10_000) this.buckets.clear();
+    if (this.buckets.size > KEYS_MAX) this.buckets.delete(this.buckets.keys().next().value!);
     if (b.tokens < 1) return false;
     b.tokens--;
     return true;

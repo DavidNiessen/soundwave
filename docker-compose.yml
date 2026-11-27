@@ -20,14 +20,18 @@ services:
       - SOUNDWAVE_PASSWORD=${SOUNDWAVE_PASSWORD:-}
       # The web game players sign in from and invite links offer (a copy of your own, if you host one).
       - SOUNDWAVE_WEB_GAME=${SOUNDWAVE_WEB_GAME:-https://soundwave.niessen.dev}
-      # Behind Coolify's proxy, take players' addresses (for the rate limits) from it.
+      # Take players' addresses (for the rate limits) from the proxy in front: right here, where
+      # the port is only exposed to Coolify's proxy (or published to 127.0.0.1 for a proxy on the
+      # same machine). Published to the internet with no proxy in front, set it to false: anyone
+      # could then send the header and pick the address they are counted by.
       - SOUNDWAVE_TRUST_PROXY=${SOUNDWAVE_TRUST_PROXY:-true}
       - SOUNDWAVE_SONG_SHARING=${SOUNDWAVE_SONG_SHARING:-off}
       - SOUNDWAVE_PARTY_SONGS=${SOUNDWAVE_PARTY_SONGS:-true}
       - SOUNDWAVE_PARTY_CACHE_MB=${SOUNDWAVE_PARTY_CACHE_MB:-4000}
     volumes:
       - soundwave-data:/data
-    # Reached through Coolify's proxy; without Coolify, publish it instead: ports: ["7420:7420"].
+    # Reached through Coolify's proxy; without Coolify, publish it to the proxy on this machine
+    # instead: ports: ["127.0.0.1:7420:7420"] (docs/server-setup.md, 2B).
     expose:
       - '7420'
     healthcheck:

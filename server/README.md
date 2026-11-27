@@ -57,7 +57,7 @@ after a change.
 | `password`       | `SOUNDWAVE_PASSWORD`         |                     | The server's password, which joining needs in `password` mode.                          |
 | `publicUrl`      | `SOUNDWAVE_PUBLIC_URL`       | `http://localhost…` | The address players use, written into invite and recovery links. Set it.                |
 | `webGameUrl`     | `SOUNDWAVE_WEB_GAME`         | the game's website  | The web game that invite and recovery links offer.                                      |
-| `trustProxy`     | `SOUNDWAVE_TRUST_PROXY`      | `false`             | Behind a proxy: take players' addresses (for rate limits) from the proxy.               |
+| `trustProxy`     | `SOUNDWAVE_TRUST_PROXY`      | `false`             | Behind a proxy: take players' addresses (for rate limits) from the proxy. See below.    |
 | `songSharing`    | `SOUNDWAVE_SONG_SHARING`     | `off`               | `songs`, `charts` or `off`: see [Shared songs](#shared-songs).                          |
 | `songMaxMb`      | `SOUNDWAVE_SONG_MAX_MB`      | `100`               | The largest song file, MB.                                                              |
 | `quotaMb`        | `SOUNDWAVE_QUOTA_MB`         | `2000`              | What each player may share in all, MB.                                                  |
@@ -212,7 +212,11 @@ play.example.com {
 ```
 
 and set `SOUNDWAVE_PUBLIC_URL=https://play.example.com` and `SOUNDWAVE_TRUST_PROXY=1`. Coolify does
-both for you. nginx needs the WebSocket headers: see
+both for you. With `trustProxy` the server counts each player by the last `X-Forwarded-For` entry,
+the one the proxy in front added (with two proxies in a row, that is the address of the first): so
+turn it on only where players reach the server through the proxy alone, never with its port open to
+the internet. Rate limits count an IPv6 address by its /64, as one home or server usually has a
+whole /64 to pick addresses from. nginx needs the WebSocket headers: see
 [the setup guide](../docs/server-setup.md#b-docker-compose-on-a-vps).
 
 ## Moderation
