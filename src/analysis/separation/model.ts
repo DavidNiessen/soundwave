@@ -18,40 +18,63 @@ export interface ModelSource {
   /** The graph; any other files are weight data it refers to by name. */
   entry: string;
   files: ModelFile[];
+  /**
+   * The graph was optimized when it was made (tools/analysis/export_stem_model.py --prepared): on a
+   * graphics card it is opened as it is, which spares the runtime hundreds of megabytes.
+   */
+  prepared?: boolean;
 }
 
 /**
- * The commit the model file is read from. Pinned, not the main branch: a re-exported model gets a
+ * The commit the model file is read from, one on the main branch (a branch's own commits can go
+ * once it is merged and deleted). Pinned, not the main branch itself: a re-exported model gets a
  * new id, size and hash here, and a game already installed keeps fetching exactly the file it
  * checks against.
  */
-const MODEL_COMMIT = '63e0a897f0344a6063051fe35b93f51e3239dbfe';
+const MODEL_COMMIT = 'cc905dcebf2cb0063bb5a9d26f55dbd45e0f13b9';
 
 /**
- * The file this repository holds (models/htdemucs/htdemucs-v1.onnx, made by
- * tools/analysis/export_stem_model.py): the weights as float16, half the size of the float32 copy
- * Intel publishes, with the same results.
+ * The file this repository holds (models/htdemucs/htdemucs-v2.onnx, made by
+ * tools/analysis/export_stem_model.py --prepared): the weights as float16, the attention computed
+ * in slices of queries and the graph optimized ahead of time, so the runtime opens it with a
+ * fraction of the memory htdemucs-v1 took (its stems differ from those only at about 100 dB, below
+ * any chart). Games from before it keep reading htdemucs-v1.onnx at commit 63e0a89.
  */
 export const REPO_MODEL: ModelSource = {
-  id: 'htdemucs-v1',
-  entry: 'htdemucs-v1.onnx',
+  id: 'htdemucs-v2',
+  entry: 'htdemucs-v2.onnx',
+  prepared: true,
   files: [
     {
-      name: 'htdemucs-v1.onnx',
-      url: `https://raw.githubusercontent.com/DavidNiessen/soundwave/${MODEL_COMMIT}/models/htdemucs/htdemucs-v1.onnx`,
-      bytes: 90415579,
-      sha256: 'fee1c4f070dc290f3ce65c16cd0927279b5e23159d01bfb6c8a8a13bd734f276',
+      name: 'htdemucs-v2.onnx',
+      url: `https://raw.githubusercontent.com/DavidNiessen/soundwave/${MODEL_COMMIT}/models/htdemucs/htdemucs-v2.onnx`,
+      bytes: 92657975,
+      sha256: '369814b1f964bc068054eb8b2352903900d624e247809e2e528226c83b4b566a',
     },
   ],
 };
 
-function chosenSource(): ModelSource {
+function chosenSource(): ModelSource & { dev?: boolean } {
   // Development only: `localStorage['soundwave.dev.stem-model'] = 'local'` loads the file in the
   // working copy from the dev server instead (to try a newly exported model before it is pushed).
+  // `local:<file>` loads models/htdemucs/<file> straight from the dev server, unchecked and not
+  // stored, to compare a variant of the model with the one in use.
   if (import.meta.env.DEV) {
     try {
-      if (localStorage.getItem('soundwave.dev.stem-model') === 'local') {
+      const chosen = localStorage.getItem('soundwave.dev.stem-model');
+      if (chosen === 'local') {
         return { ...REPO_MODEL, files: REPO_MODEL.files.map((f) => ({ ...f, url: `/models/htdemucs/${f.name}` })) };
+      }
+      if (chosen?.startsWith('local:')) {
+        // `local:<file>:prepared` for a graph optimized when it was made (see ModelSource).
+        const [name, prepared] = chosen.slice('local:'.length).split(':');
+        return {
+          id: `dev-${name}`,
+          entry: name,
+          files: [{ name, url: `/models/htdemucs/${name}`, bytes: 0, sha256: '' }],
+          prepared: prepared === 'prepared',
+          dev: true,
+        };
       }
     } catch {
       /* storage unavailable */
@@ -71,6 +94,8 @@ export interface ModelStatus {
 export interface LoadedModel {
   entry: string;
   files: { name: string; data: ArrayBuffer }[];
+  /** See ModelSource. */
+  prepared?: boolean;
 }
 
 const hex = (bytes: ArrayBuffer) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -107,6 +132,7 @@ class StemModel {
 
   /** Looks at what is stored, without downloading anything. */
   async check(): Promise<ModelStatus['state']> {
+    if (this.source.dev) this.set({ state: 'ready' });
     if (this.status.state === 'downloading' || this.status.state === 'ready') return this.status.state;
     try {
       const have = await Promise.all(this.source.files.map((f) => this.stored(f)));
@@ -120,7 +146,7 @@ class StemModel {
 
   /** Resolves once the model is on this device, downloading what is missing. One download at a time. */
   ensure(): Promise<void> {
-    if (this.status.state === 'ready') return Promise.resolve();
+    if (this.status.state === 'ready' || this.source.dev) return Promise.resolve();
     this.pending ??= this.download().finally(() => (this.pending = null));
     return this.pending;
   }
@@ -165,6 +191,12 @@ class StemModel {
 
   /** The model's files, read from storage. */
   async load(): Promise<LoadedModel> {
+    if (this.source.dev) {
+      const files = await Promise.all(
+        this.source.files.map(async (f) => ({ name: f.name, data: await (await fetch(f.url)).arrayBuffer() })),
+      );
+      return { entry: this.source.entry, files, prepared: this.source.prepared };
+    }
     const files = await Promise.all(
       this.source.files.map(async (f) => {
         const blob = await this.stored(f);
@@ -172,7 +204,7 @@ class StemModel {
         return { name: f.name, data: await blob.arrayBuffer() };
       }),
     );
-    return { entry: this.source.entry, files };
+    return { entry: this.source.entry, files, prepared: this.source.prepared };
   }
 }
 

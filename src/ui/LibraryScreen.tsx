@@ -56,6 +56,8 @@ interface Props {
   server?: ServerLibrary;
   /** Ready was pressed while setlist songs were still coming: how much of them has come, 0..1. */
   gathering?: number | null;
+  /** Opened to pick a party's songs: Ready goes back to the party, and says so. */
+  forParty?: boolean;
 }
 
 /** How long the player rests on a server song before it starts coming. */
@@ -158,6 +160,7 @@ export function LibraryScreen({
   actions,
   server,
   gathering,
+  forParty = false,
 }: Props) {
   const [query, setQuery] = useState('');
   /** Songs picked for a menu that acts on several at once, and where a Shift-click range starts. */
@@ -358,7 +361,12 @@ export function LibraryScreen({
     { id: 'add', label: 'Add songs', icon: Upload, ...keysOf('library.add'), bar: false, run: onAdd },
     {
       id: 'ready',
-      label: gathering !== null && gathering !== undefined ? `Getting the songs… ${Math.round(gathering * 100)}%` : 'Ready up',
+      label:
+        gathering !== null && gathering !== undefined
+          ? `Getting the songs… ${Math.round(gathering * 100)}%`
+          : forParty
+            ? 'Back to the party'
+            : 'Ready up',
       icon: Play,
       ...keysOf('library.ready'),
       primary: true,

@@ -16,7 +16,9 @@ by the project: every server is someone's own. The design is in
 backups and troubleshooting). This file is the reference.
 
 It is TypeScript run directly by Node (24.7 or newer), with one dependency (`ws`). Everything it
-keeps is in one SQLite database in its data folder.
+keeps is in one SQLite database in its data folder. The Docker image is built on a fixed Node release
+and installs `ws` from the server's own lockfile (`server/package-lock.json`, with `npm ci`): after
+changing `server/package.json`, refresh it with `npm install --package-lock-only` in `server/`.
 
 ## Quick start
 
@@ -57,10 +59,10 @@ after a change.
 | `password`       | `SOUNDWAVE_PASSWORD`         |                     | The server's password, which joining needs in `password` mode.                          |
 | `publicUrl`      | `SOUNDWAVE_PUBLIC_URL`       | `http://localhost…` | The address players use, written into invite and recovery links. Set it.                |
 | `webGameUrl`     | `SOUNDWAVE_WEB_GAME`         | the game's website  | The web game that invite and recovery links offer.                                      |
-| `trustProxy`     | `SOUNDWAVE_TRUST_PROXY`      | `false`             | Behind a proxy: take players' addresses (for rate limits) from the proxy.               |
+| `trustProxy`     | `SOUNDWAVE_TRUST_PROXY`      | `false`             | Behind proxies: `true` (or `1`) for one, a number for that many in a row. See below.    |
 | `songSharing`    | `SOUNDWAVE_SONG_SHARING`     | `off`               | `songs`, `charts` or `off`: see [Shared songs](#shared-songs).                          |
 | `songMaxMb`      | `SOUNDWAVE_SONG_MAX_MB`      | `100`               | The largest song file, MB.                                                              |
-| `quotaMb`        | `SOUNDWAVE_QUOTA_MB`         | `2000`              | What each player may share in all, MB.                                                  |
+| `quotaMb`        | `SOUNDWAVE_QUOTA_MB`         | `2000`              | What each player may share in all, MB (all the server keeps of their songs).            |
 | `publicCovers`   | `SOUNDWAVE_PUBLIC_COVERS`    | `false`             | Serve song covers without signing in (for Discord statuses).                            |
 | `partySongs`     | `SOUNDWAVE_PARTY_SONGS`      | `true`              | Pass a party's songs on to its players: see [A party's songs](#a-partys-songs).         |
 | `partyCacheMb`   | `SOUNDWAVE_PARTY_CACHE_MB`   | `4000`              | The most the party song cache holds, MB.                                                |
@@ -94,12 +96,14 @@ per player and two servers cannot tell they see the same player.
   never sees it.
 - **A lost identity**: an admin makes a one-time **recovery link** (Admin → Players → Recovery link,
   `POST /mod/recovery`), good for a week. Opened in the game, it gives the account that game's
-  identity (`POST /auth/recover` with the code and a proof) and ends every sign-in the old one had.
+  identity (`POST /auth/recover` with the code and a proof) and ends every sign-in the old one had:
+  its tokens stop working at once, and a game still online with it is signed out. A banned account
+  takes no new identity.
   An admin's own link, when there are several admins, comes from the server's command line (see
   [Command line](#command-line)), never from another admin.
 
-Players rename themselves on the Online tab, under their account (`POST /me/name`); the moderation
-log keeps the old name.
+Players rename themselves on the Online tab, under their account (`POST /me/name`, five times a
+minute at most); their party sees the new name at once, and the moderation log keeps the old one.
 
 ## Command line
 
@@ -147,7 +151,11 @@ A player's look on the stage is three colours (`GET` and `PUT /me/profile`, body
 
 A party's host can make it a Showdown: scores count as a share of each chart's par, the lowest
 players go out after each song, and (with hits on) the overdrive button strikes the player above.
-The server decides whom a Strike hits and for how long. The host can play the server's Showdown
+The server decides whom a Strike hits and for how long, and holds each Strike to the charge the
+player's chart's phrases can have given them by then (a quarter of the meter each), one every two
+seconds at most. Once a Showdown's first song has started, a player who joins (a knocked-out one who
+left and came back too) watches until the host starts the set over; a player the host removed
+cannot rejoin that party. The host can play the server's Showdown
 rotation instead of their own set: the owner and moderators set it on the Admin page (**Showdown
 rotation**; `GET` and `POST /showdown/rotation`, body `{ songs }`).
 
@@ -157,7 +165,9 @@ Off by default. Sharing music with others can infringe copyright, and you answer
 server hands out, so turning it on is your decision: set `songSharing` to `songs` for whole songs,
 audio included, or `charts` to keep everything but the audio (a player then adds their own copy of
 the very same recording, which the game checks). `songMaxMb` limits one song, `quotaMb` what each
-player shares in all. Every song records who shared it and when; players can report a song, and the
+player shares in all: everything the server keeps of their songs counts, the audio, its smaller
+copies, the charts and the covers. A cover over 4 MB is left out, and a song whose analysis comes to
+more than 32 MB is refused (a real one is a few MB). Every song records who shared it and when; players can report a song, and the
 uploader, you or a moderator can remove it everywhere at once.
 
 With `publicCovers` on, song covers are served without signing in, so a player's Discord status can
@@ -190,8 +200,9 @@ A player can only play a song they have. So, on by default, a party's songs are 
 server: when a player in a party lacks one of the set's songs, the host's game sends it here (unless
 the host turned that off in Settings → Online), and the game of every player without it downloads it
 by itself. This is separate from shared songs: nothing lists these songs, and only the players of a
-party with the song in its set can send or get it. The server checks that the file holds the song
-its id names.
+party with the song in its set can get it, and only whoever brought it can send it (the host, or
+with everyone picking, the player who picked it), at most a set's worth (20 new songs) at once and
+20 more an hour. The server checks that the file holds the song its id names.
 
 They are a cache, kept in `party-songs/` in the data folder: a song goes `partyCacheDays` after it
 was last used, and the least recently used go first once the cache passes `partyCacheMb`. Turn it off
@@ -212,7 +223,12 @@ play.example.com {
 ```
 
 and set `SOUNDWAVE_PUBLIC_URL=https://play.example.com` and `SOUNDWAVE_TRUST_PROXY=1`. Coolify does
-both for you. nginx needs the WebSocket headers: see
+both for you. With `trustProxy` the server counts each player by the last `X-Forwarded-For` entry,
+the one the proxy in front added; with `trustProxy` set to a number of proxies in a row, that many
+entries back from the end (so behind two, the address the outer one saw): so
+turn it on only where players reach the server through the proxy alone, never with its port open to
+the internet. Rate limits count an IPv6 address by its /64, as one home or server usually has a
+whole /64 to pick addresses from. nginx needs the WebSocket headers: see
 [the setup guide](../docs/server-setup.md#b-docker-compose-on-a-vps).
 
 ## Moderation
@@ -298,6 +314,11 @@ JSON unless said otherwise. A proof is `{ publicKey, nonce, signature }` (see
 
 The messages are in [src/net/protocol.ts](../src/net/protocol.ts), shared with the game. A game and a
 server with different `PROTOCOL_VERSION`s refuse each other with a sentence saying which one to update.
+
+A connection's first message is its `hello`, at most 4 KB, within ten seconds; anything else before
+it closes the connection. One address may hold 40 connections. Each connection sends at most 60
+messages a second on average, and of those that change something for others (everything but
+`progress` and `ping`) 5 a second; the rest of those are dropped.
 
 **Live updates.** Every game online hears, over its WebSocket, what changed on the server: a
 `changed` message names the topics (`songs`, `rotation`, `replays`, `boards`, `presence`, and for the

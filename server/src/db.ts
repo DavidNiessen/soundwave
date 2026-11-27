@@ -18,6 +18,8 @@ export interface UserRow {
   /** Banned until this time (ms), or null; Infinity is stored as a very large number. */
   banned_until: number | null;
   ban_reason: string | null;
+  /** Raised to end every sign-in the account has (a recovery, a ban): access tokens carry the one they were made in. */
+  epoch: number;
 }
 
 export interface InviteRow {
@@ -59,7 +61,8 @@ export class Store {
         role TEXT NOT NULL,
         created INTEGER NOT NULL,
         banned_until INTEGER,
-        ban_reason TEXT
+        ban_reason TEXT,
+        epoch INTEGER NOT NULL DEFAULT 0
       );
       CREATE TABLE IF NOT EXISTS refresh_tokens (
         hash TEXT PRIMARY KEY,
@@ -89,10 +92,17 @@ export class Store {
         expires INTEGER NOT NULL
       );
     `);
+    this.migrate();
   }
 
   close() {
     this.db.close();
+  }
+
+  /** Columns added since the first servers: their databases get them on start. */
+  private migrate() {
+    const columns = (this.db.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name);
+    if (!columns.includes('epoch')) this.db.exec('ALTER TABLE users ADD COLUMN epoch INTEGER NOT NULL DEFAULT 0');
   }
 
   getMeta(key: string): string | undefined {
@@ -114,7 +124,7 @@ export class Store {
     return this.db.prepare('SELECT * FROM users WHERE name_key = ?').get(name.toLowerCase()) as UserRow | undefined;
   }
 
-  addUser(u: Omit<UserRow, 'name_key' | 'banned_until' | 'ban_reason'>) {
+  addUser(u: Omit<UserRow, 'name_key' | 'banned_until' | 'ban_reason' | 'epoch'>) {
     this.db
       .prepare('INSERT INTO users (id, name, name_key, pubkey, role, created) VALUES (?, ?, ?, ?, ?, ?)')
       .run(u.id, u.name, u.name.toLowerCase(), u.pubkey, u.role, u.created);
@@ -188,9 +198,10 @@ export class Store {
     return row && row.expires > now ? row.user : undefined;
   }
 
-  /** Signs a user out everywhere (a ban, a recovery link used). */
+  /** Signs a user out everywhere (a ban, a recovery link used): their refresh tokens go, and their access tokens stop working. */
   dropRefreshes(user: string) {
     this.db.prepare('DELETE FROM refresh_tokens WHERE user = ?').run(user);
+    this.db.prepare('UPDATE users SET epoch = epoch + 1 WHERE id = ?').run(user);
   }
 
   /* Invites -------------------------------------------------------------------------------- */

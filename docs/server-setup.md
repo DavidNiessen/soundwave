@@ -109,12 +109,17 @@ You need a Linux server with Docker, and a domain (or subdomain) whose DNS point
        proxy_set_header Upgrade $http_upgrade;
        proxy_set_header Connection "upgrade";
        proxy_set_header Host $host;
-       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+       proxy_set_header X-Forwarded-For $remote_addr;
    }
    ```
 
 The compose file already sets `SOUNDWAVE_TRUST_PROXY=true`, so the server counts its rate limits
-per player rather than per proxy.
+per player rather than per proxy. It takes the player's address from the last `X-Forwarded-For`
+entry, the one your proxy added (anything before it is whatever the player's own program sent).
+That is only safe while the server can be reached through the proxy alone: keep port 7420 published
+to `127.0.0.1` as above, and if you ever publish it to the internet directly, set
+`SOUNDWAVE_TRUST_PROXY=false`. With two proxies in a row (Cloudflare in front of Coolify, say), set
+it to `2`, so the address counted is the one the outer proxy saw rather than the outer proxy's own.
 
 ### C. Your own PC
 
@@ -179,6 +184,10 @@ always keeps at least one.
 
 Who can join depends on the server's mode (`SOUNDWAVE_MODE`). Players never pick a password of
 their own: their game's identity signs them in.
+
+Give everyone one address for the server (its domain, the one in `SOUNDWAVE_PUBLIC_URL`): the game
+makes its key for a server from the address it connects to, so reaching the same server by another
+address (its IP instead of its name) makes a new account there.
 
 | Mode       | Who can join                                                           |
 | ---------- | ---------------------------------------------------------------------- |

@@ -44,6 +44,8 @@ export interface Settings {
   rumbleOverdrive: boolean;
   /** A PS5 controller's own haptics (desktop app, by cable) instead of its plain rumble. */
   ps5Haptics: boolean;
+  /** A PlayStation controller's light bar follows the song (desktop app, by cable). */
+  lightbar: boolean;
   /** The player's own keys, buttons and mouse buttons for the game's shortcuts (see input/bindings). */
   bindings: BindingOverrides;
   /** The 3D stage behind the highway. */
@@ -156,6 +158,7 @@ export const DEFAULT_SETTINGS: Settings = {
   rumbleSustains: true,
   rumbleOverdrive: true,
   ps5Haptics: true,
+  lightbar: true,
   bindings: {},
   graphics: DEFAULT_GRAPHICS,
   stage: DEFAULT_STAGES,
@@ -213,6 +216,7 @@ export function normalizeSettings(raw: Partial<Settings>): Settings {
   if (!['system', 'reduced', 'full'].includes(s.motion)) s.motion = 'system';
   s.touchHaptics = Boolean(s.touchHaptics);
   s.ps5Haptics = Boolean(s.ps5Haptics);
+  s.lightbar = Boolean(s.lightbar);
   s.bindings = normalizeBindings(s.bindings);
   s.muteUnfocused = Boolean(s.muteUnfocused);
   s.songPreviews = Boolean(s.songPreviews);
@@ -232,6 +236,10 @@ export function normalizeSettings(raw: Partial<Settings>): Settings {
   delete (s as unknown as { keepPartySongs?: boolean }).keepPartySongs;
   s.shareLibrary = s.shareLibrary === true;
   s.shareAsked = Array.isArray(s.shareAsked) ? s.shareAsked.filter((x): x is string => typeof x === 'string').slice(-50) : [];
+  // Settings from before the game kept where the offset was set: an offset already set came from a
+  // calibration on the output used then.
+  if (!('calibratedOn' in raw) && typeof s.offsetMs === 'number' && s.offsetMs !== 0)
+    s.calibratedOn = typeof s.outputDevice === 'string' ? s.outputDevice : '';
   if (typeof s.calibratedOn !== 'string') s.calibratedOn = null;
   if (typeof s.outputDevice !== 'string') s.outputDevice = '';
   if (typeof s.outputDeviceName !== 'string' || !s.outputDevice) s.outputDeviceName = '';

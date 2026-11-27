@@ -4,7 +4,7 @@ import { getEngine } from '../audio/engine';
 import { playSfx } from '../audio/sfx';
 import type { Chart } from '../chart/types';
 import { PlayController, REPLAY_START, timelineShape, type PlayPhase } from '../game/PlayController';
-import { replayMisses, type ReplayInputs } from '../game/replay';
+import { replayMisses, replayResults, type ReplayInputs } from '../game/replay';
 import type { Settings } from '../game/settings';
 import { keysOf } from '../input/bindings';
 import { useInputMode } from '../input/inputMode';
@@ -329,7 +329,9 @@ export function ReplayScreen({ replay, chart, inputs, buffer, silent, settings, 
     return [...at].filter((p) => p >= 0 && p <= 1);
   }, [chart, inputs, duration]);
   const shape = useMemo(() => timelineShape(chart, duration), [chart, duration]);
-  const r = replay.results;
+  // The run judged again, as the highway shows it: a replay recorded before judging went by time
+  // (format 1) can come out a point or two off the result stored with it.
+  const r = useMemo(() => replayResults(chart, inputs), [chart, inputs]);
   const what = `${PART_LABEL[replay.part]} · ${DIFFICULTY_LABEL[replay.difficulty]}`;
   const prev = keysOf('menus.tabPrev');
   const next = keysOf('menus.tabNext');

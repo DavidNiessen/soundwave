@@ -217,12 +217,21 @@ export function PlayScreen({
    */
   function showdown(ctrl: PlayController, sd: { songIndex: number; hits: boolean; me: string }) {
     let asking = false;
+    let askTimer = 0;
+    const timers = new Set<number>();
     if (sd.hits)
       ctrl.strike = (charge) => {
         if (asking) return true;
         if (!online.board()?.lines.find((l) => l.id === sd.me)?.aim) return false;
         asking = true;
         online.strike(sd.songIndex, charge);
+        // No answer (the connection dropped the ask): the press is an overdrive after all, rather
+        // than overdrive waiting for an answer that never comes for the rest of the song.
+        askTimer = window.setTimeout(() => {
+          if (!asking) return;
+          asking = false;
+          ctrl.overdriveNow();
+        }, 1500);
         return true;
       };
     // The ring's podiums follow the board: up by place, down once out, red under a hit.
@@ -239,7 +248,17 @@ export function PlayScreen({
       if (e.songIndex !== sd.songIndex) return;
       if (e.type === 'strikeFired') return ctrl.showStrike(e.from, e.to, e.at);
       if (e.type === 'struck') {
+        // An answer after the wait ran out: the press was an overdrive by then, but a Strike that
+        // landed still shows, so the player knows it hit.
+        if (!asking) {
+          if (e.target) {
+            playShowdownSfx('strike');
+            setFired({ target: e.target, at: performance.now(), ms: e.ms ?? 5000 });
+          }
+          return;
+        }
         asking = false;
+        clearTimeout(askTimer);
         if (!e.target) return ctrl.overdriveNow();
         ctrl.spendCharge();
         playShowdownSfx('strike');
@@ -250,11 +269,14 @@ export function PlayScreen({
       setHit({ from: e.from, at: e.at, ms: e.ms });
       // The warning now, the impact when it lands.
       playShowdownSfx('incoming');
-      window.setTimeout(() => playShowdownSfx('impact'), Math.max(0, e.at - performance.now()));
+      const impact = window.setTimeout(() => (timers.delete(impact), playShowdownSfx('impact')), Math.max(0, e.at - performance.now()));
+      timers.add(impact);
     });
     return () => {
       unBoard();
       unPlay();
+      clearTimeout(askTimer);
+      for (const t of timers) clearTimeout(t);
     };
   }
 

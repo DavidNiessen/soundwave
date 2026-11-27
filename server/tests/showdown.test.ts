@@ -16,12 +16,15 @@ const SET: SetSong[] = [
   { id: SONG, title: 'One', artist: '', duration: 30 },
   { id: SONG2, title: 'Two', artist: '', duration: 30 },
 ];
-/** Ten notes: a flawless run (the par) is worth 550 points, the tenth note at ×2. A share is score / 550. */
+/**
+ * Ten notes: a flawless run (the par) is worth 550 points, the tenth note at ×2. A share is score / 550.
+ * Each note is a phrase of its own, all over by 3 s, so the meter is full early on for Strikes.
+ */
 const chart: WireChart = {
   part: 'lead',
   difficulty: 'medium',
   lanes: 4,
-  notes: Array.from({ length: 10 }, (_, i) => ({ t: 1 + i, lane: 0, dur: 0, phrase: -1 })),
+  notes: Array.from({ length: 10 }, (_, i) => ({ t: 0.2 + i * 0.3, lane: 0, dur: 0, phrase: i })),
   beats: [0, 0.5, 1],
   downbeats: [0],
   secondsPerBeat: 0.5,
@@ -124,7 +127,8 @@ describe('Showdown', () => {
   it('strikes the player just above, warns them half a second ahead with the striker’s name', () => {
     const { say, start, progress, advance, last } = showdown(3);
     start(0);
-    advance(6000);
+    // Into the song (after its countdown), its phrases played: the meter is full.
+    advance(9000);
     progress(0, 300);
     progress(1, 200);
     progress(2, 100);
@@ -132,7 +136,7 @@ describe('Showdown', () => {
     expect(last(2, 'struck')).toMatchObject({ target: 'p1' });
     const hit = last(1, 'hit')!;
     expect(hit).toMatchObject({ from: 'Player 2', ms: 14000 });
-    expect(hit.at).toBe(7000 + HIT_WARNING_MS);
+    expect(hit.at).toBe(10_000 + HIT_WARNING_MS);
     // Everyone sees the Strike fly, the players it is not about too.
     for (const i of [0, 1, 2]) expect(last(i, 'strikeFired')).toMatchObject({ from: 'p2', to: 'p1', at: hit.at });
     // First place has nobody above: their press stays an overdrive.
@@ -147,17 +151,22 @@ describe('Showdown', () => {
   it('hits one at a time, protects for 6 s after, and halves a repeat within 30 s', () => {
     const { say, start, progress, advance, last } = showdown(3);
     start(0);
-    advance(6000);
+    // Into the song (after its countdown), its phrases played: the meter is full.
+    advance(9000);
     progress(0, 300);
     progress(1, 200);
     progress(2, 100);
     say(2, { type: 'strike', songIndex: 0, charge: 0.25 });
     expect(last(1, 'hit')).toMatchObject({ ms: 6000 });
-    // p1 is under the hit: p2's next Strike goes on up, to p0.
+    // A Strike spends the meter: another one at once is refused.
+    say(2, { type: 'strike', songIndex: 0, charge: 0.25 });
+    expect(last(2, 'struck')).toMatchObject({ target: null });
+    // p1 is still under the hit: p2's next Strike goes on up, to p0.
+    advance(2000);
     say(2, { type: 'strike', songIndex: 0, charge: 0.25 });
     expect(last(2, 'struck')).toMatchObject({ target: 'p0' });
     // Both are under a hit or protected: nobody can be hit, the charge is not spent.
-    advance(HIT_WARNING_MS + 6000 + HIT_PROTECTION_MS - 100);
+    advance(HIT_WARNING_MS + 6000 + HIT_PROTECTION_MS - 2100);
     say(2, { type: 'strike', songIndex: 0, charge: 0.25 });
     expect(last(2, 'struck')).toMatchObject({ target: null });
     // Protection over, still within 30 s of the first hit: half as long.
@@ -170,7 +179,8 @@ describe('Showdown', () => {
   it('lets at most two players aim at the same player', () => {
     const { say, start, progress, advance, last } = showdown(5);
     start(0);
-    advance(6000);
+    // Into the song (after its countdown), its phrases played: the meter is full.
+    advance(9000);
     [500, 400, 300, 200, 100].forEach((score, i) => progress(i, score));
     // p1 and p2 are under hits: p3 and p4 would both look past them…
     say(2, { type: 'strike', songIndex: 0, charge: 0.25 }); // p2 hits p1
@@ -236,5 +246,65 @@ describe('Showdown', () => {
     const back = last(2, 'party')?.party;
     // Either still in the party at its results, or out of it after the grace: never in the song.
     expect(back === null || back?.phase !== 'playing').toBe(true);
+  });
+
+  it('keeps a knocked-out player out when they leave and come back, and lets a newcomer only watch', () => {
+    const { parties, say, start, last, state } = showdown(6);
+    start(0);
+    for (let i = 0; i < 6; i++) say(i, { type: 'finish', songIndex: 0, result: result(Math.round(PAR * (1 - i / 10))) });
+    expect(state().members.find((m) => m.id === 'p5')?.eliminated).toBe(true);
+    const code = state().code;
+    say(5, { type: 'party-leave' });
+    say(5, { type: 'party-join', code });
+    const late = { id: 'late', name: 'Late' };
+    parties.handle(late, { type: 'party-join', code });
+    for (const who of ['p5', 'late']) expect(state().members.find((m) => m.id === who)?.eliminated).toBe(true);
+    // Neither is given a chart for the next song, whatever the host's game assigns.
+    say(5, { type: 'ready', part: 'lead', difficulty: 'medium', ready: true, have: [SONG, SONG2] });
+    parties.handle(late, { type: 'ready', part: 'lead', difficulty: 'medium', ready: true, have: [SONG, SONG2] });
+    say(0, { type: 'start', songIndex: 1, charts: [chart], assign: { p0: 0, p1: 0, p2: 0, p3: 0, p5: 0, late: 0 } });
+    expect(last(5, 'start')?.chart).toBeNull();
+    expect(state().members.filter((m) => !m.eliminated)).toHaveLength(4);
+  });
+
+  it('does not let a player the host removed back in', () => {
+    const { say, last, state } = showdown(3);
+    const code = state().code;
+    say(0, { type: 'kick', id: 'p2' });
+    expect(state().members.map((m) => m.id)).toEqual(['p0', 'p1']);
+    say(2, { type: 'party-join', code });
+    expect(last(2, 'error')?.message).toMatch(/removed you/);
+    expect(state().members.map((m) => m.id)).toEqual(['p0', 'p1']);
+  });
+
+  it('holds Strikes to the charge the chart’s phrases can have given, one every two seconds', () => {
+    const { say, start, progress, advance, last } = showdown(3);
+    start(0);
+    // In the countdown, before the song's first phrase ends, there is no charge, whatever the game says.
+    advance(4000);
+    progress(0, 300);
+    progress(1, 200);
+    say(2, { type: 'strike', songIndex: 0, charge: 1 });
+    expect(last(2, 'struck')).toMatchObject({ target: null });
+    // A second into the song after its 3 s countdown (and the server's second of slack): the
+    // phrases ended by 2 s gave 1.75 of meter.
+    advance(5000);
+    say(2, { type: 'strike', songIndex: 0, charge: 1 });
+    expect(last(1, 'hit')).toMatchObject({ ms: 14000 });
+    // Not again within two seconds, whatever the charge.
+    advance(1000);
+    say(2, { type: 'strike', songIndex: 0, charge: 0.25 });
+    expect(last(2, 'struck')).toMatchObject({ target: null });
+    // Every phrase ended: 2.5 in all, 1.5 left, a full meter's Strike…
+    advance(30_000);
+    progress(0, 400);
+    progress(1, 300);
+    say(2, { type: 'strike', songIndex: 0, charge: 1 });
+    expect(last(1, 'hit')).toMatchObject({ ms: 14000 });
+    // …and then only half a meter's, however full the game says it is.
+    advance(21_000);
+    say(2, { type: 'strike', songIndex: 0, charge: 1 });
+    expect(last(2, 'struck')).toMatchObject({ target: 'p1' });
+    expect(last(1, 'hit')).toMatchObject({ ms: hitLength(0.5, true) });
   });
 });

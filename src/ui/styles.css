@@ -68,6 +68,11 @@
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
   /* An earned star. Gold is kept for gold stars, the tier beyond five. */
   --star: #c4a6ff;
+  /* A Showdown player's pill over the stage: night blue into violet, so it reads over any stage
+     without taking a light role (pink acts, mint focuses, lavender selects, gold is earned). */
+  --showdown-1: #3d6bff;
+  --showdown-2: #8a4dff;
+  --showdown-3: #c04dff;
   --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
   /* A gentler landing than --ease, for large things that arrive (the home tiles). */
   --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
@@ -921,6 +926,14 @@ img.cover {
   z-index: 90;
   -webkit-app-region: drag;
 }
+/* A Mac window has its close, minimize and full-screen buttons over the top of the game: the pages
+   keep that band clear, and the whole band moves the window, as a title bar does. */
+:root.mac-titlebar {
+  --safe-t: max(env(safe-area-inset-top, 0px), 28px);
+}
+:root.mac-titlebar .drag-strip {
+  height: 28px;
+}
 .page-body {
   flex: 1;
   min-height: 0;
@@ -1250,6 +1263,9 @@ img.cover {
 .tile.hero .mosaic {
   flex: none;
   align-self: stretch;
+  /* A square as tall as the card. The height is spelled out: WebKit (Safari, the macOS app) does not
+     take a width from a stretched height and would draw the covers as a thin strip. */
+  height: 100%;
   aspect-ratio: 1;
   max-width: 48%;
 }
@@ -3099,43 +3115,220 @@ input.text {
   font-size: 1.6rem;
 }
 
-/* Toasts, drop target, launch */
-.toasts {
+/* Notifications (Notifications.tsx): a short stack that comes and goes on its own, centred at the
+   foot of the menus above the action bar, along the top edge during a song (clear of the highway)
+   and on a phone (whose foot holds the setlist and the thumbs). Newest nearest the edge. */
+.notices {
   position: absolute;
-  right: calc(var(--gutter) + var(--safe-r));
-  bottom: calc(var(--bar-h) + var(--safe-b) + 0.4rem);
-  z-index: 60;
+  left: 50%;
+  z-index: 75;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  width: min(26rem, calc(100% - 2 * var(--gutter)));
+  width: min(30rem, calc(100% - 2 * var(--gutter) - var(--safe-l) - var(--safe-r)));
+  translate: -50% 0;
+  pointer-events: none;
 }
-.toast {
+.notices.at-bar {
+  bottom: calc(var(--safe-b) + 1rem);
+}
+.action-bar ~ .notices.at-bar {
+  bottom: calc(var(--bar-h) + var(--safe-b) + 0.5rem);
+}
+.notices.at-top {
+  top: calc(var(--safe-t) + 0.9rem);
+  flex-direction: column-reverse;
+}
+@media (max-width: 640px) {
+  .notices.at-bar,
+  .action-bar ~ .notices.at-bar {
+    top: calc(var(--safe-t) + 0.6rem);
+    bottom: auto;
+    flex-direction: column-reverse;
+  }
+}
+.notice {
+  --tone: var(--ink-2);
+  --tone-wash: rgb(196 166 255 / 0.16);
+  --from: 0.8rem;
+  position: relative;
   display: flex;
-  gap: 0.7rem;
-  align-items: flex-start;
-  text-align: left;
-  padding: 0.8rem 1rem;
+  gap: 0.75rem;
+  align-items: center;
+  width: 100%;
+  min-height: 3.3rem;
+  padding: 0.6rem 0.6rem 0.65rem 0.7rem;
+  overflow: hidden;
   border-radius: var(--r-m);
-  background: #4a1a52;
+  background: linear-gradient(90deg, var(--tone-wash), transparent 40%), var(--panel-solid);
+  backdrop-filter: var(--glass-blur);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-edge),
+    0 18px 34px -16px rgb(0 0 0 / 0.85);
   color: var(--ink);
-  line-height: 1.4;
-  box-shadow: 0 16px 30px -14px rgb(0 0 0 / 0.8);
-  animation: toast-in 0.35s var(--ease);
+  font: 500 0.95rem/1.35 var(--font);
+  text-align: left;
+  pointer-events: auto;
+  animation: notice-in 0.38s var(--ease);
+  transition: transform 0.12s var(--ease);
 }
-.toast svg {
+.notices.at-top .notice {
+  --from: -0.8rem;
+}
+@media (max-width: 640px) {
+  .notices.at-bar .notice {
+    --from: -0.8rem;
+  }
+}
+.notice.error {
+  --tone: #ffa3b4;
+  --tone-wash: rgb(255 90 114 / 0.2);
+}
+.notice.warning {
+  --tone: #ffc98a;
+  --tone-wash: rgb(255 170 80 / 0.17);
+}
+.notice.success {
+  --tone: var(--ok);
+  --tone-wash: rgb(98 232 154 / 0.16);
+}
+.notice:active {
+  transform: scale(0.98);
+}
+.notice.again {
+  animation: notice-again 0.34s var(--ease);
+}
+.notice.leaving {
+  pointer-events: none;
+  animation: notice-out 0.2s var(--ease-in) forwards;
+}
+.notice-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 50%;
+  background: var(--tone-wash);
+  color: var(--tone);
+}
+.notice-icon svg {
   width: 1.2rem;
   height: 1.2rem;
-  flex: none;
-  margin-top: 0.1rem;
-  color: var(--pink-2);
 }
-@keyframes toast-in {
+.notice-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.notice-count {
+  flex: none;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: var(--tone-wash);
+  color: var(--tone);
+  font: 800 0.8rem/1.2 var(--font);
+  font-variant-numeric: tabular-nums;
+}
+.notice-close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  min-width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 50%;
+  color: var(--ink-3);
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.notice-close > svg {
+  width: 1rem;
+  height: 1rem;
+}
+.notice:hover .notice-close {
+  background: var(--raised-hi);
+  color: var(--ink);
+}
+/* Unfolded, the gaps between the cards are part of the stack, so the pointer can travel from the
+   newest to the older ones without the stack folding under it. */
+.notices.held {
+  pointer-events: auto;
+}
+/* Folded: every notification in one place, the older ones as edges behind the newest (above it at
+   the foot, below it at the top), so the stack covers no more than one. The pointer unfolds it. */
+.notices.folded {
+  display: grid;
+}
+.notices.folded > .notice {
+  grid-area: 1 / 1;
+  z-index: calc(10 - var(--depth));
+}
+.notices.folded > .notice.behind {
+  --peek: -0.55rem;
+  align-self: start;
+  height: 3.3rem;
+  transform: translateY(calc(var(--depth) * var(--peek))) scale(calc(1 - var(--depth) * 0.05));
+  filter: brightness(calc(1 - var(--depth) * 0.18));
+  transition:
+    transform 0.3s var(--ease),
+    filter 0.3s var(--ease);
+}
+.notices.folded > .notice.behind > * {
+  opacity: 0;
+}
+.notices.folded.at-top > .notice.behind {
+  --peek: 0.55rem;
+  align-self: end;
+}
+@media (max-width: 640px) {
+  .notices.folded.at-bar > .notice.behind {
+    --peek: 0.55rem;
+    align-self: end;
+  }
+}
+/* The time it has left, running out along its foot; it stops while the stack is held. */
+.notice-life {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--tone);
+  opacity: 0.5;
+  transform-origin: left;
+  animation: notice-life var(--life) linear forwards;
+}
+.notices.held .notice-life {
+  animation-play-state: paused;
+}
+:root[data-motion='reduced'] .notice-life {
+  display: none;
+}
+@keyframes notice-in {
   from {
-    transform: translateY(0.8rem);
+    transform: translateY(var(--from)) scale(0.98);
     opacity: 0;
   }
 }
+@keyframes notice-again {
+  40% {
+    transform: scale(1.025);
+  }
+}
+@keyframes notice-out {
+  to {
+    transform: scale(0.96);
+    opacity: 0;
+  }
+}
+@keyframes notice-life {
+  to {
+    transform: scaleX(0);
+  }
+}
+
+/* Drop target, launch */
 .drop-overlay {
   position: absolute;
   inset: 0;
@@ -4657,6 +4850,10 @@ input.text {
   .action-bar:not(:has(.primary)) .act-group.end .act {
     flex: 1;
   }
+  /* Three or more side by side would each cut their name short: they keep their icons instead. */
+  .action-bar:not(:has(.primary)) .act-group.end:has(> .act:nth-child(3)) .act-label {
+    display: none;
+  }
   .act-passive {
     display: none;
   }
@@ -4773,10 +4970,6 @@ input.text {
   }
   .results-stats dd {
     font-size: 1.3rem;
-  }
-  .toasts {
-    width: auto;
-    left: calc(var(--gutter) + var(--safe-l));
   }
 }
 @keyframes sheet-up {
@@ -5305,7 +5498,13 @@ input.text {
   background: var(--panel-solid);
   box-shadow: 0 16px 30px -14px rgb(0 0 0 / 0.8);
   overflow-x: auto;
-  animation: toast-in 0.3s var(--ease);
+  animation: selbar-in 0.3s var(--ease);
+}
+@keyframes selbar-in {
+  from {
+    transform: translateY(0.8rem);
+    opacity: 0;
+  }
 }
 .editor-selbar .btn {
   flex: none;
@@ -5954,14 +6153,23 @@ kbd.mark {
   width: 1.15rem;
   height: 1.15rem;
 }
+/* On a phone five named tabs do not fit: the row takes the width, and only the open tab says its name. */
 @media (max-width: 640px) {
   .home-tabs {
     order: 3;
     margin-left: 0;
+    width: 100%;
   }
-  .home-tabs .tab,
-  .home-tabs .tab.on {
-    padding: 0;
+  .home-tabs .tab-row {
+    flex: 1;
+  }
+  .home-tabs .tab {
+    flex: 1 1 auto;
+    justify-content: center;
+    padding: 0 0.55rem;
+  }
+  .home-tabs .tab:not(.on) .tab-label {
+    display: none;
   }
 }
 
@@ -6397,9 +6605,9 @@ a.btn {
   height: 1.15rem;
   filter: drop-shadow(0 2px 4px rgb(0 0 0 / 0.5));
 }
-/* The replay's own keep button lights up while the replay is kept. */
+/* The replay's own keep button lights up while the replay is kept (lavender: mint is only the focus ring). */
 .btn[aria-pressed='true'] svg {
-  color: var(--mint);
+  color: var(--lit);
   fill: currentColor;
 }
 .replay-speed {
@@ -6475,7 +6683,7 @@ a.btn {
 }
 .replay-kept {
   display: inline-grid;
-  color: var(--mint);
+  color: var(--lit);
 }
 .replay-kept svg {
   width: 1rem;
@@ -6929,7 +7137,7 @@ a.btn {
 }
 .party .hint svg {
   vertical-align: -0.12em;
-  color: var(--gold);
+  color: var(--ink-2);
 }
 
 /* Signing in: the server first, then you. */
@@ -7266,6 +7474,16 @@ a.btn {
 .mode-tile:disabled {
   cursor: default;
 }
+/* The Online tab's party tile while the connection is being tried again: it says why it waits. */
+.tile.hero:disabled {
+  cursor: default;
+}
+.tile.hero:disabled .tile-title {
+  color: var(--ink-3);
+}
+:root[data-input='mouse'] .tile.hero:disabled:hover {
+  transform: none;
+}
 :root[data-input='mouse'] .mode-tile:disabled:hover {
   transform: none;
   background: var(--panel);
@@ -7293,7 +7511,7 @@ a.btn {
   --mode-glow: rgb(255 77 157 / 0.55);
 }
 .mode-tile[data-mode='showdown'] {
-  --mode-glow: rgb(255 210 61 / 0.45);
+  --mode-glow: rgb(138 77 255 / 0.5);
 }
 .mode-tile .tile-meta.warn {
   color: #ffc98a;
@@ -7342,7 +7560,7 @@ a.btn {
   height: 1em;
   margin-left: 0.35em;
   vertical-align: -0.12em;
-  color: var(--gold);
+  color: var(--ink-2);
 }
 /* The players as cards: their look's colours, their part, and whether they are ready. */
 .player-cards {
@@ -7448,7 +7666,7 @@ a.btn {
   flex: none;
   width: 1em;
   height: 1em;
-  color: var(--gold);
+  color: var(--ink-2);
 }
 .player-you {
   flex: none;
@@ -7570,6 +7788,11 @@ a.btn {
 .party-empty {
   grid-template-columns: 1.6rem minmax(0, 1fr);
 }
+/* The empty set's explanation is the one thing on the card: it wraps instead of being cut short. */
+.party-empty :is(.song-title, .song-artist) {
+  white-space: normal;
+  overflow: visible;
+}
 .party-empty .slot-num svg {
   width: 1.3rem;
   height: 1.3rem;
@@ -7587,7 +7810,7 @@ a.btn {
   align-items: center;
   flex-wrap: wrap;
   gap: 0.4rem;
-  color: var(--mint);
+  color: var(--ink-2);
 }
 .transfer svg {
   width: 1rem;
@@ -7597,7 +7820,7 @@ a.btn {
   flex-basis: 100%;
   height: 0.3rem;
   border-radius: 1rem;
-  background: linear-gradient(90deg, var(--mint) calc(var(--done, 0) * 100%), var(--well) 0);
+  background: linear-gradient(90deg, var(--lit) calc(var(--done, 0) * 100%), var(--well) 0);
 }
 .option-label {
   display: flex;
@@ -8297,7 +8520,7 @@ a.btn {
   height: 0.95em;
   margin-left: 0.45em;
   vertical-align: -0.1em;
-  color: var(--mint);
+  color: var(--ink-2);
 }
 .board-pill {
   justify-self: center;
@@ -8914,7 +9137,7 @@ a.btn {
   margin-left: 0.3rem;
 }
 .sdr-count.held {
-  color: var(--gold);
+  color: var(--ink-2);
 }
 
 /* ------------------------------------------------------------------------------------------- */
@@ -8965,7 +9188,7 @@ a.btn {
   height: 100%;
   width: calc(var(--p, 0) * 100%);
   border-radius: inherit;
-  background: var(--mint);
+  background: var(--lit);
   transition: width 1s linear;
 }
 
@@ -9177,12 +9400,12 @@ a.btn {
 .sdb-count svg {
   width: 2.2rem;
   height: 2.2rem;
-  color: var(--mint);
+  color: var(--ink-2);
   animation: spin 3s linear infinite;
 }
 .sdb-count.held svg {
   animation: none;
-  color: var(--gold);
+  color: var(--ink-3);
 }
 .sdb-count > span {
   display: flex;
@@ -9313,8 +9536,8 @@ a.btn {
   vertical-align: 0.05em;
 }
 .mode-tag.showdown {
-  background: rgb(255 210 61 / 0.18);
-  color: var(--gold);
+  background: rgb(138 77 255 / 0.24);
+  color: var(--ink);
 }
 .mode-tag.versus {
   background: rgb(255 77 157 / 0.2);
@@ -9497,13 +9720,13 @@ a.btn {
   min-height: 3.3rem;
   padding: 0.25rem 0.3rem 0.25rem 1.1rem;
   border-radius: 999px;
-  background: linear-gradient(90deg, #3d6bff, #8a4dff 70%, #c04dff);
+  background: linear-gradient(90deg, var(--showdown-1), var(--showdown-2) 70%, var(--showdown-3));
   box-shadow: 0 0.3rem 1rem rgb(0 0 0 / 0.35);
   color: #fff;
 }
 .sd-row.me .sd-pill {
-  background: linear-gradient(90deg, #ffb31a, #ffd23d);
-  color: #2a1600;
+  background: var(--lit);
+  color: var(--lit-ink);
 }
 .sd-row.hit .sd-pill {
   animation: sd-pill-hit 0.6s ease-in-out infinite alternate;
@@ -9856,10 +10079,10 @@ a.btn {
   background: rgb(12 8 28 / 0.85);
 }
 .sd-cut.danger .sd-cut-margin {
-  color: #ff6b84;
+  color: var(--danger-2);
 }
 .sd-cut.safe .sd-cut-margin {
-  color: #6ff0a6;
+  color: var(--ok);
 }
 /* Places skipped between the leader and you: three small dots, centred under the pills. */
 .sd-gap {
@@ -9932,7 +10155,7 @@ a.btn {
   color: #1a0710;
 }
 .sd-segs span {
-  background: linear-gradient(90deg, var(--mint) calc(var(--fill, 0) * 100%), transparent 0), rgb(0 0 0 / 0.35);
+  background: linear-gradient(90deg, var(--lit) calc(var(--fill, 0) * 100%), transparent 0), rgb(0 0 0 / 0.35);
 }
 .sd-segs.drain span,
 .sd-struck .sd-segs span {
@@ -10251,7 +10474,7 @@ a.btn {
   stroke: rgb(255 255 255 / 0.16);
 }
 .progress-ring .fill {
-  stroke: var(--mint);
+  stroke: var(--lit);
   stroke-linecap: round;
   transition: stroke-dasharray 0.2s ease-out;
 }
@@ -10262,21 +10485,34 @@ a.btn {
   animation-timing-function: linear;
 }
 .server-song.in-set .progress-ring .track {
-  stroke: rgb(6 38 31 / 0.25);
+  stroke: rgb(29 18 99 / 0.25);
 }
 .server-song.in-set .progress-ring .fill {
-  stroke: #06261f;
+  stroke: var(--lit-ink);
 }
 .server-song.failed .server-song-act {
   box-shadow: inset 0 0 0 2px var(--danger-2);
 }
-/* A streamed song in the setlist: its pill says where. */
+/* A streamed song in the setlist: its pill says where, lavender as the library's setlist badge is. */
 .server-song.in-set .server-song-act {
-  background: var(--mint);
-  color: #06261f;
+  background: var(--lit);
+  color: var(--lit-ink);
 }
+/* A switch that is on is a chosen thing: the lavender sheet with dark ink (a mint ring would read as focus). */
 .btn.is-on {
-  box-shadow: inset 0 0 0 2px var(--mint);
+  background: var(--lit);
+  color: var(--lit-ink);
+}
+.btn.is-on:hover:not(:disabled) {
+  background: #fff;
+  color: var(--lit-ink);
+}
+.btn.is-on svg {
+  color: var(--lit-ink);
+}
+.btn.is-on .keycap-hint {
+  background: var(--lit-ink);
+  color: var(--lit);
 }
 
 /* The admin page's server library: a song renamed in place. */
@@ -10338,6 +10574,56 @@ a.btn {
 .online-bento .tile.hero .mosaic {
   max-width: 34%;
 }
+/* Three or four ways on beside the party (the boards, the look, invites, the server's tools): two
+   by two, each its icon over its name, so the column fits beside the party tile at 720px tall. */
+@media (min-width: 641px) {
+  .online-bento .party-tiles:has(.tile-stack.many) .tile.hero {
+    flex: 1 1 0;
+  }
+  .online-bento .party-tiles:has(.tile-stack.many) .tile.hero .mosaic {
+    max-width: 26%;
+  }
+  .online-bento .party-tiles:has(.tile-stack.many) .tile.hero .party-code-text {
+    font-size: clamp(1.6rem, 2.6vw, 2.4rem);
+    letter-spacing: 0.1em;
+    white-space: nowrap;
+  }
+  .online-bento .tile-stack.many {
+    flex: 1.15 1 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto;
+    grid-auto-rows: minmax(0, 1fr);
+  }
+  .online-bento .tile-stack.many > .party-join {
+    grid-column: 1 / -1;
+  }
+  .online-bento .tile-stack.many .tile.small {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 0.55rem;
+    padding: 0.8rem 0.9rem;
+  }
+  .online-bento .tile-stack.many .tile-icon {
+    width: 2.6rem;
+    margin-left: 0;
+  }
+  .online-bento .tile-stack.many .tile.small .tile-text {
+    flex: none;
+    padding: 0;
+  }
+  .online-bento .tile-stack.many .tile.small .tile-cap {
+    display: none;
+  }
+  /* An odd one out (three of them, for a player) takes the whole row. */
+  .online-bento .tile-stack.many.odd > .tile.small:last-child {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+  }
+}
 
 /* The player's portrait on the Online tab: a card of the game's light, a podium, the figure in it,
    drawn above the menus (not the stage behind them). */
@@ -10373,7 +10659,7 @@ a.btn {
   position: absolute;
   inset: 8% 18% 30%;
   border-radius: 50%;
-  background: radial-gradient(closest-side, rgb(93 242 214 / 0.18), transparent);
+  background: radial-gradient(closest-side, rgb(239 234 255 / 0.16), transparent);
   filter: blur(8px);
   animation: portrait-breathe 4s ease-in-out infinite alternate;
 }
@@ -10672,7 +10958,7 @@ a.btn {
   letter-spacing: 0.05em;
 }
 .admin-role.owner {
-  color: var(--gold);
+  color: var(--ink);
 }
 .admin-role.moderator {
   color: var(--pink-2);
@@ -10794,10 +11080,18 @@ a.btn {
   flex-direction: column;
   gap: 0.55rem;
 }
-.look-group > .label {
+.look-group > .label,
+.look-group-head > .label {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+.look-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.8rem;
 }
 .look-parts {
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -11218,6 +11512,22 @@ a.btn {
   color: var(--ink);
   font-weight: 700;
 }
+/* A short window (720px and under): the editor tightens so Save and the rest stay in view without scrolling. */
+@media (max-height: 820px) and (min-width: 1001px) {
+  .look-editor {
+    gap: 0.7rem;
+    padding-block: 0.9rem;
+  }
+  .look-head .display {
+    font-size: 1.6rem;
+  }
+  .look-head .hint {
+    margin-top: 0.2rem;
+  }
+  .look-swatches {
+    grid-template-columns: repeat(auto-fill, minmax(2.4rem, 2.8rem));
+  }
+}
 /* A narrow window shows the character while the look is edited, above the editor. */
 @media (max-width: 1000px) {
   .online-panel.editing .online-me {
@@ -11241,170 +11551,6 @@ a.btn {
   }
 }
 
-/* A dropdown in the game's look (ui/Dropdown.tsx): a well like the other fields, its list a panel
-   of the menus' glass under it, the choice ticked and the focused option lit. */
-.dropdown {
-  position: relative;
-  min-width: 0;
-}
-.dropdown-trigger {
-  width: 100%;
-  min-height: var(--target);
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0 0.8rem 0 0.95rem;
-  border-radius: var(--r-m);
-  background: var(--well);
-  color: var(--ink);
-  font-weight: 700;
-  text-align: left;
-  box-shadow: inset 0 0 0 1.5px transparent;
-  transition:
-    background 0.15s,
-    box-shadow 0.15s;
-}
-.dropdown-trigger:hover:not(:disabled) {
-  background: rgb(255 255 255 / 0.08);
-}
-.dropdown.open .dropdown-trigger {
-  box-shadow: inset 0 0 0 2px var(--pink);
-}
-.dropdown-trigger:disabled {
-  cursor: default;
-}
-.dropdown-trigger:disabled :is(.dropdown-value, .dropdown-chevron) {
-  color: var(--ink-3);
-}
-.dropdown-value {
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.dropdown-value.placeholder {
-  color: var(--ink-2);
-}
-.dropdown-chevron {
-  flex: none;
-  width: 1.1rem;
-  height: 1.1rem;
-  color: var(--ink-2);
-  transition: rotate 0.2s var(--ease);
-}
-.dropdown.open .dropdown-chevron {
-  rotate: 180deg;
-}
-.dropdown-panel {
-  /* Laid over the page at the button (Dropdown.tsx places it). */
-  position: fixed;
-  z-index: 200;
-  max-width: calc(100vw - 1rem);
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  padding: 0.4rem;
-  border-radius: var(--r-l);
-  background: var(--panel-solid);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  box-shadow:
-    inset 0 0 0 1px var(--glass-edge),
-    0 1.2rem 2.6rem -0.6rem rgb(0 0 0 / 0.7);
-  transform-origin: top center;
-  animation: dropdown-in 0.18s var(--ease) backwards;
-}
-@keyframes dropdown-in {
-  from {
-    opacity: 0;
-    transform: translateY(-0.4rem) scale(0.98);
-  }
-}
-.dropdown-search {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-height: 2.6rem;
-  padding: 0 0.7rem;
-  border-radius: var(--r-m);
-  background: var(--well);
-  color: var(--ink-2);
-}
-.dropdown-search:focus-within {
-  box-shadow: inset 0 0 0 2px var(--pink);
-}
-.dropdown-search svg {
-  flex: none;
-  width: 1rem;
-  height: 1rem;
-}
-.dropdown-search input {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  outline: none;
-  background: transparent;
-  font-weight: 700;
-}
-.dropdown-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  max-height: min(20rem, 45vh);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-.dropdown-option {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  min-height: 2.6rem;
-  padding: 0.35rem 0.75rem;
-  border-radius: var(--r-m);
-  color: var(--ink);
-  text-align: left;
-  font-weight: 700;
-}
-.dropdown-option:hover,
-.dropdown-option:focus-visible {
-  background: rgb(255 255 255 / 0.08);
-  outline: none;
-}
-.dropdown-option:focus-visible {
-  box-shadow: inset 0 0 0 2px var(--mint);
-}
-.dropdown-option.on {
-  background: rgb(255 77 157 / 0.16);
-  color: #fff;
-}
-.dropdown-option > svg {
-  flex: none;
-  width: 1.1rem;
-  height: 1.1rem;
-  color: var(--pink-2);
-}
-.dropdown-option-text {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-.dropdown-option-label,
-.dropdown-option-hint {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.dropdown-option-hint {
-  color: var(--ink-2);
-  font-size: 0.85rem;
-}
-.dropdown-none {
-  margin: 0;
-  padding: 0.6rem 0.75rem;
-  color: var(--ink-3);
-}
 .admin-add {
   flex: 1;
   max-width: 28rem;
@@ -12036,7 +12182,7 @@ a.btn {
 }
 .admin-pill.good {
   background: rgb(61 220 132 / 0.16);
-  color: var(--mint);
+  color: var(--ok);
 }
 .admin-chips {
   display: flex;
@@ -12072,7 +12218,7 @@ a.btn {
   margin: 0;
 }
 .admin-empty.good svg {
-  color: var(--mint);
+  color: var(--ok);
 }
 /* A section's own page: a toolbar, then its list. */
 .admin-page-body {
@@ -12411,6 +12557,26 @@ a.btn {
   .online-landing {
     grid-template-columns: minmax(0, 1fr);
     align-items: start;
+  }
+}
+/* A short window (720px and under): the five cards beside the way in tighten so the last one,
+   Run your own server, is not cut off by the action bar. */
+@media (max-height: 820px) and (min-width: 1001px) {
+  .landing-side,
+  .landing-features {
+    gap: 0.4rem;
+  }
+  .landing-feature,
+  .landing-own {
+    padding: 0.55rem 0.9rem;
+  }
+  .landing-feature-icon {
+    width: 2.4rem;
+    height: 2.4rem;
+  }
+  .landing-feature-cap {
+    font-size: 0.86rem;
+    line-height: 1.3;
   }
 }
 

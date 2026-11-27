@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isFullscreenToggle, toggledMode, windowedSize } from '../src/game/displayMode';
+import { frameOnScreen, isFullscreenToggle, toggledMode, windowedSize } from '../src/game/displayMode';
 import { DEFAULT_SETTINGS, normalizeSettings, type Settings } from '../src/game/settings';
 
 describe('display mode setting', () => {
@@ -109,5 +109,31 @@ describe('replay settings', () => {
     expect(normalizeSettings({ replayLimit: 1 }).replayLimit).toBe(5);
     expect(normalizeSettings({ replayLimit: 1000 }).replayLimit).toBe(100);
     expect(normalizeSettings({ replayLimit: 'many' } as unknown as Partial<Settings>).replayLimit).toBe(30);
+  });
+});
+
+describe('a remembered window place', () => {
+  const monitors = [
+    { position: { x: 0, y: 0 }, size: { width: 2560, height: 1440 } },
+    { position: { x: 2560, y: 0 }, size: { width: 1920, height: 1080 } },
+  ];
+
+  it('is used while its title bar is on a connected monitor', () => {
+    expect(frameOnScreen({ x: 100, y: 80, width: 1600, height: 1000 }, monitors)).toBe(true);
+    expect(frameOnScreen({ x: 3000, y: 200, width: 1280, height: 800 }, monitors)).toBe(true);
+  });
+
+  it('is not used when that monitor is gone, or the title bar is off every screen', () => {
+    expect(frameOnScreen({ x: 5000, y: 100, width: 1280, height: 800 }, monitors)).toBe(false);
+    expect(frameOnScreen({ x: 100, y: -400, width: 1280, height: 800 }, monitors)).toBe(false);
+  });
+});
+
+describe('calibration from before the game kept where it was made', () => {
+  it('counts an offset already set as calibrated on the output used then', () => {
+    expect(normalizeSettings({ offsetMs: 40, outputDevice: 'usb' }).calibratedOn).toBe('usb');
+    expect(normalizeSettings({ offsetMs: 40 }).calibratedOn).toBe('');
+    expect(normalizeSettings({ offsetMs: 0 }).calibratedOn).toBeNull();
+    expect(normalizeSettings({ offsetMs: 40, calibratedOn: null }).calibratedOn).toBeNull();
   });
 });

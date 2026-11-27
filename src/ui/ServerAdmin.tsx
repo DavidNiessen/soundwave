@@ -36,6 +36,7 @@ import type { SongMeta } from '../storage/db';
 import { Hint, useActions, useHints, type Action } from './actions';
 import { Cover } from './Cover';
 import { Dialog } from './Dialog';
+import { notify } from './notify';
 import { ServerCover, ServerLibrary } from './ServerLibrary';
 import { ICON_STROKE } from './icons';
 
@@ -47,6 +48,21 @@ export function download(name: string, data: string | Blob, type = 'application/
   a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+/**
+ * Copies a link for the player to send, and says whether it worked: a browser can refuse the
+ * clipboard (no permission, a page not in front), and a silent failure leaves them pasting nothing.
+ */
+export function copyLink(link: string, what = 'The link'): Promise<boolean> {
+  if (!navigator.clipboard) {
+    notify.error(`${what} could not be copied here. Select it and copy it yourself.`);
+    return Promise.resolve(false);
+  }
+  return navigator.clipboard.writeText(link).then(
+    () => (notify.success(`${what} is copied.`), true),
+    () => (notify.error(`${what} could not be copied. Select it and copy it yourself.`), false),
+  );
 }
 
 /**
@@ -68,7 +84,7 @@ export function InvitePanel({ mod }: { mod: boolean }) {
       (e) => setProblem((e as Error).message),
     );
   };
-  const copy = () => void navigator.clipboard?.writeText(invite!.link).then(() => setCopied(true));
+  const copy = () => void copyLink(invite!.link, 'The invite link').then(setCopied);
   return (
     <section className="ready-panel">
       <h2 className="label">
@@ -789,11 +805,7 @@ function Players({ users, owner, me, onChange }: { users: UserEntry[] | null; ow
               <div className="admin-recovery">
                 <p className="hint">Send this to {recovery.name} only. It works once, for a week:</p>
                 <code className="party-invite">{recovery.link}</code>
-                <button
-                  type="button"
-                  className="btn small"
-                  onClick={() => void navigator.clipboard?.writeText(recovery.link).then(() => setNote('Copied.'))}
-                >
+                <button type="button" className="btn small" onClick={() => void copyLink(recovery.link, 'The recovery link')}>
                   <Copy strokeWidth={ICON_STROKE} aria-hidden />
                   Copy the link
                 </button>
@@ -1118,7 +1130,7 @@ function AdminInvites() {
       (i) => (setMade((m) => [i, ...m]), setProblem(null)),
       (e) => setProblem((e as Error).message),
     );
-  const copy = (link: string) => void navigator.clipboard?.writeText(link).then(() => setCopied(link));
+  const copy = (link: string) => void copyLink(link, 'The invite link').then((ok) => ok && setCopied(link));
   return (
     <div className="admin-page-body">
       <div className="admin-kinds" role="radiogroup" aria-label="What kind of invite">

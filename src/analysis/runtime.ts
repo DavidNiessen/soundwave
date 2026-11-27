@@ -1,4 +1,5 @@
 import type * as Ort from 'onnxruntime-web/webgpu';
+import { onWebKit } from './separation/support';
 
 /**
  * The runtime's WebAssembly file, unpacked. A server may already have undone the compression on the
@@ -34,7 +35,7 @@ export function fitMemory(script: string): { script: string; patched: boolean } 
   if (!script.includes(MEMORY_CALL) || !script.includes(HEAP_MAX)) return { script, patched: false };
   const prelude =
     `let __swHeapMax=4294901760;function __swMemory(){let last;for(const maximum of ${JSON.stringify(MEMORY_MAXIMA)}){` +
-    `try{const m=new WebAssembly.Memory({initial:256,maximum,shared:!0});__swHeapMax=maximum*65536-65536;return m}` +
+    `try{const m=new WebAssembly.Memory({initial:256,maximum,shared:!0});__swHeapMax=maximum*65536-65536;globalThis.__swRuntimeMemory=m;return m}` +
     `catch(e){if(!(e instanceof RangeError))throw e;last=e}}throw last}\n`;
   return {
     script: prelude + script.replace(MEMORY_CALL, '__swMemory()').replace(HEAP_MAX, 'function rc(){return __swHeapMax}'),
@@ -63,8 +64,28 @@ export async function loadRuntime(ort: typeof Ort, device: 'gpu' | 'cpu'): Promi
   ort.env.wasm.wasmPaths = { mjs: URL.createObjectURL(new Blob([fitted.script], { type: 'text/javascript' })) };
   ort.env.wasm.wasmBinary = binary;
   // A graphics card does the arithmetic itself; threads are for the processor path.
-  if (device === 'gpu') ort.env.wasm.numThreads = 1;
+  ort.env.wasm.numThreads = device === 'gpu' ? 1 : processorThreads();
+  // A laptop with two graphics cards is given the faster one, not the one that saves power.
+  if (device === 'gpu') ort.env.webgpu.powerPreference = 'high-performance';
   ort.env.logLevel = 'error';
+}
+
+/**
+ * Threads for a model on the processor: every core but one, which the page keeps for itself. The
+ * runtime's own default is half the cores and never more than four, which left a 16-thread
+ * desktop separating a song in three minutes with most of its cores idle.
+ */
+export function processorThreads(cores = typeof navigator === 'undefined' ? 4 : navigator.hardwareConcurrency || 4): number {
+  return Math.max(1, Math.min(16, cores - 1));
+}
+
+/**
+ * How much memory the runtime of this worker holds, in MB (0 before it started). Its memory only
+ * grows: what a model needed at its largest stays held until the worker ends.
+ */
+export function runtimeMemory(): number {
+  const memory = (globalThis as { __swRuntimeMemory?: WebAssembly.Memory }).__swRuntimeMemory;
+  return memory ? Math.round(memory.buffer.byteLength / 2 ** 20) : 0;
 }
 
 /**
@@ -99,5 +120,115 @@ export async function openOnDevice<T>(
     } catch {
       throw runtimeError(err);
     }
+  }
+}
+
+/**
+ * Lets the worker's garbage collector see how much it may free, after a model run.
+ *
+ * The runtime makes GPU buffers, bind groups and read-backs for every run and lets go of them, but
+ * a browser frees what they hold only when the JavaScript objects standing for them are collected.
+ * A worker's own JavaScript heap stays small, so its collector barely runs: in WebKit (Safari, the
+ * macOS app) a song's separation piled up 15 GB and more that way, until the system closed the
+ * game. Allocating a few large arrays and dropping them at once makes the collector run, and the
+ * GPU memory and WebKit's bookkeeping for it are freed as the work goes. At most once a second.
+ */
+let nudged = 0;
+/** Only WebKit needs the nudge; elsewhere it would only zero 256 MB every second. */
+const nudges = onWebKit();
+export function nudgeCollector() {
+  if (!nudges) return;
+  const now = performance.now();
+  if (now - nudged < 1000) return;
+  nudged = now;
+  for (let i = 0; i < 8; i++) new Uint8Array(32 << 20)[0] = 1;
+}
+
+/** WebGPU, as far as reading a tensor back needs it. */
+interface Gpu {
+  createBuffer(d: { size: number; usage: number }): GpuBuffer;
+  createCommandEncoder(): {
+    copyBufferToBuffer(from: unknown, fromOffset: number, to: GpuBuffer, toOffset: number, size: number): void;
+    finish(): unknown;
+  };
+  queue: { submit(buffers: unknown[]): void };
+}
+interface GpuBuffer {
+  size: number;
+  mapAsync(mode: number): Promise<void>;
+  getMappedRange(): ArrayBuffer;
+  unmap(): void;
+  destroy(): void;
+}
+/** GPUBufferUsage.MAP_READ | COPY_DST, and GPUMapMode.READ. */
+const MAP_READ = 0x0001;
+const COPY_DST = 0x0008;
+const READ = 0x0001;
+
+/**
+ * Reads tensors the runtime left on the graphics card (`preferredOutputLocation: 'gpu-buffer'`)
+ * into arrays of its own, through one staging buffer per output kept for every run. The runtime's
+ * own read-back makes a new staging buffer and a new array each time: for the stem model 55 MB a
+ * segment, which WebKit holds until it collects them. The arrays returned are reused by the next
+ * read of the same output, so they must be done with by then.
+ */
+export class GpuReader {
+  private staging = new Map<string, GpuBuffer>();
+  private arrays = new Map<string, Float32Array>();
+  constructor(private readonly device: Gpu) {}
+
+  async read(name: string, tensor: Ort.Tensor): Promise<Float32Array> {
+    const bytes = tensor.size * 4;
+    let staging = this.staging.get(name);
+    if (!staging || staging.size !== bytes) {
+      staging?.destroy();
+      staging = this.device.createBuffer({ size: bytes, usage: MAP_READ | COPY_DST });
+      this.staging.set(name, staging);
+      this.arrays.set(name, new Float32Array(tensor.size));
+    }
+    const encoder = this.device.createCommandEncoder();
+    encoder.copyBufferToBuffer(tensor.gpuBuffer, 0, staging, 0, bytes);
+    this.device.queue.submit([encoder.finish()]);
+    await staging.mapAsync(READ);
+    const array = this.arrays.get(name)!;
+    array.set(new Float32Array(staging.getMappedRange()));
+    staging.unmap();
+    return array;
+  }
+
+  /**
+   * Copies stretches of tensors into staging buffers now, and gives back a function that reads them
+   * into the caller's arrays: each part `into.length` values of `tensor` from value `from` on. The
+   * copies are queued straight after the work that made the tensors, so the tensors may be let go
+   * and the next run started before the function is called. Each `key` keeps its staging buffer
+   * for the next time: a part still to be read must not share its key with one being staged.
+   */
+  stageParts(parts: { key: string; tensor: Ort.Tensor; from: number; into: Float32Array }[]): () => Promise<void> {
+    const encoder = this.device.createCommandEncoder();
+    const staged = parts.map((p) => {
+      const bytes = p.into.length * 4;
+      let staging = this.staging.get(p.key);
+      if (!staging || staging.size !== bytes) {
+        staging?.destroy();
+        staging = this.device.createBuffer({ size: bytes, usage: MAP_READ | COPY_DST });
+        this.staging.set(p.key, staging);
+      }
+      encoder.copyBufferToBuffer(p.tensor.gpuBuffer, p.from * 4, staging, 0, bytes);
+      return staging;
+    });
+    this.device.queue.submit([encoder.finish()]);
+    return async () => {
+      await Promise.all(staged.map((s) => s.mapAsync(READ)));
+      parts.forEach((p, i) => {
+        p.into.set(new Float32Array(staged[i].getMappedRange()));
+        staged[i].unmap();
+      });
+    };
+  }
+
+  release() {
+    for (const b of this.staging.values()) b.destroy();
+    this.staging.clear();
+    this.arrays.clear();
   }
 }

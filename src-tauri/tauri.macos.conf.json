@@ -1,0 +1,22 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "app": {
+    "windows": [
+      {
+        "title": "Soundwave",
+        "width": 1280,
+        "height": 800,
+        "resizable": true,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "fullscreen": false,
+        "visible": false,
+        "minWidth": 960,
+        "minHeight": 600,
+        "backgroundColor": "#0e0828",
+        "backgroundThrottling": "disabled"
+      }
+    ]
+  }
+}

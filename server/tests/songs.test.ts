@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
+import { request, type ServerResponse } from 'node:http';
+import { crc32, gzipSync } from 'node:zlib';
 import { WebSocket } from 'ws';
 import { PROTOCOL_VERSION, type DuplicatePair, type ServerInfo, type ServerMessage, type SharedSong } from '../../src/net/protocol.ts';
 import { readSoundwave, writeSoundwave } from '../../src/storage/soundwaveFile.ts';
 import { startServer, type RunningServer } from '../src/app.ts';
 import { DEFAULTS, type Config } from '../src/config.ts';
 import { Store } from '../src/db.ts';
+import { Uploads } from '../src/limits.ts';
 import { players } from './identity.ts';
 
 let server: RunningServer;
@@ -15,6 +19,7 @@ const start = async (over: Partial<Config> = {}) => {
   server = await startServer({ ...DEFAULTS, port: 0, host: '127.0.0.1', mode: 'public', dataDir: ':memory:', ...over }, store, () => {});
 };
 afterEach(async () => {
+  if (!store?.db.isOpen) return;
   await server.close();
   store.close();
 });
@@ -129,6 +134,69 @@ describe('shared songs', () => {
     expect((await api('POST', '/songs', (await songFile(7)).bytes, bo.access)).status).toBe(413);
   });
 
+  it('count what a song takes on disk against the quota, its charts too, one upload after another', async () => {
+    // Charts only, the audio thrown away: its analysis still counts.
+    await start({ songSharing: 'charts', quotaMb: 0.01 });
+    const ana = await signUp('Ana');
+    const big = async (seed: number, tempo: number[]) => {
+      const audio = new Uint8Array(3000).map((_, i) => (i * seed) % 251);
+      const file = await writeSoundwave({
+        meta: { title: `Song ${seed}`, artist: 'Band', duration: 30 + seed * 20, fileName: 'song.mp3' },
+        analysis: { version: 1, data: { tempo } },
+        audio: new Blob([audio], { type: 'audio/mpeg' }),
+      });
+      return new Uint8Array(await file.arrayBuffer());
+    };
+    const beats = Array.from({ length: 1000 }, (_, i) => i * 1.5);
+    // Each fits alone (some 7 KB of charts in 10 KB), not both: sent at once, only one is taken.
+    const both = await Promise.all([1, 2].map(async (n) => (await api('POST', '/songs', await big(n, beats), ana.access)).status));
+    expect(both.sort()).toEqual([200, 413]);
+    expect((await api<SharedSong[]>('GET', '/songs', undefined, ana.access)).body).toHaveLength(1);
+  });
+
+  it('refuse an upload from its headers alone, before its body is read', async () => {
+    await start({ songSharing: 'songs', songMaxMb: 10 });
+    const ana = await signUp('Ana');
+    // Says it is 9 MB but sends a few bytes: an answer that comes now did not wait for the body.
+    const early = (headers: Record<string, string | number>) =>
+      new Promise<number>((resolve, reject) => {
+        const r = request(`${server.url}/songs`, { method: 'POST', headers }, (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        });
+        r.on('error', reject);
+        r.write(Buffer.alloc(1000));
+      });
+    expect(await early({ 'Content-Length': 9 * 1024 * 1024 })).toBe(401);
+    expect(await early({ 'Content-Length': 9 * 1024 * 1024, Authorization: 'Bearer nonsense' })).toBe(401);
+    expect(await early({ 'Content-Length': 11 * 1024 * 1024, Authorization: `Bearer ${ana.access}` })).toBe(413);
+    // The server still answers as ever.
+    expect((await api<SharedSong>('POST', '/songs', (await songFile(3)).bytes, ana.access)).status).toBe(200);
+  });
+
+  it('take a song whose analysis is a gzip bomb without inflating it past the limit', async () => {
+    await start({ songSharing: 'charts' });
+    const ana = await signUp('Ana');
+    const audio = new Uint8Array(4000).map((_, i) => (i * 3) % 251);
+    const good = new Uint8Array(
+      await (
+        await writeSoundwave({ meta: { title: 'Bomb', artist: 'Band', duration: 30, fileName: 'b.mp3' }, audio: new Blob([audio]) })
+      ).arrayBuffer(),
+    );
+    // An ANLS chunk of a few hundred KB that inflates to 200 MB of JSON.
+    const payload = Buffer.concat([Buffer.from([1, 0]), gzipSync(Buffer.alloc(200 * 1024 * 1024, 0x20), { level: 1 })]);
+    const head = Buffer.alloc(8);
+    head.write('ANLS', 0, 'ascii');
+    head.writeUInt32LE(payload.length, 4);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32LE(crc32(Buffer.concat([Buffer.from('ANLS'), payload])), 0);
+    const file = Buffer.concat([good.subarray(0, 12), head, payload, crc, good.subarray(12)]);
+    expect(file.length).toBeLessThan(2 * 1024 * 1024);
+    const id = createHash('sha256').update(audio).digest('hex');
+    expect((await api<SharedSong>('POST', '/songs', new Uint8Array(file), ana.access)).body).toMatchObject({ id, title: 'Bomb' });
+    expect((await api<{ analysis: unknown }>('GET', `/songs/${id}/charts`, undefined, ana.access)).body.analysis).toBeNull();
+  });
+
   it('pass a party’s songs on through the server, to the party’s players only', async () => {
     await start();
     const sessions = [await signUp('Host'), await signUp('Guest'), await signUp('Stranger')];
@@ -158,8 +226,9 @@ describe('shared songs', () => {
     host.send({ type: 'set', songs: [{ id: f.id, title: 'Song 9', artist: 'Band', duration: 30 }] });
     await wait(guest, 'party', (m) => m.type === 'party' && m.party?.set.length === 1);
 
-    // Only a song in the party's set, and only the song its id names.
+    // Only a song in the party's set, only the song its id names, and only from whoever brought it.
     expect((await api('PUT', `/party/songs/${other.id}`, other.bytes, sessions[0].access)).status).toBe(403);
+    expect((await api('PUT', `/party/songs/${f.id}`, f.bytes, sessions[1].access)).status).toBe(403);
     expect((await api('PUT', `/party/songs/${f.id}`, other.bytes, sessions[0].access)).status).toBe(400);
     expect((await api('PUT', `/party/songs/${f.id}`, f.bytes, sessions[0].access)).status).toBe(200);
     // The party hears that the server has it.
@@ -269,5 +338,36 @@ describe('shared songs', () => {
   it('do not pass a party’s songs on where the owner turned that off', async () => {
     await start({ partySongs: false });
     expect((await api<ServerInfo>('GET', '/info')).body.partySongs).toBe(false);
+  });
+});
+
+describe('the line for uploads', () => {
+  const res = () => new EventEmitter() as unknown as ServerResponse;
+  it('reads a few at once, lets the rest wait their turn, and refuses past the line', async () => {
+    const line = new Uploads(2, 1, 1);
+    const a = await line.enter('a', res());
+    const b = await line.enter('b', res());
+    let third = false;
+    const c = line.enter('c', res()).then((done) => ((third = true), done));
+    // One of a player's own waits; a second is refused.
+    const a2 = line.enter('a', res());
+    await expect(line.enter('a', res())).rejects.toMatchObject({ status: 429 });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(third).toBe(false);
+    b();
+    (await c)();
+    a();
+    (await a2)();
+  });
+
+  it('lets go of a place in line when the player gives up', async () => {
+    const line = new Uploads(1, 1, 5);
+    const done = await line.enter('a', res());
+    const gone = res();
+    const waiting = line.enter('b', gone);
+    (gone as unknown as EventEmitter).emit('close');
+    await expect(waiting).rejects.toMatchObject({ status: 499 });
+    done();
+    (await line.enter('c', res()))();
   });
 });

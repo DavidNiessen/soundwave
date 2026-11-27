@@ -3,9 +3,15 @@
  * and password (server/src/identity.ts is the other side).
  *
  * It is one secret, made the first time it is needed. From it the game makes a key of its own for
- * each server (Ed25519, from HKDF of the secret and the server's id), so a server sees one public
- * key for the player and two servers cannot tell they see the same player. One backup still brings
- * every account back.
+ * each server (Ed25519, from HKDF of the secret, the address the game connects to and the server's
+ * id), so a server sees one public key for the player and two servers cannot tell they see the
+ * same player. One backup still brings every account back.
+ *
+ * The address is part of the key because a server's id is only what the server says it is: a
+ * server that claimed another's id, and passed that server's challenge on, would otherwise get the
+ * player's signature for the other server and sign in there as them. With the address in it, the
+ * key the game makes for the impostor is one the real server has never seen. (A server is then one
+ * address: the same server reached by another address is a new account there.)
  *
  * The secret is kept where the system keeps secrets in the desktop app (Windows Credential Manager,
  * the macOS keychain; a file only its user reads on Linux: src-tauri/src/identity.rs), and in the
@@ -46,6 +52,11 @@ const desktop = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in 
 
 /* Where the secret is kept ------------------------------------------------------------------- */
 
+/**
+ * The identity kept here, or null when there is none. A store that cannot be read (the keychain
+ * refused, storage blocked) throws: taking that for "none" would make a new identity and write it
+ * over the one that is there, and every account with it.
+ */
 async function read(): Promise<Stored | null> {
   let raw: string | null = null;
   try {
@@ -53,8 +64,11 @@ async function read(): Promise<Stored | null> {
       const { invoke } = await import('@tauri-apps/api/core');
       raw = await invoke<string | null>('identity_load');
     } else raw = localStorage.getItem(STORE_KEY);
-  } catch {
-    raw = null;
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      `Your identity could not be read from this device (${why}). Nothing was changed: try again, or bring it back from your backup.`,
+    );
   }
   if (!raw) return null;
   try {
@@ -97,7 +111,14 @@ export const identity = {
 
   /** Loads the identity kept here (once). Null when there is none yet. */
   load(): Promise<Stored | null> {
-    loaded ??= read().then((s) => (changed(s), s));
+    loaded ??= read().then(
+      (s) => (changed(s), s),
+      (e: unknown) => {
+        // Read again next time: the store may answer then (the keychain asked once more, say).
+        loaded = null;
+        throw e;
+      },
+    );
     return loaded;
   },
 
@@ -122,17 +143,18 @@ export const identity = {
   },
 
   /**
-   * The proof a server asks for to sign in: this identity's key for the server (`serverId`, from
-   * its /info), and the server's challenge signed with it.
+   * The proof a server asks for to sign in: this identity's key for the server (`server`: the
+   * address the game connects to; `serverId`: the id from its /info), and the server's challenge
+   * signed with it.
    */
-  async prove(serverId: string, nonce: string): Promise<{ publicKey: string; nonce: string; signature: string }> {
+  async prove(server: string, serverId: string, nonce: string): Promise<{ publicKey: string; nonce: string; signature: string }> {
     await this.ensure();
-    const key = await keyFor(serverId);
+    const key = await keyFor(server, serverId);
     const signature = new Uint8Array(await crypto.subtle.sign('Ed25519', key.privateKey, utf8.encode(signInMessage(serverId, nonce))));
     return { publicKey: key.publicKey, nonce, signature: b64url(signature) };
   },
 
-  /** A backup of the identity, locked with `passphrase`: a small file to keep anywhere. */
+  /** A backup of the identity, locked with `passphrase`: a small file to keep anywhere (see `backedUp`, once it is saved). */
   async export(passphrase: string): Promise<Blob> {
     const s = current ?? (await this.load());
     if (!s) throw new Error('There is no identity here yet: it is made when you first join a server.');
@@ -150,10 +172,16 @@ export const identity = {
       cipher: { name: 'AES-GCM', iv: b64url(iv) },
       data: b64url(new Uint8Array(data)),
     };
+    return new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' });
+  },
+
+  /** The backup from `export` is saved: the game stops asking for one. */
+  async backedUp() {
+    const s = current ?? (await this.load());
+    if (!s || s.backedUp) return;
     const next = { ...s, backedUp: true };
     await write(next);
     changed(next);
-    return new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' });
   },
 
   /** Brings an identity back from its backup (replacing the one here, if any). */
@@ -212,15 +240,16 @@ function pkcs8(seed: Uint8Array): Uint8Array<ArrayBuffer> {
   return out;
 }
 
-/** This identity's key for one server: its seed is HKDF of the secret, with the server's id. */
-function keyFor(serverId: string) {
-  let k = keys.get(serverId);
+/** This identity's key for one server: its seed is HKDF of the secret, with the server's address and id. */
+function keyFor(server: string, serverId: string) {
+  const name = `${server}\n${serverId}`;
+  let k = keys.get(name);
   if (!k) {
     k = (async () => {
       const base = await crypto.subtle.importKey('raw', fromB64url(current!.secret), 'HKDF', false, ['deriveBits']);
       const seed = new Uint8Array(
         await crypto.subtle.deriveBits(
-          { name: 'HKDF', hash: 'SHA-256', salt: utf8.encode('soundwave-identity-v1'), info: utf8.encode(serverId) },
+          { name: 'HKDF', hash: 'SHA-256', salt: utf8.encode('soundwave-identity-v1'), info: utf8.encode(name) },
           base,
           256,
         ),
@@ -229,7 +258,7 @@ function keyFor(serverId: string) {
       const jwk = await crypto.subtle.exportKey('jwk', privateKey);
       return { privateKey, publicKey: jwk.x! };
     })();
-    keys.set(serverId, k);
+    keys.set(name, k);
   }
   return k;
 }

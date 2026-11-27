@@ -21,6 +21,7 @@ import { chartId } from '../net/runs';
 import type { SongMeta } from '../storage/db';
 import { Hint, useActions, useHints } from './actions';
 import { Cover } from './Cover';
+import { Dialog } from './Dialog';
 import { DIFFICULTY_LABEL, ICON_STROKE, PART_ICON, PART_LABEL, Pips, Stars } from './icons';
 import { useSlide } from './useSlide';
 
@@ -126,7 +127,7 @@ export function BoardsScreen({ library, playable, setlist, pick, thin, settings,
         <header className="page-head">
           <h1 className="page-title">Leaderboards</h1>
         </header>
-        <p className="hint">Sign in to a server under Play together to see its leaderboards.</p>
+        <p className="hint">Sign in to a server on the main menu’s Online tab to see its leaderboards.</p>
       </div>
     );
 
@@ -384,6 +385,8 @@ function SongBoard({
   const [board, setBoard] = useState<Board | null>(null);
   const [none, setNone] = useState(false);
   const [version, setVersion] = useState(0);
+  /** The run a moderator asked to remove, waiting for them to say yes. */
+  const [removing, setRemoving] = useState<RankLine | null>(null);
   const problemRef = useRef(onProblem);
   problemRef.current = onProblem;
   // A run posted, shared or taken off this song's boards elsewhere: the board is fetched again, quietly.
@@ -417,7 +420,7 @@ function SongBoard({
   if (none) return <p className="hint boards-empty">This song has no {PART_LABEL[pick.part].toLowerCase()} notes at this difficulty.</p>;
   if (!board) return <p className="hint boards-empty">Loading the board…</p>;
   const mine = board.me;
-  const remove = (l: RankLine) => () =>
+  const remove = (l: RankLine) =>
     void online.removeScore(l.scoreId, 'Removed from the leaderboard by a moderator').then(
       () => setVersion((v) => v + 1),
       (e) => onProblem((e as Error).message),
@@ -429,7 +432,7 @@ function SongBoard({
       me={l.scoreId === mine?.scoreId}
       difficulty={pick.difficulty}
       onWatch={() => onWatch(l.scoreId)}
-      onRemove={mod && l.scoreId !== mine?.scoreId ? remove(l) : undefined}
+      onRemove={mod && l.scoreId !== mine?.scoreId ? () => setRemoving(l) : undefined}
     />
   );
   return (
@@ -464,6 +467,31 @@ function SongBoard({
             {mine.shared ? 'Stop sharing my run' : 'Share my run'}
           </button>
         </div>
+      )}
+      {removing && (
+        <Dialog title="Remove the run" variant="card" closeLabel="Keep it" onClose={() => setRemoving(null)}>
+          {(close) => (
+            <div className="pause-card">
+              <h2 className="display">Remove {removing.name}’s run?</h2>
+              <p className="hint">
+                It leaves the server’s boards for good: rank {removing.rank} here, {removing.score.toLocaleString()}.
+              </p>
+              <button type="button" className="btn wide" data-autofocus data-sfx="back" onClick={close}>
+                Keep it
+              </button>
+              <button
+                type="button"
+                className="btn primary wide danger"
+                onClick={() => {
+                  remove(removing);
+                  close();
+                }}
+              >
+                Remove
+              </button>
+            </div>
+          )}
+        </Dialog>
       )}
     </div>
   );

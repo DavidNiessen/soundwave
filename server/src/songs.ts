@@ -16,7 +16,7 @@
  * refused (an admin can add it anyway), and the admin page lists what may be the same song twice.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readSoundwave, writeSoundwave } from '../../src/storage/soundwaveFile.ts';
@@ -25,8 +25,13 @@ import { coarseEnergy, likeness, nameKey, type Fingerprint } from '../../src/net
 import { Refusal } from './accounts.ts';
 import type { Config } from './config.ts';
 import type { Store, UserRow } from './db.ts';
+import { contentsOf, hashOf } from './soundwave.ts';
 
 const MB = 1024 * 1024;
+/** The biggest cover kept of a shared song (a bigger one is left out): a cover is a picture of a few hundred KB. */
+const COVER_MAX = 4 * MB;
+/** The most a song's details, analysis and hand-made charts may take as JSON: a real one is a few MB. */
+const CHARTS_MAX = 32 * MB;
 const canModerate = (u: UserRow) => u.role === 'owner' || u.role === 'moderator';
 
 interface SongRow {
@@ -71,7 +76,8 @@ export class Songs {
         cover_type TEXT,
         created INTEGER NOT NULL,
         uid TEXT NOT NULL UNIQUE,
-        hash TEXT NOT NULL
+        hash TEXT NOT NULL,
+        stored INTEGER NOT NULL DEFAULT 0
       );
       CREATE TABLE IF NOT EXISTS not_duplicates (
         a TEXT NOT NULL,
@@ -86,6 +92,17 @@ export class Songs {
         at INTEGER NOT NULL
       );
     `);
+    // What each song takes on disk, for the quota (servers from before kept only the audio's size).
+    const columns = store.db.prepare('PRAGMA table_info(songs)').all() as { name: string }[];
+    if (!columns.some((c) => c.name === 'stored')) {
+      store.db.exec('ALTER TABLE songs ADD COLUMN stored INTEGER NOT NULL DEFAULT 0');
+      for (const r of store.db.prepare('SELECT id FROM songs').all() as { id: string }[]) {
+        const bytes = [join(this.dirs.songs, `${r.id}.soundwave`), this.copyPath(r.id, 'medium'), this.copyPath(r.id, 'low')]
+          .concat([join(this.dirs.charts, `${r.id}.json`), join(this.dirs.covers, r.id)])
+          .reduce((n, p) => n + (existsSync(p) ? statSync(p).size : 0), 0);
+        store.db.prepare('UPDATE songs SET stored = ? WHERE id = ?').run(bytes, r.id);
+      }
+    }
   }
 
   /** The hash of what the server keeps of a song: its whole file, or its charts without the audio. */
@@ -217,15 +234,13 @@ export class Songs {
     if (this.sharing === 'off' && !curator)
       throw new Refusal(403, 'This server does not take shared songs. Its owner can turn sharing on.');
     if (body.length > this.config.songMaxMb * MB) throw new Refusal(413, `A shared song can be at most ${this.config.songMaxMb} MB here.`);
-    let c;
-    try {
-      c = await readSoundwave(new Blob([new Uint8Array(body)]));
-    } catch (e) {
-      throw new Refusal(400, (e as Error).message || 'That is not a Soundwave song file.');
-    }
-    const id = createHash('sha256')
-      .update(new Uint8Array(await c.audio.arrayBuffer()))
-      .digest('hex');
+    const c = await contentsOf(body);
+    const id = await hashOf(c.audio);
+    // Everything that takes waiting is done first: from here to the insert nothing awaits, so no
+    // other upload can come between the quota check and the song taking its place.
+    const cover = c.cover && c.cover.size <= COVER_MAX ? { type: c.cover.type, bytes: new Uint8Array(await c.cover.arrayBuffer()) } : null;
+    const charts = JSON.stringify({ meta: c.meta, analysis: c.analysis ?? null, edits: c.edits ?? null });
+    if (charts.length > CHARTS_MAX) throw new Refusal(413, 'This song’s analysis is too big to share here.');
     const had = this.row(id);
     if (had) return this.shared({ ...had, name: this.store.userById(had.uploader ?? '')?.name });
     // The same recording in another file is not taken twice (an admin may add it anyway).
@@ -235,23 +250,19 @@ export class Songs {
       throw new Refusal(409, `This song is already on the server as "${twin.row.title}" by ${twin.row.artist}.`);
     const keepAudio = curator || this.sharing === 'songs';
     const size = keepAudio ? body.length : 0;
-    const used = (this.store.db.prepare('SELECT COALESCE(SUM(size), 0) AS n FROM songs WHERE uploader = ?').get(user.id) as { n: number })
-      .n;
-    if (!curator && used + size > this.config.quotaMb * MB)
+    // What the song takes on the server's disk, its charts and cover too, counts against the quota.
+    const stored = size + Buffer.byteLength(charts) + (cover?.bytes.length ?? 0);
+    if (!curator && this.used(user.id) + stored > this.config.quotaMb * MB)
       throw new Refusal(413, `That would take you past the ${this.config.quotaMb} MB each player can share here. Remove a song first.`);
     if (keepAudio) writeFileSync(join(this.dirs.songs, `${id}.soundwave`), body);
-    writeFileSync(
-      join(this.dirs.charts, `${id}.json`),
-      JSON.stringify({ meta: c.meta, analysis: c.analysis ?? null, edits: c.edits ?? null }),
-    );
-    let coverType: string | null = null;
-    if (c.cover) {
-      coverType = c.cover.type;
-      writeFileSync(join(this.dirs.covers, id), new Uint8Array(await c.cover.arrayBuffer()));
-    }
+    writeFileSync(join(this.dirs.charts, `${id}.json`), charts);
+    if (cover) writeFileSync(join(this.dirs.covers, id), cover.bytes);
+    const hash = createHash('sha256')
+      .update(keepAudio ? body : charts)
+      .digest('hex');
     this.store.db
       .prepare(
-        'INSERT INTO songs (id, uploader, title, artist, duration, size, audio, cover_type, created, uid, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO songs (id, uploader, title, artist, duration, size, audio, cover_type, created, uid, hash, stored) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       )
       .run(
         id,
@@ -261,12 +272,18 @@ export class Songs {
         c.meta.duration,
         size,
         keepAudio ? 1 : 0,
-        coverType,
+        cover?.type ?? null,
         this.now(),
         randomUUID(),
-        this.fileHash(id, keepAudio),
+        hash,
+        stored,
       );
     return this.shared({ ...this.row(id)!, name: user.name });
+  }
+
+  /** What a player's shared songs take on the server's disk, bytes. */
+  private used(user: string): number {
+    return (this.store.db.prepare('SELECT COALESCE(SUM(stored), 0) AS n FROM songs WHERE uploader = ?').get(user) as { n: number }).n;
   }
 
   /** The library, newest first, or the songs whose title or artist has `query` in it. */
@@ -306,15 +323,21 @@ export class Songs {
     if (r.uploader !== actor.id && !canModerate(actor))
       throw new Refusal(403, 'Only whoever shared a song, the owner and moderators send its smaller copies.');
     if (body.length >= r.size) throw new Refusal(400, 'A smaller copy has to be smaller than the song.');
-    let c;
-    try {
-      c = await readSoundwave(new Blob([new Uint8Array(body)]));
-    } catch (e) {
-      throw new Refusal(400, (e as Error).message || 'That is not a Soundwave song file.');
-    }
+    // Only its details are needed: its analysis is not inflated.
+    const c = await contentsOf(body, false);
     if (c.meta.copyOf !== id) throw new Refusal(400, 'That copy is of another song.');
     if (Math.abs(c.meta.duration - r.duration) > 2) throw new Refusal(400, 'That copy is not as long as the song.');
-    writeFileSync(this.copyPath(id, quality), body);
+    // The copy counts against its sharer's quota, in place of one it replaces. Read again after the
+    // wait above, and nothing awaited from here on, so two copies at once cannot both slip past it.
+    const now = this.row(id);
+    if (!now?.audio) throw new Refusal(404, 'That song is not on this server.');
+    const path = this.copyPath(id, quality);
+    const before = existsSync(path) ? statSync(path).size : 0;
+    const uploader = now.uploader ? this.store.userById(now.uploader) : undefined;
+    if (uploader && !canModerate(uploader) && this.used(uploader.id) - before + body.length > this.config.quotaMb * MB)
+      throw new Refusal(413, `That copy would take its sharer past the ${this.config.quotaMb} MB each player can share here.`);
+    writeFileSync(path, body);
+    this.store.db.prepare('UPDATE songs SET stored = stored - ? + ? WHERE id = ?').run(before, body.length, id);
   }
 
   /** A song's details, analysis and hand-made charts, for a player who has the same audio. */

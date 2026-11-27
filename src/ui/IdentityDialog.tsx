@@ -32,6 +32,8 @@ export function IdentityDialog({ kind, onClose, onDone }: { kind: 'export' | 'im
         if (!target) return;
         await target.write(await identity.export(pass));
         await target.close();
+        // Only a file that was written counts as a backup.
+        await identity.backedUp();
         close();
         onDone('Your identity is backed up. Keep the file and the passphrase: both are needed to bring it back.');
       } else {

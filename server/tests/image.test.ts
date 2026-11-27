@@ -38,4 +38,14 @@ describe('the server’s image', () => {
       expect(ignore.split(/\r?\n/), `.dockerignore lets ${f} in`).toContain(`!${f}`);
     }
   });
+
+  it('installs from a lockfile that matches the server’s package.json', () => {
+    // npm ci refuses a lockfile that does not; refresh it with `npm install --package-lock-only` in server/.
+    const pkg = JSON.parse(read('server/package.json'));
+    const lock = JSON.parse(read('server/package-lock.json'));
+    expect(lock.packages[''].dependencies).toEqual(pkg.dependencies);
+    expect(lock.packages[''].devDependencies).toEqual(pkg.devDependencies);
+    expect(read('server/Dockerfile')).toMatch(/npm ci/);
+    expect(read('.dockerignore').split(/\r?\n/)).toContain('!server/package-lock.json');
+  });
 });

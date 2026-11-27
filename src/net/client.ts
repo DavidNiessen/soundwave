@@ -43,6 +43,7 @@ import {
 } from './protocol';
 import type { SoundwaveAnalysis, SoundwaveEdits, SoundwaveMeta } from '../storage/soundwaveFile';
 import { identity } from './identity';
+import { wellFormed } from './check';
 
 /** A refusal from the server, with its status (404: an identity with no account there yet, say). */
 export class ServerRefusal extends Error {
@@ -57,6 +58,8 @@ const STORE_KEY = 'soundwave.online';
 /** Clock sync: rounds per measurement, and how often it is measured again (ms). */
 const SYNC_ROUNDS = 6;
 const SYNC_EVERY_MS = 30_000;
+/** How long a request (other than a file) may take before it counts as not reaching the server. */
+const REQUEST_TIMEOUT_MS = 15_000;
 
 export type Status =
   /** No server chosen. */
@@ -113,6 +116,16 @@ const isLocal = (host: string) =>
   host.startsWith('10.') ||
   host.startsWith('192.168.') ||
   /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+
+/**
+ * Whether this page cannot reach `server` at all: a page served over HTTPS (the web game) may not
+ * fetch from plain HTTP, except from this machine itself. The desktop app's page is not HTTPS.
+ */
+function blockedHere(server: string): boolean {
+  if (typeof location === 'undefined' || location.protocol !== 'https:' || !server.startsWith('http:')) return false;
+  const host = new URL(server).hostname;
+  return !(host === 'localhost' || host === '[::1]' || host.startsWith('127.'));
+}
 
 /**
  * A server's address as the player typed it, made whole: HTTPS unless it is on this machine or
@@ -287,6 +300,13 @@ class OnlineClient {
     return () => void this.startListeners.delete(fn);
   }
 
+  /** Called with what the server says went wrong (the host ended the party, a code that names none). */
+  onServerError(fn: (message: string) => void) {
+    this.errorListeners.add(fn);
+    return () => void this.errorListeners.delete(fn);
+  }
+  private readonly errorListeners = new Set<(message: string) => void>();
+
   /** Called for what happens to the player during a party's song (see PlayEvent). */
   onPlayEvent(fn: (e: PlayEvent) => void) {
     this.playListeners.add(fn);
@@ -336,13 +356,17 @@ class OnlineClient {
   ): Promise<T> {
     const server = this.state.server;
     if (!server) throw new Error('No server is chosen.');
+    // A request that hangs (a captive portal, a connection that went nowhere) gives up in a while,
+    // so the game can say so and try again; files, which can take long, are left to the browser.
     const send = () =>
       fetch(server + path, {
+        ...(init.file || init.raw ? {} : { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }),
         method: init.method ?? (init.body === undefined && !init.raw ? 'GET' : 'POST'),
         headers: {
           ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
           ...(init.raw ? { 'Content-Type': 'application/octet-stream' } : {}),
-          ...(init.auth && this.access ? { Authorization: `Bearer ${this.access}` } : {}),
+          // A token goes only to the server it is for: the server may change while this is under way.
+          ...(init.auth && this.access && this.state.server === server ? { Authorization: `Bearer ${this.access}` } : {}),
         },
         body: init.raw ?? (init.body === undefined ? undefined : JSON.stringify(init.body)),
       });
@@ -350,12 +374,13 @@ class OnlineClient {
     try {
       res = await send();
       // An access token runs out after a while: trade the refresh token for a new one, once.
-      if (res.status === 401 && init.auth && this.refreshToken) {
+      if (res.status === 401 && init.auth && this.refreshToken && this.state.server === server) {
         await this.renew();
+        if (this.state.server !== server) throw new Error('You moved to another server meanwhile.');
         res = await send();
       }
     } catch (e) {
-      if (e instanceof Error && e.name !== 'TypeError') throw e;
+      if (e instanceof Error && e.name !== 'TypeError' && e.name !== 'TimeoutError') throw e;
       throw new Error('The server could not be reached. Check the address and your connection.');
     }
     if (res.ok) init.headers?.(res.headers);
@@ -368,10 +393,13 @@ class OnlineClient {
   private async renew() {
     const token = this.refreshToken;
     if (!token) throw new Error('You were signed out. Sign in again.');
+    const attempt = this.attempt;
     this.refreshToken = null;
     try {
-      this.signedIn(await this.request<Session>('/auth/refresh', { body: { refresh: token } }));
+      const session = await this.request<Session>('/auth/refresh', { body: { refresh: token } });
+      if (!this.signedIn(session, attempt)) throw new Error('You signed out.');
     } catch (e) {
+      if (attempt !== this.attempt) throw e;
       // A refused refresh token is spent; one that never reached the server is still good.
       if (/could not be reached/.test((e as Error).message)) this.refreshToken = token;
       else this.save();
@@ -381,27 +409,34 @@ class OnlineClient {
 
   /** The player signed out (see Stored.out). */
   private out = false;
+  /**
+   * Counts sign-outs and changes of server: a sign-in still under way from before one (waiting on
+   * the network) is dropped when it comes back, instead of signing the player in again.
+   */
+  private attempt = 0;
 
-  private signedIn(s: Session) {
+  /** Takes a session, unless the player signed out or changed servers since `attempt` began. */
+  private signedIn(s: Session, attempt = this.attempt): boolean {
+    if (attempt !== this.attempt) return false;
     this.out = false;
     this.access = s.access;
     this.refreshToken = s.refresh;
     this.save();
     this.set({ account: s.user, error: null, signedOut: false });
+    return true;
   }
 
   /** Picks a server and asks it what it is. Throws a sentence for the player. */
   async choose(typed: string): Promise<ServerInfo> {
     const server = serverAddress(typed);
+    if (blockedHere(server))
+      throw new Error(
+        'The web game cannot reach a server over plain HTTP: the browser blocks it on a secure page. Play on it in the desktop app, or give the server HTTPS.',
+      );
     if (server !== this.state.server) this.forget();
     this.set({ server, status: 'signed-out', error: null });
     const info = await this.request<ServerInfo>('/info');
-    if (info.protocol !== PROTOCOL_VERSION)
-      throw new Error(
-        info.protocol > PROTOCOL_VERSION
-          ? 'This server needs a newer version of Soundwave. Update the game to play here.'
-          : 'This server runs an older version than your game. Its owner needs to update it.',
-      );
+    checkProtocol(info);
     this.set({ info });
     this.save();
     return info;
@@ -415,10 +450,13 @@ class OnlineClient {
 
   /** This game's proof for the server chosen: its identity's key for the server, signing a fresh challenge. */
   private async proof() {
-    const id = this.state.info?.id;
-    if (!id) throw new Error('Connect to a server first.');
+    const { server, info } = this.state;
+    if (!server || !info?.id) throw new Error('Connect to a server first.');
     const { nonce } = await this.request<{ nonce: string }>('/auth/challenge', { body: {} });
-    return identity.prove(id, nonce);
+    if (this.state.server !== server) throw new Error('You moved to another server meanwhile.');
+    // The key is this server's by the address the game connects to, not only by the id the server
+    // gives for itself (see identity.ts): a server claiming another's id gets a key no one else knows.
+    return identity.prove(server, info.id, nonce);
   }
 
   /** A session for the identity on the server chosen, or null when it has no account there yet. */
@@ -433,18 +471,20 @@ class OnlineClient {
 
   /** Signs in with the identity. False: it has no account on this server yet (`join` makes one). */
   async signInWithIdentity(): Promise<boolean> {
+    const attempt = this.attempt;
     const session = await this.keySession();
-    if (!session) return false;
-    this.signedIn(session);
+    if (!session || !this.signedIn(session, attempt)) return false;
     this.connect();
     return true;
   }
 
   /** Makes an account on the server chosen for the identity, under `name`. */
   async join(req: Omit<SignUp, 'publicKey' | 'nonce' | 'signature'>) {
+    const attempt = this.attempt;
     await identity.ensure(req.name);
     if (!identity.snapshot()?.name) await identity.setName(req.name);
-    this.signedIn(await this.request<Session>('/auth/signup', { body: { ...req, ...(await this.proof()) } }));
+    const session = await this.request<Session>('/auth/signup', { body: { ...req, ...(await this.proof()) } });
+    if (!this.signedIn(session, attempt)) return;
     this.set({ invite: null });
     this.connect();
   }
@@ -455,8 +495,10 @@ class OnlineClient {
    */
   async recover(server: string, code: string) {
     await this.choose(server);
+    const attempt = this.attempt;
     await identity.ensure();
-    this.signedIn(await this.request<Session>('/auth/recover', { body: { code, ...(await this.proof()) } }));
+    const session = await this.request<Session>('/auth/recover', { body: { code, ...(await this.proof()) } });
+    if (!this.signedIn(session, attempt)) return;
     this.connect();
   }
 
@@ -468,6 +510,7 @@ class OnlineClient {
 
   /** Signs out of the server, which stays chosen. */
   signOut() {
+    this.attempt++;
     this.closing = true;
     this.welcomed = false;
     this.access = null;
@@ -477,6 +520,8 @@ class OnlineClient {
     this.ws?.close();
     this.ws = null;
     this.pending = [];
+    this.waitingParty = null;
+    this.byeReason = null;
     clearTimeout(this.retryTimer);
     clearInterval(this.syncTimer);
     this.set({ status: this.state.server ? 'signed-out' : 'off', account: null, party: null, avatar: null, signedOut: true });
@@ -678,49 +723,85 @@ class OnlineClient {
   private connect() {
     this.closing = false;
     clearTimeout(this.retryTimer);
-    if (this.ws) return;
+    // One connection at a time: the screens and the start of the game may all ask for it at once.
+    if (this.ws || this.opening === this.attempt) return;
     this.set({ status: this.state.account ? 'reconnecting' : 'connecting' });
     void this.open();
   }
+  /** The `attempt` whose connection is being opened (waiting on the network), or -1. */
+  private opening = -1;
 
   private async open() {
+    const attempt = this.attempt;
+    this.opening = attempt;
+    const done = () => {
+      if (this.opening === attempt) this.opening = -1;
+    };
     try {
-      if (!this.state.info) this.set({ info: await this.request<ServerInfo>('/info') });
+      if (!this.state.info) {
+        const info = await this.request<ServerInfo>('/info');
+        if (attempt !== this.attempt) return done();
+        checkProtocol(info);
+        this.set({ info });
+      }
       if (!this.access)
         await this.renew().catch(async (e: Error) => {
-          // The sign-in ran out (or there was none kept): the identity signs in again by itself.
-          if (/could not be reached/.test(e.message) || !(await identity.load())) throw e;
+          // The sign-in ran out (or there was none kept): the identity signs in again by itself,
+          // unless the player signed out.
+          if (attempt !== this.attempt || this.out || /could not be reached/.test(e.message) || !(await identity.load())) throw e;
           const session = await this.keySession();
-          if (!session) throw e;
-          this.signedIn(session);
+          if (!session || !this.signedIn(session, attempt)) throw e;
         });
     } catch (e) {
+      done();
+      if (attempt !== this.attempt) return;
       if (this.refreshToken) return this.again();
+      // Signed out after all: what waited for the connection (a party to join) is not sent later.
+      this.pending = [];
       this.set({ status: 'signed-out', error: (e as Error).message });
       return;
     }
+    done();
+    if (attempt !== this.attempt || !this.access || this.ws) return;
     const url = this.state.server!.replace(/^http/, 'ws') + '/ws';
     const ws = new WebSocket(url);
     this.ws = ws;
-    ws.onopen = () => this.send({ type: 'hello', protocol: PROTOCOL_VERSION, token: this.access! });
+    const token = this.access;
+    ws.onopen = () => {
+      if (this.ws === ws) ws.send(JSON.stringify({ type: 'hello', protocol: PROTOCOL_VERSION, token } satisfies ClientMessage));
+    };
     ws.onmessage = (e) => {
-      let msg: ServerMessage;
+      // A socket this client has let go of (signed out, replaced) says nothing more.
+      if (this.ws !== ws) return;
+      let msg: unknown;
       try {
-        msg = JSON.parse(String(e.data)) as ServerMessage;
+        msg = JSON.parse(String(e.data));
       } catch {
         return;
       }
-      this.receive(msg);
+      // A message of a shape the game does not know (a server with a bug, or one up to no good) is left unread.
+      if (wellFormed(msg)) this.receive(msg);
     };
     ws.onclose = (e) => {
       if (this.ws !== ws) return;
       this.ws = null;
       clearInterval(this.syncTimer);
       if (this.closing) return;
+      const reason = this.byeReason;
+      this.byeReason = null;
+      // The access token was refused (it lasts a quarter of an hour, and a drop can outlast it): a
+      // fresh one, then again.
+      if (e.code === 4003) {
+        this.access = null;
+        return this.again();
+      }
+      // Too many connections from this network (a shared address): said, and tried again in a while.
+      if (e.code === 4009) {
+        if (reason) this.set({ error: reason });
+        return this.again();
+      }
       // The server said why it closed (banned, signed in elsewhere, too old): no point trying again.
-      if (e.code >= 4000 && e.code !== 4003) return this.set({ status: 'signed-out', party: null });
-      // The access token was refused: a fresh one, then again.
-      if (e.code === 4003) this.access = null;
+      if (e.code >= 4000) return this.set({ status: 'signed-out', party: null, error: reason ?? this.state.error });
       this.again();
     };
   }
@@ -729,11 +810,14 @@ class OnlineClient {
   private again() {
     this.set({ status: 'reconnecting' });
     const wait = Math.min(30_000, 1000 * 2 ** this.retry++);
+    clearTimeout(this.retryTimer);
     this.retryTimer = window.setTimeout(() => {
-      this.ws = null;
+      if (this.ws || this.opening === this.attempt) return;
       void this.open();
     }, wait);
   }
+  /** Why the server is about to close the connection (its `bye`), for the close that follows. */
+  private byeReason: string | null = null;
 
   private send(msg: ClientMessage) {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
@@ -794,6 +878,7 @@ class OnlineClient {
         return;
       case 'error':
         this.set({ error: msg.message });
+        for (const l of this.errorListeners) l(msg.message);
         return;
       case 'hit':
       case 'strikeFired':
@@ -804,8 +889,8 @@ class OnlineClient {
         return;
       }
       case 'bye':
-        this.closing = true;
-        this.set({ error: msg.reason, party: null, status: 'signed-out' });
+        // The close that follows says what to do about it (see onclose: a refused token is renewed).
+        this.byeReason = msg.reason;
         return;
     }
   }
@@ -834,7 +919,9 @@ class OnlineClient {
     this.send({ type: 'party-create' });
   }
   joinParty(code: string) {
-    this.send({ type: 'party-join', code });
+    // Joined while the connection is being made again: sent once it is back.
+    if (this.state.status === 'reconnecting') this.sendOrKeep({ type: 'party-join', code });
+    else this.send({ type: 'party-join', code });
   }
   leaveParty() {
     this.send({ type: 'party-leave' });
@@ -879,7 +966,10 @@ class OnlineClient {
   joinFrom(server: string, code: string) {
     if (this.state.server === server && this.state.account) return this.joinParty(code);
     this.waitingParty = code;
-    void this.choose(server);
+    void this.choose(server).catch((e: Error) => {
+      this.waitingParty = null;
+      this.set({ error: e.message });
+    });
   }
   /** A party to join once signed in (from Discord). */
   private waitingParty: string | null = null;
@@ -922,6 +1012,16 @@ class OnlineClient {
 }
 
 export const online = new OnlineClient();
+
+/** Throws a sentence for the player when the server speaks another version of the protocol. */
+function checkProtocol(info: ServerInfo) {
+  if (info.protocol !== PROTOCOL_VERSION)
+    throw new Error(
+      info.protocol > PROTOCOL_VERSION
+        ? 'This server needs a newer version of Soundwave. Update the game to play here.'
+        : 'This server runs an older version than your game. Its owner needs to update it.',
+    );
+}
 
 /** Reads a response's body, telling `progress` how much of it has come (when its length is known). */
 export async function readWithProgress(res: Response, progress: (done: number) => void): Promise<Blob> {

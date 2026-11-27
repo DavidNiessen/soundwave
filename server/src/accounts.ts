@@ -53,7 +53,7 @@ export class Accounts {
       store.setMeta('secret', secret);
     }
     this.signer = new Signer(Buffer.from(secret, 'base64url'));
-    this.identities = new Identities(store, now);
+    this.identities = new Identities(store, Buffer.from(secret, 'base64url'), now);
     if (!store.hasOwner()) {
       let code = store.getMeta('owner-code');
       if (!code || !store.invite(code)) {
@@ -67,6 +67,12 @@ export class Accounts {
 
   /** Makes an account for an identity, if the server's mode lets this request make one, and signs it in. */
   async signUp(req: Partial<SignUp>): Promise<Session> {
+    // The body is the client's: anything but text where text belongs is refused, not looked up.
+    if (
+      (req.invite !== undefined && typeof req.invite !== 'string') ||
+      (req.serverPassword !== undefined && typeof req.serverPassword !== 'string')
+    )
+      throw new Refusal(400, 'That request is broken. Update the game.');
     const name = cleanName(req.name);
     if (!name) throw new Refusal(400, NAME_RULE);
     if (this.store.userByName(name)) throw new Refusal(409, 'That name is taken on this server. Pick another one.');
@@ -144,9 +150,10 @@ export class Accounts {
     if (!user) throw new Refusal(403, 'That recovery link has run out or was used. Ask an admin for a new one.');
     const other = this.store.userByKey(pubkey);
     if (other && other.id !== user.id) throw new Refusal(409, `Your identity has another account here already: ${other.name}.`);
+    // A banned account takes no new identity: the ban is checked before anything changes.
+    this.checkBan(user);
     this.store.setKey(user.id, pubkey);
     this.store.dropRefreshes(user.id);
-    this.checkBan(user);
     return this.issue(this.store.userById(user.id)!);
   }
 
@@ -162,7 +169,9 @@ export class Accounts {
   /** The account an access token belongs to, if it is valid and not banned. */
   authenticate(token: string | undefined): UserRow {
     const claims = token ? this.signer.verify<AccessClaims>(token) : undefined;
-    const user = claims?.kind === 'access' && claims.exp > this.now() ? this.store.userById(claims.sub) : undefined;
+    const found = claims?.kind === 'access' && claims.exp > this.now() ? this.store.userById(claims.sub) : undefined;
+    // A token from before the account's sign-ins were ended (a recovery, a ban) is refused.
+    const user = found && (claims!.ep ?? 0) === found.epoch ? found : undefined;
     if (!user) throw new Refusal(401, 'You were signed out. Sign in again.');
     this.checkBan(user);
     return user;
@@ -177,7 +186,7 @@ export class Accounts {
 
   private issue(user: UserRow): Session {
     const now = this.now();
-    const access = this.signer.sign({ sub: user.id, exp: now + ACCESS_TTL_MS, kind: 'access' } satisfies AccessClaims);
+    const access = this.signer.sign({ sub: user.id, exp: now + ACCESS_TTL_MS, kind: 'access', ep: user.epoch } satisfies AccessClaims);
     const refresh = randomToken(32);
     this.store.addRefresh(sha256(refresh), user.id, now + REFRESH_TTL_MS);
     return { user: account(user), access, refresh };
@@ -199,7 +208,13 @@ export class Accounts {
     if (this.config.mode !== 'invite' && !mod) throw new Refusal(403, 'Only admins and moderators can make invites here.');
     const code = randomToken(12);
     const n = !mod ? 1 : uses === null ? null : typeof uses === 'number' && Number.isInteger(uses) && uses > 0 ? Math.min(uses, 10_000) : 1;
-    const h = !mod ? 24 * 7 : hours === null ? null : typeof hours === 'number' && hours > 0 ? Math.min(hours, 24 * 365) : 24 * 7;
+    const h = !mod
+      ? 24 * 7
+      : hours === null
+        ? null
+        : typeof hours === 'number' && Number.isFinite(hours) && hours > 0
+          ? Math.min(hours, 24 * 365)
+          : 24 * 7;
     const expires = h === null ? null : this.now() + h * 3_600_000;
     this.store.addInvite({ code, by: by.id, uses: n, expires, role: 'player', created: this.now() });
     return { code, uses: n, expires, link: inviteLink(this.config.publicUrl, code) };
@@ -229,7 +244,8 @@ export class Accounts {
 
   ban(actor: UserRow, name: unknown, hours: unknown, reason: unknown): UserRow {
     const user = this.target(actor, name);
-    const until = typeof hours === 'number' && hours > 0 ? this.now() + hours * 3_600_000 : FOREVER;
+    const until =
+      typeof hours === 'number' && Number.isFinite(hours) && hours > 0 ? Math.min(FOREVER, this.now() + hours * 3_600_000) : FOREVER;
     const why = this.reasonOf(reason);
     this.store.setBan(user.id, until, why || null);
     this.store.dropRefreshes(user.id);

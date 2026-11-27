@@ -13,6 +13,15 @@ updates:
       # TensorFlow, and the model it is handed no longer fits it (two backends, two tensor types).
       - dependency-name: '@tensorflow/tfjs'
         update-types: ['version-update:semver-major']
+  # The server's Docker image installs from its own lockfile (server/package-lock.json, npm ci),
+  # which the root's pnpm lockfile does not keep current.
+  - package-ecosystem: npm
+    directory: /server
+    schedule:
+      interval: weekly
+    groups:
+      server:
+        patterns: ['*']
   - package-ecosystem: cargo
     directory: /src-tauri
     schedule:

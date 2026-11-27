@@ -5,10 +5,11 @@
  * their instrument, tries it on at each part, and saves it to the server, where their party sees it.
  */
 import { Check, Dices, Palette, RotateCcw, Undo2, X } from 'lucide-react';
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { PARTS, type Part } from '../chart/types';
 import type { Settings } from '../game/settings';
 import { keysOf } from '../input/bindings';
+import { TAB_HOLD_EVENT } from '../input/menuNav';
 import { online } from '../net/client';
 import type { Avatar } from '../net/protocol';
 import { Hint, useActions, useHints } from './actions';
@@ -109,6 +110,25 @@ export function LookEditor({
     }
   };
   const leave = () => (dirty ? setAsking(true) : onClose());
+  /** A tab switch asked for while there are changes: it waits for the answer to Save your look. */
+  const then = useRef<(() => void) | null>(null);
+  const box = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = box.current!;
+    const held = (e: Event) => {
+      then.current = (e as CustomEvent<() => void>).detail;
+      setAsking(true);
+    };
+    el.addEventListener(TAB_HOLD_EVENT, held);
+    return () => el.removeEventListener(TAB_HOLD_EVENT, held);
+  }, []);
+  /** Done with the editor, from the question: on to the tab asked for, if one was. */
+  const finish = () => {
+    const go = then.current;
+    then.current = null;
+    onClose();
+    go?.();
+  };
 
   useActions([
     { id: 'back', label: dirty ? 'Done' : 'Back', icon: X, kbd: 'Escape', sfx: 'back', run: leave },
@@ -124,12 +144,13 @@ export function LookEditor({
     { id: 'look-slot', label: 'Colour the next thing', icon: Palette, ...keysOf('look.slot'), bar: false, run: nextSlot },
     { id: 'look-random', label: 'Surprise me', icon: Dices, ...keysOf('look.random'), bar: false, run: surprise },
     { id: 'look-undo', label: 'Undo changes', icon: Undo2, ...keysOf('look.undo'), bar: false, run: () => setLook(saved) },
+    { id: 'look-own', label: 'Their own look', icon: RotateCcw, ...keysOf('look.own'), bar: false, run: () => setLook(null) },
   ]);
 
   const current = SLOTS.find((x) => x.id === slot)!;
   const noFinish = slot === 'finish' && shown === 'vocals';
   return (
-    <section className="look-editor" aria-label="Your look">
+    <section className="look-editor" aria-label="Your look" ref={box} data-holds-tabs={dirty ? '' : undefined}>
       <header className="look-head">
         <h2 className="display">Your look</h2>
         <p className="hint">Dress your band member. Everyone sees it wherever you play{s.info ? `, on ${s.info.name}` : ''}.</p>
@@ -161,10 +182,18 @@ export function LookEditor({
       </div>
 
       <div className="look-group">
-        <span className="label">
-          Colour
-          <Hint {...keysOf('look.slot')} {...hints} />
-        </span>
+        {/* Back to the band member's own colours sits with the colours, so the row of actions under them fits. */}
+        <div className="look-group-head">
+          <span className="label">
+            Colour
+            <Hint {...keysOf('look.slot')} {...hints} />
+          </span>
+          <button type="button" className="btn small quiet" data-action="look-own" disabled={!look} onClick={() => setLook(null)}>
+            <RotateCcw strokeWidth={ICON_STROKE} aria-hidden />
+            Their own look
+            <Hint {...keysOf('look.own')} {...hints} />
+          </button>
+        </div>
         <div className="look-slots" role="tablist" aria-label="What to colour">
           {SLOTS.map((x) => (
             <button
@@ -220,10 +249,6 @@ export function LookEditor({
           Undo changes
           <Hint {...keysOf('look.undo')} {...hints} />
         </button>
-        <button type="button" className="btn quiet" disabled={!look} onClick={() => setLook(null)}>
-          <RotateCcw strokeWidth={ICON_STROKE} aria-hidden />
-          Their own look
-        </button>
       </div>
       {note && (
         <p className="hint look-note" role="status">
@@ -232,15 +257,23 @@ export function LookEditor({
       )}
 
       {asking && (
-        <Dialog title="Save your look" variant="card" closeLabel="Keep editing" onClose={() => setAsking(false)}>
+        <Dialog
+          title="Save your look"
+          variant="card"
+          closeLabel="Keep editing"
+          onClose={() => {
+            then.current = null;
+            setAsking(false);
+          }}
+        >
           {(close) => (
             <div className="pause-card">
               <h2 className="display">Save your look?</h2>
               <p className="hint">You changed it and have not saved it yet.</p>
-              <button type="button" className="btn primary wide" data-autofocus onClick={() => void save().then((ok) => ok && onClose())}>
+              <button type="button" className="btn primary wide" data-autofocus onClick={() => void save().then((ok) => ok && finish())}>
                 Save
               </button>
-              <button type="button" className="btn wide" data-sfx="back" onClick={onClose}>
+              <button type="button" className="btn wide" data-sfx="back" onClick={finish}>
                 Leave it as it was
               </button>
               <button type="button" className="btn wide quiet" onClick={close}>

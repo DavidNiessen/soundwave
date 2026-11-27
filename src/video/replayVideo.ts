@@ -6,7 +6,8 @@
  */
 import { BufferAnalyser } from '../audio/bufferAnalyser';
 import { FINALE_SECONDS, REPLAY_START } from '../game/timing';
-import { ReplayPlayback } from '../game/replay';
+import { findBreaks, highwayAway, interludes } from '../game/breaks';
+import { ReplayPlayback, showdownMarks } from '../game/replay';
 import { highwaySpeed } from '../game/settings';
 import { feedbackFor, ShowPulse } from '../game/showPulse';
 import { videoSize } from '../game/videoExport';
@@ -96,6 +97,10 @@ export async function makeReplayVideo(job: VideoJob, hooks: VideoHooks): Promise
 
     const playback = new ReplayPlayback(chart, job.inputs);
     const session = playback.session;
+    // As on screen (PlayController): a Showdown's hits haze the highway, and in a long break the
+    // highway leaves, with the deck's dial.
+    const hits = showdownMarks(job.inputs).hits;
+    const breaks = interludes(findBreaks(chart));
     highway.attach(session);
     let now = 0;
     let feedback: { text: string; kind: string; at: number } | null = null;
@@ -142,6 +147,9 @@ export async function makeReplayVideo(job: VideoJob, hooks: VideoHooks): Promise
           }
         }
         const f = show.frame(t, now, session.overdriveActive, !!stage);
+        highway.fog = hits.some(([a, b]) => t >= a && t < b) ? 1 : 0;
+        const away = over === Number.POSITIVE_INFINITY ? highwayAway(t, breaks) : 0;
+        highway.away = away;
         // The stage and the highway are drawn, and read, in this one task: their pictures are
         // still in their canvases.
         if (stage && f.stage) {
@@ -150,7 +158,7 @@ export async function makeReplayVideo(job: VideoJob, hooks: VideoHooks): Promise
         }
         highway.render(t, session, f.pulse, now);
         let deck = null;
-        if (video.hud) {
+        if (video.hud && away < 0.5) {
           const pos = highway.padScreenPositions();
           const foot = highway.footRow(margin);
           if (pos.length) {
@@ -181,7 +189,7 @@ export async function makeReplayVideo(job: VideoJob, hooks: VideoHooks): Promise
           stagePicture = ownCanvas.transferToImageBitmap();
         }
         const highwayPicture = hwCanvas.transferToImageBitmap();
-        composeVideoFrame(g, width, height, stagePicture, highwayPicture, hud);
+        composeVideoFrame(g, width, height, stagePicture, highwayPicture, hud, 1 - away);
         stagePicture?.close();
         highwayPicture.close();
         await encoder.frame(i);

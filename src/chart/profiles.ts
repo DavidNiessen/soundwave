@@ -20,7 +20,7 @@ export interface DifficultyProfile {
   sustainBeats: number;
   /** Silence left between a sustain's end and the next note, in beats. */
   sustainGapBeats: number;
-  /** Most note times per bar (chords count once); the weakest off-beats go first. */
+  /** Most note times in a bar of four beats (chords count once; see barCap); the weakest off-beats go first. */
   maxPerBar: number;
   /** Chords only on this grid (1 = on the beat, 0.5 = eighths, 0.25 = anywhere). */
   chordGrid: number;
@@ -88,3 +88,21 @@ export const PROFILES: Record<Difficulty, DifficultyProfile> = {
     pitchedLanes: 5,
   },
 };
+
+/** Seconds per beat (120 BPM) at which the beat lengths above hold as they are. */
+const BASE_SECONDS_PER_BEAT = 0.5;
+
+/**
+ * A length in beats that should not get shorter in time on a fast song: as given at 120 BPM and
+ * slower, and the same number of seconds as at 120 BPM when faster.
+ */
+export const atLeastAt120 = (beats: number, secondsPerBeat: number): number => beats * Math.max(1, BASE_SECONDS_PER_BEAT / secondsPerBeat);
+
+/**
+ * Shortest note held on this difficulty, in beats. On a fast song half a beat is barely a moment,
+ * and taking sustainBeats as it is would turn nearly every note of a quick bass line into a hold.
+ */
+export const sustainMinBeats = (p: DifficultyProfile, secondsPerBeat: number): number => atLeastAt120(p.sustainBeats, secondsPerBeat);
+
+/** Most note times in a bar of `beats` beats: maxPerBar is for four, so a bar of three keeps three quarters as many. */
+export const barCap = (p: DifficultyProfile, beats: number): number => Math.max(1, Math.round((p.maxPerBar * beats) / 4));

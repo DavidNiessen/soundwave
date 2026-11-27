@@ -10,7 +10,7 @@ import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { MESSAGE_MAX, MOD_TOPICS, PROTOCOL_VERSION, type ServerInfo, type ServerMessage, type Topic } from '../../src/net/protocol.ts';
 import { Accounts, Refusal } from './accounts.ts';
-import type { Config } from './config.ts';
+import { proxyHops, type Config } from './config.ts';
 import type { Store, UserRow } from './db.ts';
 import { Parties } from './parties.ts';
 import { Profiles } from './profiles.ts';
@@ -20,7 +20,8 @@ import { Scores } from './scores.ts';
 import { joinPage } from './joinPage.ts';
 import { Songs } from './songs.ts';
 import { PartySongs } from './partySongs.ts';
-import { clientMessage } from './validate.ts';
+import { clientMessage, SET_LIMIT } from './validate.ts';
+import { addressKey, RateLimit, Uploads } from './limits.ts';
 
 /** The most bytes an HTTP request's body may have (everything it carries is small). */
 const BODY_MAX = 64 * 1024;
@@ -28,6 +29,13 @@ const BODY_MAX = 64 * 1024;
 const NOTIFY_MS = 250;
 /** A run's inputs are bigger: a long song at a high frame rate. */
 const RUN_MAX = 8 * 1024 * 1024;
+/** The biggest message a connection may send before its hello, and the most connections one address may have. */
+const HELLO_MAX = 4 * 1024;
+const SOCKETS_PER_ADDRESS = 40;
+/** Uploads read at once, on the whole server and per player; and how many a player may have waiting. */
+const UPLOADS_AT_ONCE = 4;
+const UPLOADS_EACH = 1;
+const UPLOADS_WAITING = 20;
 
 type Handler = (
   req: IncomingMessage,
@@ -70,25 +78,37 @@ class Binary {
   }
 }
 
-/** A bucket of attempts per address: `burst` at once, refilled at `perMinute`. */
-class RateLimit {
-  private readonly buckets = new Map<string, { tokens: number; at: number }>();
-  private readonly burst: number;
-  private readonly perMinute: number;
-  constructor(burst: number, perMinute: number) {
-    this.burst = burst;
-    this.perMinute = perMinute;
+/** A JSON reviver that refuses numbers too big to be one (1e400 parses as Infinity). */
+function finite(_key: string, value: unknown) {
+  if (typeof value === 'number' && !Number.isFinite(value)) throw new Refusal(400, 'That request has a number out of range.');
+  return value;
+}
+
+/**
+ * A request's body, refused past `limit`. With its length known up front (`size`) it is read
+ * straight into one buffer of that size, so a big upload is held once, not twice.
+ */
+async function bodyOf(req: IncomingMessage, limit: number, size?: number): Promise<Buffer> {
+  if (size !== undefined) {
+    const out = Buffer.allocUnsafe(size);
+    let at = 0;
+    for await (const c of req) {
+      const piece = c as Buffer;
+      if (at + piece.length > size) throw new Refusal(400, 'That request is longer than it says.');
+      piece.copy(out, at);
+      at += piece.length;
+    }
+    if (at !== size) throw new Refusal(400, 'That request is cut short.');
+    return out;
   }
-  take(key: string, now = Date.now()): boolean {
-    const b = this.buckets.get(key) ?? { tokens: this.burst, at: now };
-    b.tokens = Math.min(this.burst, b.tokens + ((now - b.at) / 60_000) * this.perMinute);
-    b.at = now;
-    this.buckets.set(key, b);
-    if (this.buckets.size > 10_000) this.buckets.clear();
-    if (b.tokens < 1) return false;
-    b.tokens--;
-    return true;
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const c of req) {
+    total += (c as Buffer).length;
+    if (total > limit) throw new Refusal(413, 'That request is too big.');
+    chunks.push(c as Buffer);
   }
+  return Buffer.concat(chunks, total);
 }
 
 export interface RunningServer {
@@ -113,20 +133,41 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     const ws = sockets.get(to);
     if (ws && ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
   };
+  /** One message to several players, turned into text once: a party's state goes to all its players at once. */
+  const sendAll = (to: string[], msg: ServerMessage) => {
+    let text: string | undefined;
+    for (const id of to) {
+      const ws = sockets.get(id);
+      if (ws && ws.readyState === ws.OPEN) ws.send((text ??= JSON.stringify(msg)));
+    }
+  };
   const parties = new Parties(
     send,
     clock,
     () => rotation.songs(),
     // A song in the server's own library is there for a party as much as one a host sent.
     (id) => partySongs.has(id) || songs.hasFile(id),
+    sendAll,
   );
   /** What each player online says they are doing. */
   const activity = new Map<string, string>();
+  /** Each player online, as their connection knows them (a rename changes it). */
+  const live = new Map<string, UserRow>();
   const authLimit = new RateLimit(10, 10);
   // A challenge costs the server nothing to hand out, and every sign-in starts with one: a party of
   // players behind one home address all signing in at once must not run out.
   const challengeLimit = new RateLimit(60, 60);
   const writeLimit = new RateLimit(30, 30);
+  // Signing in with a key and refreshing a sign-in happen once a session and once every quarter of
+  // an hour; the limits only stop someone trying many in a row.
+  const keyLimit = new RateLimit(30, 30);
+  const refreshLimit = new RateLimit(60, 60);
+  const uploads = new Uploads(UPLOADS_AT_ONCE, UPLOADS_EACH, UPLOADS_WAITING);
+  // Each tells everyone online (a rename) or the moderators (a report): a few a minute is plenty.
+  const renameLimit = new RateLimit(5, 5);
+  const reportLimit = new RateLimit(10, 10);
+  // A whole set's songs at once, and a set's worth an hour after that.
+  const partySongLimit = new RateLimit(SET_LIMIT, SET_LIMIT / 60);
 
   /** Closes a player's connection, telling them why. */
   /*
@@ -163,19 +204,28 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     if (!ws) return;
     send(user, { type: 'bye', reason });
     sockets.delete(user);
+    activity.delete(user);
+    live.delete(user);
     parties.leave(user);
     ws.close(4000, 'bye');
     notify(['users', 'presence']);
   };
 
-  const addressOf = (req: IncomingMessage) =>
-    (config.trustProxy
+  /**
+   * The address a request is rate-limited by. Behind proxies it is the X-Forwarded-For entry the
+   * outermost one added, counting `trustProxy` proxies back from the end: entries before it are
+   * whatever the client sent, and anyone can send any. IPv6 addresses count by their /64 (limits.ts).
+   */
+  const hops = proxyHops(config);
+  const addressOf = (req: IncomingMessage) => {
+    const chain = hops
       ? String(req.headers['x-forwarded-for'] ?? '')
-          .split(',')[0]
-          .trim()
-      : '') ||
-    req.socket.remoteAddress ||
-    '?';
+          .split(',')
+          .map((x) => x.trim())
+          .filter(Boolean)
+      : [];
+    return addressKey((hops && (chain[chain.length - hops] ?? chain[0])) || req.socket.remoteAddress || '?');
+  };
 
   const routes: Record<string, Handler> = {
     // For a container's healthcheck (Docker, Coolify): the server answers, and its database too.
@@ -191,8 +241,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       partySongs: config.partySongs,
       id: accounts.identities.serverId,
     }),
-    'POST /songs': async (req, _body, ip, _p, raw) => {
-      if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many songs at once. Wait a minute.');
+    'POST /songs': async (req, _body, _ip, _p, raw) => {
       const force = new URL(req.url ?? '/', 'http://x').searchParams.get('force') === '1';
       const shared = await songs.share(me(req), raw, force);
       notify(['songs']);
@@ -213,25 +262,30 @@ export async function startServer(config: Config, store: Store, log: (line: stri
         .filter((p) => p.name)
         .sort((a, b) => a.name.localeCompare(b.name));
     },
-    'POST /auth/signup': async (_req, body, ip) => {
-      if (!authLimit.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
+    'POST /auth/signup': async (_req, body) => {
       const session = await accounts.signUp(body);
       notify(['users']);
       return session;
     },
     'POST /auth/refresh': (_req, body) => accounts.refresh(body.refresh),
     // Signing in with an identity: a challenge, then the challenge signed (identity.ts).
-    'POST /auth/challenge': (_req, _body, ip) => {
-      if (!challengeLimit.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
-      return { nonce: accounts.identities.challenge() };
-    },
+    'POST /auth/challenge': () => ({ nonce: accounts.identities.challenge() }),
     'POST /auth/key': (_req, body) => accounts.keySignIn(body),
-    'POST /auth/recover': (_req, body, ip) => {
-      if (!authLimit.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
-      return accounts.recover(body.code, body);
+    'POST /auth/recover': (_req, body) => {
+      const session = accounts.recover(body.code, body);
+      // The old identity's game, if it is still online somewhere, is signed out at once.
+      drop(session.user.id, 'Your account was recovered on another device, so you were signed out here.');
+      return session;
     },
     'POST /me/name': (req, body) => {
-      const you = accounts.rename(me(req), body.name);
+      const u = me(req);
+      if (!renameLimit.take(u.id)) throw new Refusal(429, 'Too many new names at once. Wait a minute.');
+      const you = accounts.rename(u, body.name);
+      // Their connection and their party take the new name at once, not only on their next sign-in.
+      const online = live.get(u.id);
+      if (online) live.set(u.id, { ...online, name: you.name });
+      parties.rename(u.id, you.name);
+      send(u.id, { type: 'you', you });
       notify(['users', 'presence', 'boards', 'replays', 'log']);
       return you;
     },
@@ -269,8 +323,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       parties.setAvatar(u.id, a ?? undefined);
       return { avatar: a };
     },
-    'POST /scores': async (req, body, ip) => {
-      if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many scores at once. Wait a minute.');
+    'POST /scores': async (req, body) => {
       const taken = await scores.submit(me(req), body);
       notify(['boards'], typeof body.songId === 'string' ? [body.songId] : []);
       return taken;
@@ -350,8 +403,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     [
       'PUT',
       /^\/songs\/([0-9a-f]{64})\/copies\/(medium|low)$/,
-      async (req, _b, ip, [id, quality], raw) => {
-        if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many songs at once. Wait a minute.');
+      async (req, _b, _ip, [id, quality], raw) => {
         await songs.putCopy(me(req), id, quality as 'medium' | 'low', raw);
         notify(['songs']);
         return { ok: true };
@@ -360,10 +412,13 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     [
       'PUT',
       /^\/party\/songs\/([0-9a-f]{64})$/,
-      async (req, _b, ip, [id], raw) => {
+      async (req, _b, _ip, [id], raw) => {
         const u = me(req);
-        if (!writeLimit.take(ip)) throw new Refusal(429, 'Too many songs at once. Wait a minute.');
         if (!parties.inSet(u.id, id)) throw new Refusal(403, 'Only a song in your party’s set can be sent.');
+        if (!parties.maySend(u.id, id)) throw new Refusal(403, 'Only whoever brought a song to the party sends it.');
+        // A song new to the cache pushes older ones out of it, so each player may bring only so many.
+        if (!partySongs.has(id) && !partySongLimit.take(u.id))
+          throw new Refusal(429, 'You sent the server many songs lately. Wait a while before you send more.');
         await partySongs.put(id, raw);
         parties.songCached(id);
         return { ok: true };
@@ -402,7 +457,9 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       'POST',
       /^\/songs\/([0-9a-f]{64})\/report$/,
       (req, body, _ip, [id]) => {
-        songs.report(me(req), id, body.reason);
+        const u = me(req);
+        if (!reportLimit.take(u.id)) throw new Refusal(429, 'Too many reports at once. Wait a minute.');
+        songs.report(u, id, body.reason);
         notify(['reports']);
         return { ok: true };
       },
@@ -439,6 +496,15 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     ],
   ];
 
+  /** The requests with a body that need no sign-in, each with the rate limit its address is held to. */
+  const OPEN: Record<string, RateLimit> = {
+    'POST /auth/signup': authLimit,
+    'POST /auth/recover': authLimit,
+    'POST /auth/challenge': challengeLimit,
+    'POST /auth/key': keyLimit,
+    'POST /auth/refresh': refreshLimit,
+  };
+
   const me = (req: IncomingMessage): UserRow => {
     const auth = req.headers.authorization;
     return accounts.authenticate(auth?.startsWith('Bearer ') ? auth.slice(7) : undefined);
@@ -460,6 +526,8 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     res.setHeader('Access-Control-Expose-Headers', 'X-File-Size, X-Soundwave-Quality');
     // The game's page is cross-origin isolated (for analysis threads): answers must say they may be read there.
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    // Every answer is what its type says: a browser never guesses another (a song file as a page).
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     if (req.method === 'OPTIONS') return void res.writeHead(204).end();
     const path = (req.url ?? '/').split('?')[0].replace(/\/+$/, '') || '/';
     // An invite link's page: plain HTML, with nothing on it that runs.
@@ -486,32 +554,43 @@ export async function startServer(config: Config, store: Store, log: (line: stri
         break;
       }
     if (!route) return reply(res, 404, { error: 'There is nothing here.' });
+    const key = `${req.method} ${path}`;
     const upload =
       (req.method === 'POST' && path === '/songs') ||
       (req.method === 'PUT' && (path.startsWith('/party/songs/') || /^\/songs\/[0-9a-f]{64}\/copies\//.test(path)));
     const limit = path === '/scores' ? RUN_MAX : upload ? config.songMaxMb * 1024 * 1024 + 1 : BODY_MAX;
+    const ip = addressOf(req);
+    let release: (() => void) | undefined;
+    let read = false;
     try {
       let body: Record<string, unknown> = {};
-      let raw = Buffer.alloc(0);
+      let raw: Buffer = Buffer.alloc(0);
       if (req.method === 'POST' || req.method === 'PUT') {
-        const chunks: Buffer[] = [];
-        let size = 0;
-        for await (const c of req) {
-          size += (c as Buffer).length;
-          if (size > limit) throw new Refusal(413, 'That request is too big.');
-          chunks.push(c as Buffer);
+        // Everything that can be checked from the headers is checked before the body is read, so
+        // a body is only ever held for someone allowed to send it, and never past its limit.
+        const declared = Number(req.headers['content-length'] ?? NaN);
+        if (declared > limit) throw new Refusal(413, 'That request is too big.');
+        const open = OPEN[key];
+        if (open) {
+          if (!open.take(ip)) throw new Refusal(429, 'Too many tries. Wait a minute and try again.');
+        } else {
+          const u = me(req);
+          if ((upload || path === '/scores') && !writeLimit.take(u.id))
+            throw new Refusal(429, upload ? 'Too many songs at once. Wait a minute.' : 'Too many scores at once. Wait a minute.');
+          if (upload) release = await uploads.enter(u.id, res);
         }
-        raw = Buffer.concat(chunks);
-        if (size && !upload) {
+        raw = await bodyOf(req, limit, upload && Number.isSafeInteger(declared) ? declared : undefined);
+        read = true;
+        if (raw.length && !upload) {
           try {
-            const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+            const parsed: unknown = JSON.parse(raw.toString('utf8'), finite);
             if (typeof parsed === 'object' && parsed && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
           } catch {
             throw new Refusal(400, 'That request is not JSON.');
           }
         }
-      }
-      const answer = await route(req, body, addressOf(req), params, raw);
+      } else read = true;
+      const answer = await route(req, body, ip, params, raw);
       if (answer instanceof Binary) {
         res.writeHead(200, {
           'Content-Type': answer.type,
@@ -525,38 +604,72 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       }
       reply(res, 200, answer);
     } catch (e) {
+      // A body left unread is not read to its end: the connection closes once the answer is sent.
+      if (!read) res.setHeader('Connection', 'close');
       if (e instanceof Refusal) return reply(res, e.status, { error: e.message });
       log(`Error on ${req.method} ${path}: ${(e as Error).stack ?? e}`);
       reply(res, 500, { error: 'Something went wrong on the server.' });
+    } finally {
+      release?.();
     }
   });
 
   /* Parties, over WebSocket ----------------------------------------------------------------- */
 
   const wss = new WebSocketServer({ server: http, path: '/ws', maxPayload: MESSAGE_MAX });
-  wss.on('connection', (ws) => {
+  /** Each connection's address, to hold every address to a few connections. */
+  const addresses = new WeakMap<WebSocket, string>();
+  /** The receiver's limit on one message (ws keeps it per connection, unexported: set where it is there). */
+  const setMaxPayload = (ws: WebSocket, bytes: number) => {
+    const receiver = (ws as unknown as { _receiver?: { _maxPayload?: number } })._receiver;
+    if (receiver && typeof receiver._maxPayload === 'number') receiver._maxPayload = bytes;
+  };
+  wss.on('connection', (ws, req) => {
     let user: UserRow | null = null;
+    const address = addressOf(req);
+    const mine = [...wss.clients].filter((c) => addresses.get(c) === address);
+    // A household or a LAN party shares one address, but no more than a few parties' worth of it.
+    if (mine.length >= SOCKETS_PER_ADDRESS) {
+      // Said, so the player knows why; the game tries again after a while, as for a dropped connection.
+      ws.send(
+        JSON.stringify({
+          type: 'bye',
+          reason: 'Too many players are connected from your network right now. Trying again shortly.',
+        } satisfies ServerMessage),
+      );
+      return void ws.close(4009, 'too many');
+    }
+    addresses.set(ws, address);
+    // Before it says who it is, a connection may send only small messages: a hello is a few hundred bytes.
+    setMaxPayload(ws, HELLO_MAX);
     // A connection that does not say hello in time is closed.
     const helloTimer = setTimeout(() => !user && ws.close(4001, 'hello'), 10_000);
-    // At most 60 messages a second on average (a song sends 10).
+    // At most 60 messages a second on average (a song sends 10), and of those that change
+    // something for others (a party's state, the presence list) 5 a second.
     let budget = 120;
+    let changes = 20;
     let budgetAt = performance.now();
     const say = (msg: ServerMessage) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(msg));
 
     ws.on('message', (data, isBinary) => {
       const now = performance.now();
-      budget = Math.min(120, budget + ((now - budgetAt) / 1000) * 60);
+      const since = (now - budgetAt) / 1000;
+      budget = Math.min(120, budget + since * 60);
+      changes = Math.min(20, changes + since * 5);
       budgetAt = now;
       if (--budget < 0) return void ws.close(4008, 'too fast');
       if (isBinary) return;
+      if (!user && (data as Buffer).length > HELLO_MAX) return void ws.close(1009, 'hello');
       let msg;
       try {
         msg = clientMessage(JSON.parse(data.toString()));
       } catch {
         msg = undefined;
       }
+      if (!msg && !user) return void ws.close(4001, 'hello');
       if (!msg) return say({ type: 'error', message: 'The server did not understand that message. Is the game up to date?' });
       if (msg.type === 'ping') return say({ type: 'pong', t: msg.t, serverT: performance.now() });
+      if (msg.type !== 'progress' && msg.type !== 'hello' && --changes < 0) return;
       if (!user) {
         if (msg.type !== 'hello') return;
         if (msg.protocol !== PROTOCOL_VERSION) {
@@ -576,6 +689,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
           return void ws.close(4003, 'auth');
         }
         clearTimeout(helloTimer);
+        setMaxPayload(ws, MESSAGE_MAX);
         const before = sockets.get(user.id);
         if (before && before !== ws) {
           before.send(JSON.stringify({ type: 'bye', reason: 'You signed in to this server somewhere else.' } satisfies ServerMessage));
@@ -583,12 +697,14 @@ export async function startServer(config: Config, store: Store, log: (line: stri
           before.close(4004, 'replaced');
         }
         sockets.set(user.id, ws);
+        live.set(user.id, user);
         notify(['users', 'presence']);
         say({ type: 'welcome', you: { id: user.id, name: user.name, role: user.role }, server: config.name, protocol: PROTOCOL_VERSION });
         parties.reconnected(user.id);
         return;
       }
       if (msg.type === 'hello') return;
+      if (sockets.get(user.id) === ws) user = live.get(user.id) ?? user;
       if (msg.type === 'status') {
         activity.set(user.id, msg.activity);
         return void notify(['presence']);
@@ -602,6 +718,7 @@ export async function startServer(config: Config, store: Store, log: (line: stri
       if (user && sockets.get(user.id) === ws) {
         sockets.delete(user.id);
         activity.delete(user.id);
+        live.delete(user.id);
         parties.disconnected(user.id);
         notify(['users', 'presence']);
       }

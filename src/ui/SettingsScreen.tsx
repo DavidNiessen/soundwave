@@ -18,7 +18,7 @@ import { stemModel, type ModelStatus } from '../analysis/separation/model';
 import type { AnalysisDevice } from '../analysis/separation/support';
 import { allowOutputList, canPickOutput, listOutputs, type OutputList } from '../audio/output';
 import { playSfx } from '../audio/sfx';
-import { inDesktopApp } from '../game/displayMode';
+import { fullscreenShortcut, inDesktopApp, onMac } from '../game/displayMode';
 import { applyPreset, autoTier, resolveGraphics, type GraphicsPreset, type GraphicsSettings, type Level } from '../game/graphics';
 import {
   clampReplayLimit,
@@ -35,6 +35,7 @@ import { PadGlyph, STYLE_LABEL } from '../input/glyphs';
 import { getInputMode, usesFocus } from '../input/inputMode';
 import { focusEl, focusStart, NAV_EVENT, nearest, TAB_EVENT, type Dir } from '../input/menuNav';
 import { backInput, confirmInput, PAUSE_INPUT, pads, resolveStyle, styleFor, SYSTEM_INPUT, type GlyphStyle } from '../input/pads';
+import { lightPads, type LightPad } from '../input/lightbar';
 import { dualSenseHaptics, menuPulse, Rumbler } from '../input/rumble';
 import { usePads } from '../input/usePads';
 import { Hint, keyName, useActions, useHints } from './actions';
@@ -69,6 +70,7 @@ function updateButton(u: UpdateStatus, upToDate: boolean): string {
   }
 }
 import { useSlide } from './useSlide';
+import { notify } from './notify';
 import {
   AREAS,
   bound,
@@ -124,7 +126,7 @@ const FIELDS: Record<Tab, readonly (keyof Settings)[]> = {
   video: ['graphics', 'displayMode', 'uiScale', 'motion'],
   audio: ['volume', 'musicVolume', 'sfxVolume', 'songPreviews', 'muteUnfocused', 'outputDevice', 'outputDeviceName'],
   game: ['trackSpeed', 'offsetMs', 'replays', 'replayLimit'],
-  controller: ['glyphs', 'rumble', 'rumbleHits', 'rumbleMisses', 'rumbleSustains', 'rumbleOverdrive', 'ps5Haptics'],
+  controller: ['glyphs', 'rumble', 'rumbleHits', 'rumbleMisses', 'rumbleSustains', 'rumbleOverdrive', 'ps5Haptics', 'lightbar'],
   touch: ['touchHaptics', 'touchOverdriveSide'],
   shortcuts: ['keys4', 'keys5', 'overdriveKey', 'pad4', 'pad5', 'padOverdrive', 'bindings'],
   online: ['postScores', 'discordJoin', 'shareSongs', 'shareLibrary', 'serverSongs', 'streamQuality'],
@@ -389,6 +391,21 @@ export function SettingsScreen({ settings, model, device, onChange, onBack, inSo
     };
   }, [ps5, tab]);
 
+  // A PlayStation controller's light bar can be set by the desktop app over USB; say which it is.
+  const playstation = snap.pads.some((p) => p.family === 'ps5' || p.family === 'ps4');
+  const [lights, setLights] = useState<LightPad[] | null>(null);
+  useEffect(() => {
+    if (!playstation || tab !== 'controller') return setLights(null);
+    let live = true;
+    const check = () => void lightPads().then((found) => live && setLights(found));
+    check();
+    const timer = setInterval(check, 4000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [playstation, tab]);
+
   // The audio outputs, kept current while the Audio tab is open (plugging one in changes the list).
   const [outputs, setOutputs] = useState<OutputList>({ devices: [], listed: false });
   const [outputsRefused, setOutputsRefused] = useState(false);
@@ -412,7 +429,6 @@ export function SettingsScreen({ settings, model, device, onChange, onBack, inSo
   const me = useSyncExternalStore(identityStore.subscribe, identityStore.snapshot);
   useEffect(() => void identityStore.load(), []);
   const [identityDialog, setIdentityDialog] = useState<'export' | 'import' | null>(null);
-  const [identityNote, setIdentityNote] = useState<string | null>(null);
 
   const resetTab = () => {
     const patch: Partial<Settings> = {};
@@ -432,6 +448,7 @@ export function SettingsScreen({ settings, model, device, onChange, onBack, inSo
     setBinding,
     snap,
     haptics,
+    lights,
     model,
     device,
     library,
@@ -564,19 +581,9 @@ export function SettingsScreen({ settings, model, device, onChange, onBack, inSo
           )}
         </Dialog>
       )}
-      {identityDialog && <IdentityDialog kind={identityDialog} onClose={() => setIdentityDialog(null)} onDone={setIdentityNote} />}
-      {identityNote && (
-        <Dialog title="Your identity" variant="card" closeLabel="Done" onClose={() => setIdentityNote(null)}>
-          {(close) => (
-            <div className="pause-card">
-              <h2 className="display">Your identity</h2>
-              <p className="hint">{identityNote}</p>
-              <button type="button" className="btn primary wide" data-autofocus onClick={close}>
-                Done
-              </button>
-            </div>
-          )}
-        </Dialog>
+      {/* Done out of sight (a file saved, a sign-in changed): a notification says so, not another window. */}
+      {identityDialog && (
+        <IdentityDialog kind={identityDialog} onClose={() => setIdentityDialog(null)} onDone={(text) => notify.success(text)} />
       )}
       {library.ui}
       {updateOpen && <UpdateCard settings={settings} onClose={() => setUpdateOpen(false)} />}
@@ -602,6 +609,8 @@ interface Ctx {
   setBinding(b: Binding): void;
   snap: ReturnType<typeof usePads>;
   haptics: boolean | null;
+  /** The controllers with a light bar the desktop app found (null while it looks). */
+  lights: LightPad[] | null;
   model: ModelStatus;
   device: AnalysisDevice | null;
   library: LibraryBackup;
@@ -664,21 +673,39 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
                 kind: 'choice',
                 id: 'displayMode',
                 label: 'Window mode',
-                help: 'How the game fills the screen. Alt+Enter or F11 switches between a window and the fullscreen mode you used last.',
+                help: `How the game fills the screen. ${fullscreenShortcut()} switches between a window and the fullscreen mode you used last.`,
                 value: s.displayMode,
-                options: [
-                  { value: 'fullscreen', label: 'Fullscreen', help: 'The game takes over the whole screen.' },
-                  {
-                    value: 'borderless',
-                    label: 'Windowed fullscreen',
-                    help: 'A borderless window that fills the screen. Switching to other apps stays instant.',
-                  },
-                  {
-                    value: 'windowed',
-                    label: 'Window',
-                    help: 'A window without a title bar. Drag its top edge to move it and its sides to resize it.',
-                  },
-                ],
+                options: onMac()
+                  ? [
+                      {
+                        value: 'fullscreen',
+                        label: 'Fullscreen',
+                        help: 'The game gets a space of its own, like any Mac app in full screen. Switching apps slides between spaces.',
+                      },
+                      {
+                        value: 'borderless',
+                        label: 'Windowed fullscreen',
+                        help: 'The game covers the whole screen and hides the menu bar and Dock, without a space of its own. Switching apps is instant.',
+                      },
+                      {
+                        value: 'windowed',
+                        label: 'Window',
+                        help: 'A window with the usual close, minimize and full-screen buttons. Drag its top edge to move it.',
+                      },
+                    ]
+                  : [
+                      { value: 'fullscreen', label: 'Fullscreen', help: 'The game takes over the whole screen.' },
+                      {
+                        value: 'borderless',
+                        label: 'Windowed fullscreen',
+                        help: 'A borderless window that fills the screen. Switching to other apps stays instant.',
+                      },
+                      {
+                        value: 'windowed',
+                        label: 'Window',
+                        help: 'A window without a title bar. Drag its top edge to move it and its sides to resize it.',
+                      },
+                    ],
                 set: (v) => set({ displayMode: v as DisplayMode }),
               },
             ],
@@ -1085,6 +1112,14 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
     const detected = styleFor(c.snap.family);
     const none = !c.snap.pads.length;
     const ps5 = c.snap.pads.some((p) => p.family === 'ps5');
+    const playstation = c.snap.pads.some((p) => p.family === 'ps5' || p.family === 'ps4');
+    const lightNote = !inDesktopApp()
+      ? 'It works in the desktop app with a USB cable.'
+      : c.lights === null
+        ? 'Checking the controller…'
+        : c.lights.some((p) => p.usb)
+          ? ''
+          : 'It needs a USB cable: by Bluetooth, setting the light would stop the game reading the controller’s buttons.';
     return [
       {
         title: 'Controllers',
@@ -1196,6 +1231,22 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
             : []),
         ],
       },
+      ...(playstation
+        ? [
+            {
+              title: 'Light bar',
+              rows: [
+                toggle(
+                  'lightbar',
+                  'Light bar',
+                  `The light around the touchpad flashes in a lane’s colour every time you press that lane, glows gold while your streak holds the top multiplier, and light blue in overdrive. ${lightNote}`.trim(),
+                  s.lightbar,
+                  (v) => set({ lightbar: v }),
+                ),
+              ],
+            },
+          ]
+        : []),
     ];
   }
 
@@ -1360,11 +1411,13 @@ function buildSections(tab: Tab, c: Ctx): Section[] {
           body:
             c.device === 'gpu'
               ? 'Graphics card'
-              : c.device === 'cpu'
-                ? 'Processor (slower)'
-                : c.device === 'none'
-                  ? 'Not available on this device'
-                  : 'Checking…',
+              : c.device === 'native'
+                ? 'The app itself (graphics card and processor)'
+                : c.device === 'cpu'
+                  ? 'Processor (slower)'
+                  : c.device === 'none'
+                    ? 'Not available on this device'
+                    : 'Checking…',
         },
       ],
     },

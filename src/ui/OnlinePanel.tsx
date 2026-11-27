@@ -2,7 +2,7 @@
  * The main menu's Online tab: everything on a Soundwave server in one place. Signed out, a way in;
  * signed in, starting or joining a party (or the one the player is in), the leaderboards, shared
  * songs, the player's look, who is online and their account. The party itself (its lobby and
- * songs) and signing in are on the Play together screen, which this opens.
+ * songs) and making an account are on the Play together screen, which this opens.
  */
 import {
   ExternalLink,
@@ -21,6 +21,7 @@ import {
   Trophy,
   UserPlus,
   UserRound,
+  WifiOff,
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -29,11 +30,13 @@ import { keysOf } from '../input/bindings';
 import { online, parseInvite, parseRecovery } from '../net/client';
 import { REPOSITORY_URL } from '../app/release';
 import { PARTY_MAX, type Role } from '../net/protocol';
-import { Hint, useActions, useHints, type Action } from './actions';
+import { Hint, keyName, useActions, useHints, type Action } from './actions';
 import type { Part } from '../chart/types';
 import { AvatarPortrait } from './AvatarPortrait';
 import { LookEditor, type LookPreview } from './AvatarScreen';
 import { Dialog } from './Dialog';
+import { HoldButton } from './HoldButton';
+import { notify } from './notify';
 import { ICON_STROKE } from './icons';
 import { OnlineSidebar } from './OnlineSidebar';
 import { MODES } from './PartyScreen';
@@ -59,7 +62,10 @@ export function OnlinePanel(props: OnlinePanelProps) {
   const s = useSyncExternalStore(online.subscribe, online.snapshot);
   // A stored sign-in connects by itself.
   useEffect(() => online.resume(), []);
-  return s.account ? <SignedIn {...props} /> : <SignedOut {...props} />;
+  // The server can end a sign-in (signed in elsewhere, banned): the account is still known then,
+  // but the way back in is the signed-out page, with the server's reason.
+  const signedIn = !!s.account && (s.status === 'online' || s.status === 'reconnecting');
+  return signedIn ? <SignedIn {...props} /> : <SignedOut {...props} />;
 }
 
 /** Where to read how to run a server of one's own. */
@@ -135,7 +141,7 @@ function SignedOut({ settings, onParty, base }: OnlinePanelProps) {
     <div className="online-panel signed-out">
       <div className="online-landing">
         <section className="landing-hero" aria-label="Play online">
-          <h2 className="landing-title">Play together</h2>
+          <h2 className="landing-title">Play online</h2>
           <p className="landing-lead">
             Soundwave servers are run by players, for their friends. Join one with its address, or the invite link someone sent you.
           </p>
@@ -196,10 +202,19 @@ function SignedOut({ settings, onParty, base }: OnlinePanelProps) {
               )}
             </form>
           )}
-          {problem && (
+          {problem ? (
             <p className="party-error" role="alert">
               {problem}
             </p>
+          ) : (
+            s.error && (
+              <p className="party-error" role="alert">
+                {s.error}
+                <button type="button" className="btn small" onClick={() => online.clearError()}>
+                  OK
+                </button>
+              </p>
+            )
           )}
           {!known && (
             <p className="landing-small">
@@ -247,7 +262,6 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, base, part }: OnlinePa
   const hints = useHints(settings);
   /** The window open over the tab: the account, an invite, or the server's tools. */
   const [modal, setModal] = useState<'account' | 'forget' | 'invite' | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const [newName, setNewName] = useState(s.account?.name ?? '');
   const [renameNote, setRenameNote] = useState<string | null>(null);
   /** Editing the look in place (the tiles give way to the editor): what the character wears meanwhile. */
@@ -255,25 +269,32 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, base, part }: OnlinePa
   const onAvatar = () => setLook({ part, look: s.avatar });
   const mod = s.account!.role !== 'player';
   const party = s.party;
+  /** The connection is gone and being tried again: a party cannot be started or joined until it is back. */
+  const away = s.status !== 'online';
   const [code, setCode] = useState('');
   const codeInput = useRef<HTMLInputElement>(null);
+  // Said in a notification: the account window stays open over the tab, and would hide a note on it.
   const saveData = async () => {
     try {
       const data = await online.exportData();
-      download(`soundwave-${s.info?.name ?? 'server'}-my-data.zip`.replace(/[^\w.-]+/g, '-'), data);
+      const name = `soundwave-${s.info?.name ?? 'server'}-my-data.zip`.replace(/[^\w.-]+/g, '-');
+      download(name, data);
+      notify.success(`Your data from ${s.info?.name ?? 'the server'} is saved as ${name}.`);
     } catch (e) {
-      online.report((e as Error).message);
+      notify.error(`Your data could not be saved: ${(e as Error).message}`);
     }
   };
+  const deleteAccount = () => void online.deleteAccount().catch((e: Error) => notify.error(`Your account was not deleted: ${e.message}`));
   // Starting or joining a party from here opens its lobby as soon as the party is there.
   const asked = useRef(false);
   const join = () => {
-    if (!code.trim()) return;
+    if (!code.trim() || away) return;
     asked.current = true;
     online.joinParty(code);
   };
   const start = () => {
     if (party) return onParty();
+    if (away) return;
     asked.current = true;
     online.createParty();
   };
@@ -296,6 +317,7 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, base, part }: OnlinePa
         icon: PartyPopper,
         ...keysOf('party.create'),
         bar: false,
+        disabled: !party && away,
         run: start,
       },
       {
@@ -304,6 +326,7 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, base, part }: OnlinePa
         icon: UserPlus,
         ...keysOf('party.join'),
         bar: false,
+        disabled: away,
         run: () => (code.trim() ? join() : codeInput.current?.focus()),
       },
       {
@@ -314,246 +337,284 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, base, part }: OnlinePa
         bar: false,
         run: () => setModal('account'),
       },
-      { id: 'party-invite', label: 'Invite', icon: Send, ...keysOf('party.invite'), run: () => setModal('invite') },
+      { id: 'party-invite', label: 'Invite', icon: Send, ...keysOf('party.invite'), bar: false, run: () => setModal('invite') },
       { id: 'party-boards', label: 'Leaderboards', icon: Trophy, ...keysOf('party.boards'), bar: false, run: onBoards },
       { id: 'party-avatar', label: 'Your look', icon: Shirt, ...keysOf('party.avatar'), bar: false, run: onAvatar },
-      ...(mod ? [{ id: 'party-admin', label: 'Admin', icon: Gavel, ...keysOf('party.admin'), run: onAdmin }] : []),
+      ...(mod ? [{ id: 'party-admin', label: 'Admin', icon: Gavel, ...keysOf('party.admin'), bar: false, run: onAdmin }] : []),
     ],
     { passive: !!look },
   );
 
+  // Each is a tile as well as a shortcut, so a controller and a finger reach it too.
   const more: [string, string, LucideIcon, string, string, () => void][] = [
     ['party-boards', 'party.boards', Trophy, 'Leaderboards', 'The best runs of every song here.', onBoards],
     ['party-avatar', 'party.avatar', Shirt, 'Your look', 'Your colours, on stage for everyone.', onAvatar],
+    ['party-invite', 'party.invite', Send, 'Invite friends', 'A link that brings them to this server.', () => setModal('invite')],
+    ...(mod
+      ? ([['party-admin', 'party.admin', Gavel, 'Run the server', 'Players, invites, songs and reports.', onAdmin]] as typeof more)
+      : []),
   ];
   const players = party ? party.members.length : 0;
 
   return (
-    <div className={`online-panel ${look ? 'editing' : ''}`}>
-      {s.error && (
-        <p className="party-error" role="alert">
-          {s.error}
-          <button type="button" className="btn small" onClick={() => online.clearError()}>
-            OK
-          </button>
-        </p>
-      )}
-      <div className="online-stage">
-        {/* Left: the bento, playing together and the server's boards, with the week's best under it;
-            or, while the look is edited, the editor. */}
-        {look && <LookEditor part={part} settings={settings} onPreview={setLook} onClose={() => setLook(null)} />}
-        <div className="online-bento" hidden={!!look}>
-          <div className="tiles party-tiles" data-nav-group="tiles">
-            <button
-              type="button"
-              className={`tile hero ${party ? 'in-party' : ''}`}
-              data-action="party-create"
-              data-autofocus
-              onClick={start}
-            >
-              <span className="mosaic blank" aria-hidden>
-                <PartyPopper strokeWidth={ICON_STROKE} />
-              </span>
-              <span className="tile-text">
-                <span className="tile-title">
-                  {party ? 'Your' : 'Start a'}{' '}
-                  <span className="nowrap">
-                    party
-                    <Hint {...keysOf('party.create')} {...hints} />
-                  </span>
-                </span>
-                {party ? (
-                  <>
-                    <span className="display party-code-text">{party.code}</span>
-                    <span className="tile-cap">
-                      {players} {players === 1 ? 'player' : 'players'}
-                      {party.mode ? ` · ${MODES[party.mode].label}` : ' · picking what to play'}
-                    </span>
-                    <span className="tile-meta">Open the lobby</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="tile-cap">Friends join with its code. Then you pick what to play together.</span>
-                    <span className="tile-meta">Versus or Showdown · up to {PARTY_MAX} players</span>
-                  </>
-                )}
-              </span>
+    <>
+      {/* The look editor has a title of its own, and needs the room. */}
+      {!look && <h2 className="page-title">Play online</h2>}
+      <div className={`online-panel ${look ? 'editing' : ''}`}>
+        {s.error && (
+          <p className="party-error" role="alert">
+            {s.error}
+            <button type="button" className="btn small" onClick={() => online.clearError()}>
+              OK
             </button>
-            <div className="tile-stack">
-              {!party && (
-                <form
-                  className="tile party-join"
-                  style={{ ['--i' as string]: 1 }}
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    join();
-                  }}
-                >
-                  <span className="tile-text">
-                    <span className="tile-title">
-                      Join a party
-                      <Hint {...keysOf('party.join')} {...hints} />
-                    </span>
-                    <span className="party-join-row">
-                      <input
-                        ref={codeInput}
-                        value={code}
-                        onChange={(e) =>
-                          setCode(
-                            e.target.value
-                              .toUpperCase()
-                              .replace(/[^A-Z0-9]/g, '')
-                              .slice(0, 5),
-                          )
-                        }
-                        placeholder="B7KQX"
-                        aria-label="The party’s code, from its host"
-                        maxLength={12}
-                        spellCheck={false}
-                        autoCapitalize="characters"
-                      />
-                      <button type="submit" className="btn primary" data-action="party-join" disabled={!code.trim()}>
-                        <UserPlus strokeWidth={ICON_STROKE} aria-hidden />
-                        Join
-                      </button>
-                    </span>
-                  </span>
-                </form>
-              )}
-              {more.map(([id, binding, Icon, label, cap, run], i) => (
-                <button key={id} type="button" className="tile small" data-action={id} style={{ ['--i' as string]: i + 2 }} onClick={run}>
-                  <span className="tile-icon" aria-hidden>
-                    <Icon strokeWidth={ICON_STROKE} />
-                  </span>
-                  <span className="tile-text">
-                    <span className="tile-title">
-                      {label}
-                      <Hint {...keysOf(binding)} {...hints} />
-                    </span>
-                    <span className="tile-cap">{cap}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <OnlineSidebar onBoards={onBoards} />
-        </div>
-
-        {/* Right: the player themselves, their band member on stage in their look, the nametag over them. */}
-        <div className="online-me">
-          {/* The player's character, standing over the menu as in a lobby: a light on them, their
-              shadow on the floor, and their nametag floating over their head. */}
-          <span className="lobby-light" aria-hidden />
-          <span className="lobby-shadow" aria-hidden />
-          <AvatarPortrait part={look?.part ?? part} avatar={look ? look.look : s.avatar} />
-          <button type="button" className="nametag" data-action="party-account" onClick={() => setModal('account')}>
-            <span className="nametag-name">
-              <span className={`online-dot ${s.status === 'online' ? 'on' : ''}`} aria-hidden />
-              <span className="nametag-text">{s.account!.name}</span>
-              <Hint {...keysOf('party.signOut')} {...hints} />
-            </span>
-            <span className="nametag-sub">
-              {mod ? `${ROLE_LABEL[s.account!.role].toLowerCase()} · ` : ''}
-              {(s.status === 'online' ? (s.info?.name ?? 'soundwave server') : 'reconnecting…').toLowerCase()}
-            </span>
-          </button>
-        </div>
-      </div>
-
-      {modal === 'account' && (
-        <Dialog title="Your account" variant="card" onClose={() => setModal(null)}>
-          {(close) => (
-            <div className="pause-card account-card">
-              <span className="online-dot on" aria-hidden />
-              <h2 className="display">{s.account!.name}</h2>
-              <p className="hint">
-                {mod ? `${ROLE_LABEL[s.account!.role]} · ` : ''}
-                {s.status === 'online' ? `Signed in to ${s.info?.name ?? s.server}` : 'Connection lost, trying again…'}
-              </p>
-              <form
-                className="rename-row"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  setRenameNote(null);
-                  void online.rename(newName.trim()).then(
-                    () => setRenameNote('Your name here is changed.'),
-                    (err: Error) => setRenameNote(err.message),
-                  );
-                }}
+          </p>
+        )}
+        <div className="online-stage">
+          {/* Left: the bento, playing together and the server's boards, with the week's best under it;
+            or, while the look is edited, the editor. */}
+          {look && <LookEditor part={part} settings={settings} onPreview={setLook} onClose={() => setLook(null)} />}
+          <div className="online-bento" hidden={!!look}>
+            <div className="tiles party-tiles" data-nav-group="tiles">
+              <button
+                type="button"
+                className={`tile hero ${party ? 'in-party' : ''}`}
+                data-action="party-create"
+                data-autofocus
+                disabled={!party && away}
+                onClick={start}
               >
-                <label className="meta-field">
-                  <span className="dim">Your name on {s.info?.name ?? 'this server'}</span>
-                  <input value={newName} onChange={(e) => setNewName(e.target.value)} maxLength={24} spellCheck={false} />
-                </label>
-                <button type="submit" className="btn small" disabled={newName.trim().length < 2 || newName.trim() === s.account!.name}>
-                  <Pencil strokeWidth={ICON_STROKE} aria-hidden />
-                  Rename
-                </button>
-              </form>
-              {renameNote && <p className="hint">{renameNote}</p>}
-              <button type="button" className="btn wide" data-autofocus onClick={() => void saveData()}>
-                <Download strokeWidth={ICON_STROKE} aria-hidden />
-                Save my data
+                <span className="mosaic blank" aria-hidden>
+                  <PartyPopper strokeWidth={ICON_STROKE} />
+                </span>
+                <span className="tile-text">
+                  <span className="tile-title">
+                    {party ? 'Your' : 'Start a'}{' '}
+                    <span className="nowrap">
+                      party
+                      <Hint {...keysOf('party.create')} {...hints} />
+                    </span>
+                  </span>
+                  {party ? (
+                    <>
+                      <span className="display party-code-text">{party.code}</span>
+                      <span className="tile-cap">
+                        {players} {players === 1 ? 'player' : 'players'}
+                        {party.mode ? ` · ${MODES[party.mode].label}` : ' · picking what to play'}
+                      </span>
+                      <span className="tile-meta">Open the lobby</span>
+                    </>
+                  ) : away ? (
+                    <>
+                      <span className="tile-cap">
+                        The connection to the server is lost. Starting or joining a party waits until it is back.
+                      </span>
+                      <span className="tile-meta">
+                        <WifiOff strokeWidth={ICON_STROKE} aria-hidden /> Trying again…
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="tile-cap">Friends join with its code. Then you pick what to play together.</span>
+                      <span className="tile-meta">Versus or Showdown · up to {PARTY_MAX} players</span>
+                    </>
+                  )}
+                </span>
               </button>
-              <button type="button" className="btn wide" data-sfx="back" onClick={() => online.signOut()}>
-                <LogOut strokeWidth={ICON_STROKE} aria-hidden />
-                Sign out
-              </button>
-              <button type="button" className="btn wide quiet" data-sfx="back" onClick={() => setModal('forget')}>
-                Forget this server
-              </button>
-              {s.account!.role !== 'owner' &&
-                (deleting ? (
-                  <button
-                    type="button"
-                    className="btn wide danger"
-                    onClick={() => void online.deleteAccount().catch((e) => online.report((e as Error).message))}
+              <div className={`tile-stack ${more.length > 2 ? 'many' : ''} ${more.length % 2 ? 'odd' : ''}`}>
+                {!party && (
+                  <form
+                    className="tile party-join"
+                    style={{ ['--i' as string]: 1 }}
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      join();
+                    }}
                   >
-                    Delete it, with all my scores
-                  </button>
-                ) : (
-                  <button type="button" className="btn wide quiet" onClick={() => setDeleting(true)}>
-                    Delete my account
+                    <span className="tile-text">
+                      <span className="tile-title">
+                        Join a party
+                        <Hint {...keysOf('party.join')} {...hints} />
+                      </span>
+                      <span className="party-join-row">
+                        <input
+                          ref={codeInput}
+                          value={code}
+                          disabled={away}
+                          onChange={(e) =>
+                            setCode(
+                              e.target.value
+                                .toUpperCase()
+                                .replace(/[^A-Z0-9]/g, '')
+                                .slice(0, 5),
+                            )
+                          }
+                          placeholder="B7KQX"
+                          aria-label="The party’s code, from its host"
+                          maxLength={12}
+                          spellCheck={false}
+                          autoCapitalize="characters"
+                        />
+                        {/* Its shortcut presses it only with a code typed; without one, the shortcut goes to the field. */}
+                        <button
+                          type="submit"
+                          className="btn primary"
+                          data-action={code.trim() ? 'party-join' : undefined}
+                          disabled={!code.trim() || away}
+                        >
+                          <UserPlus strokeWidth={ICON_STROKE} aria-hidden />
+                          Join
+                        </button>
+                      </span>
+                    </span>
+                  </form>
+                )}
+                {more.map(([id, binding, Icon, label, cap, run], i) => (
+                  <button key={id} type="button" className="tile small" data-action={id} style={{ ['--i' as string]: i + 2 }} onClick={run}>
+                    <span className="tile-icon" aria-hidden>
+                      <Icon strokeWidth={ICON_STROKE} />
+                    </span>
+                    <span className="tile-text">
+                      <span className="tile-title">
+                        {label}
+                        <Hint {...keysOf(binding)} {...hints} />
+                      </span>
+                      <span className="tile-cap">{cap}</span>
+                    </span>
                   </button>
                 ))}
-              <button type="button" className="btn primary wide" onClick={close}>
-                Done
-              </button>
+              </div>
             </div>
-          )}
-        </Dialog>
-      )}
-      {modal === 'forget' && (
-        <Dialog title="Forget this server" variant="card" closeLabel="Keep it" onClose={() => setModal('account')}>
-          {(close) => (
-            <div className="pause-card">
-              <h2 className="display">Forget this server?</h2>
-              <p className="hint">
-                You are signed out and the game no longer knows {s.info?.name ?? s.server}. Your account and scores stay on it; to come back
-                you need its address or an invite again.
-              </p>
-              <button type="button" className="btn wide" data-autofocus data-sfx="back" onClick={close}>
-                Keep it
-              </button>
-              <button type="button" className="btn primary wide danger" onClick={() => online.forget()}>
-                Forget it
-              </button>
-            </div>
-          )}
-        </Dialog>
-      )}
-      {modal === 'invite' && (
-        <Dialog title="Invite friends" variant="card" className="wide-card" onClose={() => setModal(null)}>
-          {(close) => (
-            <div className="window-body">
-              <InvitePanel mod={mod} />
-              <button type="button" className="btn primary wide" onClick={close}>
-                Done
-              </button>
-            </div>
-          )}
-        </Dialog>
-      )}
-    </div>
+            <OnlineSidebar onBoards={onBoards} />
+          </div>
+
+          {/* Right: the player themselves, their band member on stage in their look, the nametag over them. */}
+          <div className="online-me">
+            {/* The player's character, standing over the menu as in a lobby: a light on them, their
+              shadow on the floor, and their nametag floating over their head. */}
+            <span className="lobby-light" aria-hidden />
+            <span className="lobby-shadow" aria-hidden />
+            <AvatarPortrait part={look?.part ?? part} avatar={look ? look.look : s.avatar} />
+            <button type="button" className="nametag" data-action="party-account" onClick={() => setModal('account')}>
+              <span className="nametag-name">
+                <span className={`online-dot ${s.status === 'online' ? 'on' : ''}`} aria-hidden />
+                <span className="nametag-text">{s.account!.name}</span>
+                <Hint {...keysOf('party.signOut')} {...hints} />
+              </span>
+              <span className="nametag-sub">
+                {mod ? `${ROLE_LABEL[s.account!.role].toLowerCase()} · ` : ''}
+                {(s.status === 'online' ? (s.info?.name ?? 'soundwave server') : 'reconnecting…').toLowerCase()}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {modal === 'account' && (
+          <Dialog
+            title="Your account"
+            variant="card"
+            onClose={() => setModal(null)}
+            actions={[
+              {
+                id: 'party-export',
+                label: 'Save my data',
+                icon: Download,
+                ...keysOf('party.export'),
+                bar: false,
+                run: () => void saveData(),
+              },
+            ]}
+          >
+            {(close) => (
+              <div className="pause-card account-card">
+                <span className="online-dot on" aria-hidden />
+                <h2 className="display">{s.account!.name}</h2>
+                <p className="hint">
+                  {mod ? `${ROLE_LABEL[s.account!.role]} · ` : ''}
+                  {s.status === 'online' ? `Signed in to ${s.info?.name ?? s.server}` : 'Connection lost, trying again…'}
+                </p>
+                <form
+                  className="rename-row"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    setRenameNote(null);
+                    void online.rename(newName.trim()).then(
+                      () => setRenameNote('Your name here is changed.'),
+                      (err: Error) => setRenameNote(err.message),
+                    );
+                  }}
+                >
+                  <label className="meta-field">
+                    <span className="dim">Your name on {s.info?.name ?? 'this server'}</span>
+                    <input value={newName} onChange={(e) => setNewName(e.target.value)} maxLength={24} spellCheck={false} />
+                  </label>
+                  <button type="submit" className="btn small" disabled={newName.trim().length < 2 || newName.trim() === s.account!.name}>
+                    <Pencil strokeWidth={ICON_STROKE} aria-hidden />
+                    Rename
+                  </button>
+                </form>
+                {renameNote && <p className="hint">{renameNote}</p>}
+                <button type="button" className="btn wide" data-action="party-export" data-autofocus onClick={() => void saveData()}>
+                  <Download strokeWidth={ICON_STROKE} aria-hidden />
+                  Save my data
+                  <Hint {...keysOf('party.export')} {...hints} />
+                </button>
+                <button type="button" className="btn wide" data-sfx="back" onClick={() => online.signOut()}>
+                  <LogOut strokeWidth={ICON_STROKE} aria-hidden />
+                  Sign out
+                </button>
+                <button type="button" className="btn wide quiet" data-sfx="back" onClick={() => setModal('forget')}>
+                  Forget this server
+                </button>
+                {/* Held, not pressed: a second press of the button above it can never delete the account. */}
+                {s.account!.role !== 'owner' && (
+                  <HoldButton
+                    label="Delete my account"
+                    hint={hints.mode === 'keyboard' ? `Hold ${keyName('Enter')} · with all my scores` : 'Hold · with all my scores'}
+                    tone="danger"
+                    autoFocus={false}
+                    glyphStyle={hints.style}
+                    onComplete={deleteAccount}
+                  />
+                )}
+                <button type="button" className="btn primary wide" onClick={close}>
+                  Done
+                </button>
+              </div>
+            )}
+          </Dialog>
+        )}
+        {modal === 'forget' && (
+          <Dialog title="Forget this server" variant="card" closeLabel="Keep it" onClose={() => setModal('account')}>
+            {(close) => (
+              <div className="pause-card">
+                <h2 className="display">Forget this server?</h2>
+                <p className="hint">
+                  You are signed out and the game no longer knows {s.info?.name ?? s.server}. Your account and scores stay on it; to come
+                  back you need its address or an invite again.
+                </p>
+                <button type="button" className="btn wide" data-autofocus data-sfx="back" onClick={close}>
+                  Keep it
+                </button>
+                <button type="button" className="btn primary wide danger" onClick={() => online.forget()}>
+                  Forget it
+                </button>
+              </div>
+            )}
+          </Dialog>
+        )}
+        {modal === 'invite' && (
+          <Dialog title="Invite friends" variant="card" className="wide-card" onClose={() => setModal(null)}>
+            {(close) => (
+              <div className="window-body">
+                <InvitePanel mod={mod} />
+                <button type="button" className="btn primary wide" onClick={close}>
+                  Done
+                </button>
+              </div>
+            )}
+          </Dialog>
+        )}
+      </div>
+    </>
   );
 }

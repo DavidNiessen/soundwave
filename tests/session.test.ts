@@ -108,6 +108,31 @@ describe('GameSession', () => {
     expect(s.overdriveActive).toBe(false);
   });
 
+  it('winding back over a hold still held does not count it twice', () => {
+    const honest = new GameSession(chart([{ t: 1, dur: 2 }]));
+    honest.press(0, 1);
+    honest.update(4);
+    const farmed = new GameSession(chart([{ t: 1, dur: 2 }]));
+    farmed.press(0, 1);
+    for (let i = 0; i < 50; i++) {
+      farmed.release(1, 2.9);
+      farmed.rewind(1);
+    }
+    farmed.update(4);
+    expect(farmed.score).toBeLessThanOrEqual(honest.score);
+  });
+
+  it('an input at no time at all leaves overdrive to run out as usual', () => {
+    const s = new GameSession(chart([{ t: 1, phrase: 0 }, { t: 2, phrase: 0 }, { t: 3 }]));
+    s.press(0, 1);
+    s.press(0, 2);
+    expect(s.activateOverdrive(2)).toBe(true);
+    s.dropHolds(NaN);
+    expect(Number.isFinite(s.overdrive)).toBe(true);
+    s.update(30);
+    expect(s.overdriveActive).toBe(false);
+  });
+
   it('fails a phrase when one note is missed', () => {
     const s = new GameSession(
       chart([

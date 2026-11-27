@@ -23,8 +23,8 @@ export interface Config {
    * Behind a proxy it is not the address the server listens on.
    */
   publicUrl: string;
-  /** Behind a reverse proxy (Caddy): take the player's address from X-Forwarded-For. */
-  trustProxy: boolean;
+  /** Behind reverse proxies (Caddy, Coolify): true or 1 for one in front, a number for that many in a row. */
+  trustProxy: boolean | number;
   /** The web game an invite link offers to play in (an owner may host their own copy). */
   webGameUrl: string;
   /** Where an invite link sends someone who has neither the app nor a browser that can play. */
@@ -105,7 +105,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     ...(env.SOUNDWAVE_PARTY_SONGS ? { partySongs: env.SOUNDWAVE_PARTY_SONGS === '1' || env.SOUNDWAVE_PARTY_SONGS === 'true' } : {}),
     ...(env.SOUNDWAVE_PARTY_CACHE_MB ? { partyCacheMb: Number(env.SOUNDWAVE_PARTY_CACHE_MB) } : {}),
     ...(env.SOUNDWAVE_PARTY_CACHE_DAYS ? { partyCacheDays: Number(env.SOUNDWAVE_PARTY_CACHE_DAYS) } : {}),
-    ...(env.SOUNDWAVE_TRUST_PROXY ? { trustProxy: env.SOUNDWAVE_TRUST_PROXY === '1' || env.SOUNDWAVE_TRUST_PROXY === 'true' } : {}),
+    ...(env.SOUNDWAVE_TRUST_PROXY ? { trustProxy: proxyHopsOf(env.SOUNDWAVE_TRUST_PROXY) } : {}),
   };
   const c: Config = { ...DEFAULTS, ...fromFile, ...fromEnv, ...overrides, dataDir };
   if (!MODES.includes(c.mode)) throw new Error(`mode must be one of ${MODES.join(', ')}, not "${c.mode}".`);
@@ -114,8 +114,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
   if (!(c.partyCacheMb > 0) || !(c.partyCacheDays > 0)) throw new Error('partyCacheMb and partyCacheDays must be more than 0.');
   if (c.mode === 'password' && !c.password) throw new Error('mode "password" needs a password (SOUNDWAVE_PASSWORD).');
   if (!Number.isInteger(c.port) || c.port < 0 || c.port > 65535) throw new Error(`port must be a number from 0 to 65535.`);
+  if (!(typeof c.trustProxy === 'boolean' || (Number.isInteger(c.trustProxy) && c.trustProxy >= 0 && c.trustProxy <= 10)))
+    throw new Error('trustProxy must be true, false or the number of proxies in front of the server (up to 10).');
   if (!c.publicUrl) c.publicUrl = `http://localhost:${c.port}`;
   c.publicUrl = c.publicUrl.replace(/\/+$/, '');
   c.webGameUrl = c.webGameUrl.replace(/\/+$/, '');
   return c;
 }
+
+/** `SOUNDWAVE_TRUST_PROXY`: true (or 1) for one proxy in front, a number for that many in a row, else false. */
+function proxyHopsOf(v: string): boolean | number {
+  if (v === 'true') return true;
+  if (/^\d+$/.test(v)) return Number(v);
+  return false;
+}
+
+/** How many proxies stand in front of the server (0: players reach it directly). */
+export const proxyHops = (c: Pick<Config, 'trustProxy'>) =>
+  c.trustProxy === true ? 1 : typeof c.trustProxy === 'number' ? c.trustProxy : 0;
