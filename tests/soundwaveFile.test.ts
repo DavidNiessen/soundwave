@@ -102,9 +102,9 @@ describe('.soundwave files', () => {
   });
 
   it('leaves out an analysis that inflates past the limit, rather than fill the memory with it', async () => {
-    // A string of JSON one byte under the limit is read; one past it (a gzip bomb, say) is not.
+    // A string of JSON that just fits is read; one past the limit (as a gzip bomb would be) is not.
     const near = await readSoundwave(await writeSoundwave(contents({ analysis: { version: 2, data: 'a'.repeat(MAX_INFLATED - 2) } })));
-    expect((near.analysis?.data as string).length).toBe(MAX_INFLATED - 2);
+    expect(near.analysis?.data).toHaveLength(MAX_INFLATED - 2);
     const past = await readSoundwave(await writeSoundwave(contents({ analysis: { version: 2, data: 'a'.repeat(MAX_INFLATED) } })));
     expect(past.analysis).toBeUndefined();
     expect(await bytes(past.audio)).toEqual(audioBytes);
