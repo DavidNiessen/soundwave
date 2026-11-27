@@ -43,6 +43,7 @@ import {
 } from './protocol';
 import type { SoundwaveAnalysis, SoundwaveEdits, SoundwaveMeta } from '../storage/soundwaveFile';
 import { identity } from './identity';
+import { wellFormed } from './check';
 
 /** A refusal from the server, with its status (404: an identity with no account there yet, say). */
 export class ServerRefusal extends Error {
@@ -113,6 +114,16 @@ const isLocal = (host: string) =>
   host.startsWith('10.') ||
   host.startsWith('192.168.') ||
   /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+
+/**
+ * Whether this page cannot reach `server` at all: a page served over HTTPS (the web game) may not
+ * fetch from plain HTTP, except from this machine itself. The desktop app's page is not HTTPS.
+ */
+function blockedHere(server: string): boolean {
+  if (typeof location === 'undefined' || location.protocol !== 'https:' || !server.startsWith('http:')) return false;
+  const host = new URL(server).hostname;
+  return !(host === 'localhost' || host === '[::1]' || host.startsWith('127.'));
+}
 
 /**
  * A server's address as the player typed it, made whole: HTTPS unless it is on this machine or
@@ -406,6 +417,10 @@ class OnlineClient {
   /** Picks a server and asks it what it is. Throws a sentence for the player. */
   async choose(typed: string): Promise<ServerInfo> {
     const server = serverAddress(typed);
+    if (blockedHere(server))
+      throw new Error(
+        'The web game cannot reach a server over plain HTTP: the browser blocks it on a secure page. Play on it in the desktop app, or give the server HTTPS.',
+      );
     if (server !== this.state.server) this.forget();
     this.set({ server, status: 'signed-out', error: null });
     const info = await this.request<ServerInfo>('/info');
@@ -744,13 +759,14 @@ class OnlineClient {
     ws.onmessage = (e) => {
       // A socket this client has let go of (signed out, replaced) says nothing more.
       if (this.ws !== ws) return;
-      let msg: ServerMessage;
+      let msg: unknown;
       try {
-        msg = JSON.parse(String(e.data)) as ServerMessage;
+        msg = JSON.parse(String(e.data));
       } catch {
         return;
       }
-      this.receive(msg);
+      // A message of a shape the game does not know (a server with a bug, or one up to no good) is left unread.
+      if (wellFormed(msg)) this.receive(msg);
     };
     ws.onclose = (e) => {
       if (this.ws !== ws) return;

@@ -99,13 +99,15 @@ class ServerSongs {
 
   /** Asks the server for its songs again. */
   async refresh() {
-    if (!this.server) return this.set({ list: [] });
+    const server = this.server;
+    if (!server) return this.set({ list: [] });
     try {
       const list = (await online.songs('')).filter((x) => x.audio);
+      // The player moved to another server (or signed out) while the list came: it is not this one's.
+      if (this.server !== server || online.snapshot().server !== server) return;
       // A song gone from the server goes from this device too (taken down: it is not to be played).
       const on = new Set(list.map((x) => x.id));
-      const server = this.server;
-      if (server) for (const id of Object.keys(this.state.kept)) if (!on.has(id)) void dropSong(server, id);
+      for (const id of Object.keys(this.state.kept)) if (!on.has(id)) void dropSong(server, id);
       const kept = Object.fromEntries(
         Object.keys(this.state.kept)
           .filter((id) => on.has(id))

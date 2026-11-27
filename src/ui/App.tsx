@@ -150,6 +150,28 @@ interface Run {
   party?: { songIndex: number; at: number; mode: 'versus' | 'showdown' };
 }
 
+/** A link from outside the game, waiting to be opened (see takeLinkRef in App). */
+interface OutsideLink {
+  kind: 'invite' | 'recover' | 'discord';
+  server: string;
+  open(): void;
+}
+
+/** A server's address as the player knows it: its host name, without the scheme. */
+const hostOf = (server: string) => server.replace(/^https?:\/\//, '');
+
+/** Whether the link the desktop app was started with is new to this window (see the deep links in App). */
+function firstTime(url: string): boolean {
+  try {
+    const taken: string[] = JSON.parse(sessionStorage.getItem('soundwave.linksTaken') ?? '[]');
+    if (taken.includes(url)) return false;
+    sessionStorage.setItem('soundwave.linksTaken', JSON.stringify([...taken, url].slice(-20)));
+  } catch {
+    /* no storage: taken every time, as before */
+  }
+  return true;
+}
+
 type View =
   | { name: 'home' }
   /** `from`: the party, when its host picks the party's songs here (Back and Ready return there). */
@@ -592,6 +614,27 @@ export function App() {
         setSheet(got[0]);
     });
   useEffect(() => watchOpenedFiles((files) => openedRef.current(files)), []);
+  // Links from outside the game (an invite, a recovery link, a Discord Join). Anyone can send one,
+  // so one that would move the player to another server, or give an account this game's identity,
+  // is asked about first; one that comes during a song waits for the menus.
+  const [linkAsk, setLinkAsk] = useState<OutsideLink | null>(null);
+  const laterLink = useRef<OutsideLink | null>(null);
+  const takeLinkRef = useRef<(link: OutsideLink, asked?: boolean) => void>(() => {});
+  takeLinkRef.current = (link, asked = false) => {
+    if (['play', 'replay', 'export', 'editor'].includes(viewRef.current.name)) {
+      laterLink.current = link;
+      return void notify.info('The link you opened waits until you are back in the menus.');
+    }
+    const now = online.snapshot();
+    if (!asked && (link.kind === 'recover' || (now.account && now.server !== link.server))) return setLinkAsk(link);
+    link.open();
+  };
+  useEffect(() => {
+    if (['play', 'replay', 'export', 'editor'].includes(view.name) || !laterLink.current) return;
+    const link = laterLink.current;
+    laterLink.current = null;
+    takeLinkRef.current(link);
+  }, [view.name]);
   // Invite links: the desktop app opens soundwave://join links, and the web game is opened with
   // ?server=…&invite=… by a server's join page. Either lands on Play together, ready to join.
   const inviteRef = useRef<(text: string) => void>(() => {});
@@ -599,21 +642,31 @@ export function App() {
     // A recovery link: the account it is for takes this game's identity.
     const recovery = parseRecovery(text);
     if (recovery)
-      return void online.recover(recovery.server, recovery.code).then(
-        () => {
-          notify.success(`Your account on ${online.snapshot().info?.name ?? 'the server'} is back, with this game’s identity.`);
-          if (!['play', 'replay', 'export', 'editor'].includes(viewRef.current.name)) goOnline();
-        },
-        (e: Error) => notify.error(e.message),
-      );
+      return takeLinkRef.current({
+        kind: 'recover',
+        server: recovery.server,
+        open: () =>
+          void online.recover(recovery.server, recovery.code).then(
+            () => {
+              notify.success(`Your account on ${online.snapshot().info?.name ?? 'the server'} is back, with this game’s identity.`);
+              if (!['play', 'replay', 'export', 'editor'].includes(viewRef.current.name)) goOnline();
+            },
+            (e: Error) => notify.error(e.message),
+          ),
+      });
     const invite = parseInvite(text);
     if (!invite) return;
-    void online.useInvite(invite).then(
-      () => {
-        if (!['play', 'replay', 'export', 'editor'].includes(viewRef.current.name)) setView({ name: 'party' });
-      },
-      (e: Error) => notify.error(e.message),
-    );
+    takeLinkRef.current({
+      kind: 'invite',
+      server: invite.server,
+      open: () =>
+        void online.useInvite(invite).then(
+          () => {
+            if (!['play', 'replay', 'export', 'editor'].includes(viewRef.current.name)) setView({ name: 'party' });
+          },
+          (e: Error) => notify.error(e.message),
+        ),
+    });
   };
   const invitesWatched = useRef(false);
   useEffect(() => {
@@ -633,7 +686,9 @@ export function App() {
     let stop = () => {};
     void import('@tauri-apps/plugin-deep-link')
       .then(async ({ getCurrent, onOpenUrl }) => {
-        for (const url of (await getCurrent()) ?? []) inviteRef.current(url);
+        // The link the app was started with is handed over again after every reload of the page
+        // (a library import starts the game again): it is taken once.
+        for (const url of (await getCurrent()) ?? []) if (firstTime(url)) inviteRef.current(url);
         stop = await onOpenUrl((urls) => urls.forEach((url) => inviteRef.current(url)));
       })
       .catch(() => {});
@@ -1173,10 +1228,13 @@ export function App() {
    * song has notes on there.
    */
   const startPartySong = async (index: number) => {
-    const party = online.snapshot().party;
-    const song = party?.set[index];
-    if (!party || !song) return;
+    const song = online.snapshot().party?.set[index];
+    if (!song) return;
     if (!byId.has(song.id)) await serverSongs.ensure([song.id]);
+    // The set can change while a song comes (everyone picks): the charts go with the song they are for.
+    const moved = () => online.snapshot().party?.set[index]?.id !== song.id;
+    const party = online.snapshot().party;
+    if (!party || moved()) return notify.warning('The set changed while the song was being readied. Start it again.');
     if (!(byId.has(song.id) && canPlay(analysisStatus[song.id])) && !serverSongs.snapshot().held[song.id] && !partySongs.songs()[song.id])
       return notify.warning(`You need "${song.title}" in your library, with notes, to start it: everyone plays your charts.`);
     try {
@@ -1204,6 +1262,7 @@ export function App() {
         }
       }
       if (!Object.keys(assign).length) return notify.warning(`No notes were found in "${song.title}" at the difficulties picked.`);
+      if (moved()) return notify.warning('The set changed while the song was being readied. Start it again.');
       playSfx('launch');
       menuPulse('launch');
       online.start(index, charts, assign);
@@ -1632,11 +1691,17 @@ export function App() {
       onDiscordJoin((secret) => {
         const party = parseJoinSecret(secret);
         if (!party) return notify.error('Discord sent a party this game cannot read. Update Soundwave, or join with the party’s code.');
-        // The party screen opens once the party is there (signing in to its server may come first).
-        joiningRef.current = party.code;
-        online.joinFrom(party.server, party.code);
-        if (!online.snapshot().account && !['play', 'replay', 'export', 'editor'].includes(viewRef.current.name))
-          setView({ name: 'party' });
+        takeLinkRef.current({
+          kind: 'discord',
+          server: party.server,
+          open: () => {
+            // The party screen opens once the party is there (signing in to its server may come first).
+            joiningRef.current = party.code;
+            online.joinFrom(party.server, party.code);
+            if (!online.snapshot().account && !['play', 'replay', 'export', 'editor'].includes(viewRef.current.name))
+              setView({ name: 'party' });
+          },
+        });
       }),
     [],
   );
@@ -2055,6 +2120,41 @@ export function App() {
               </button>
             </div>
           )}
+        </Dialog>
+      )}
+      {linkAsk && (
+        <Dialog title="Open this link?" variant="card" closeLabel="Not now" outsideCloses={false} onClose={() => setLinkAsk(null)}>
+          {(close) => {
+            const there = hostOf(linkAsk.server);
+            const here = onlineState.account && onlineState.server !== linkAsk.server ? hostOf(onlineState.server!) : null;
+            return (
+              <div className="pause-card">
+                <h2 className="display">{linkAsk.kind === 'recover' ? 'Use this recovery link?' : `Go to ${there}?`}</h2>
+                <p className="hint">
+                  {linkAsk.kind === 'recover'
+                    ? `It is for an account on ${there}: that account signs in with this game’s identity from now on. Open it only if an admin of ${there} sent it to you.`
+                    : linkAsk.kind === 'discord'
+                      ? `The party you joined from Discord plays on ${there}.`
+                      : `The invite you opened is for ${there}.`}
+                  {here && ` You are signed out of ${here}; your account there stays, to go back to any time.`}
+                </p>
+                <button type="button" className="btn wide" data-autofocus data-sfx="back" onClick={close}>
+                  Not now
+                </button>
+                <button
+                  type="button"
+                  className="btn primary wide"
+                  onClick={() => {
+                    const link = linkAsk;
+                    close();
+                    takeLinkRef.current(link, true);
+                  }}
+                >
+                  {linkAsk.kind === 'recover' ? 'Use it' : 'Go there'}
+                </button>
+              </div>
+            );
+          }}
         </Dialog>
       )}
       {backingUp && <IdentityDialog kind="export" onClose={() => setBackingUp(false)} onDone={(m) => notify.success(m)} />}
