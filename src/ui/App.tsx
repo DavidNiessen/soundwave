@@ -902,14 +902,17 @@ export function App() {
       }),
     [],
   );
+  /** Runs watched from a server's board (see watchRun), by their replay id, for a video of them. */
+  const watchedRuns = useRef(new Map<string, ReplayData>());
   /** The replay whose video is being set up (the export dialog is open). */
   const [exportAsk, setExportAsk] = useState<ReplayMeta | null>(null);
   /** Loads a replay with its song, or silence where the song has left the library. */
   const loadReplay = async (meta: ReplayMeta) => {
-    const data = await getReplayData(meta.id);
+    // A run watched from a server's board is not saved here: it is the one fetched to watch it.
+    const data = watchedRuns.current.get(meta.id) ?? (await getReplayData(meta.id));
     if (!data) throw new Error('This replay is no longer saved.');
     let buffer: AudioBuffer | null = null;
-    if (byId.has(meta.songId)) buffer = await loadSongBuffer(meta.songId).catch(() => null);
+    if (byId.has(meta.songId) || serverSongs.snapshot().held[meta.songId]) buffer = await loadSongBuffer(meta.songId).catch(() => null);
     return { data, buffer: buffer ?? silence(Math.max(meta.duration, data.chart.duration)), silent: !buffer };
   };
   /**
@@ -1197,10 +1200,12 @@ export function App() {
           .stream(shared)
           .then(() => loadSongBuffer(r.songId))
           .catch(() => null);
+      const data: ReplayData = { id: meta.id, chart, inputs };
+      watchedRuns.current.set(meta.id, data);
       return {
         name: 'replay',
         meta,
-        data: { id: meta.id, chart, inputs },
+        data,
         buffer: buffer ?? silence(chart.duration),
         silent: !buffer,
         back,
@@ -1428,7 +1433,7 @@ export function App() {
         // It remembers where it came from, so it follows the server's copy from now on.
         await updateSongMeta(got[0].id, { title: got[0].title, artist: got[0].artist, album: got[0].album, server: origin(song) });
         await refresh();
-        notify.info(`"${got[0].title}" is in your library.`);
+        notify.success(`"${got[0].title}" is in your library.`);
         return;
       }
       if (setlistRef.current.length >= SET_MAX) return notify.warning(`The setlist holds ${SET_MAX} songs. Take one out to add another.`);
@@ -1630,6 +1635,11 @@ export function App() {
     };
   }, [sceneKey, view.name, booted]);
 
+  // The settings over a song close with it: a party's song plays on under them and can end there,
+  // and the next song must not start under settings left open.
+  useEffect(() => {
+    if (view.name !== 'play') setSongSettings(false);
+  }, [view.name]);
   // The settings over a paused song take focus as they open (the pause menu takes it back, see PlayScreen).
   useEffect(() => {
     if (!songSettings) return;
@@ -1705,6 +1715,9 @@ export function App() {
       }),
     [],
   );
+  // What the server says went wrong shows on the party screen; anywhere else (the library, picking
+  // the party's songs) it comes as a notification, so it is not first seen later, out of date.
+  useEffect(() => online.onServerError((message) => viewRef.current.name !== 'party' && notify.error(message)), []);
   // A party joined from Discord: its lobby opens as soon as the server has let this player in.
   const joiningRef = useRef<string | null>(null);
   useEffect(() => {
@@ -1972,7 +1985,8 @@ export function App() {
       screen = (
         <PartyScreen
           library={partyLibrary}
-          playable={(id) => canPlay(analysisStatus[id])}
+          // The host starts songs streamed from the server or held for the party too, as startPartySong does.
+          playable={(id) => playable(id) || !!partySongs.songs()[id]}
           setlist={setSongs_}
           pick={pick}
           onPick={setPick}

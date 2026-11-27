@@ -298,6 +298,13 @@ class OnlineClient {
     return () => void this.startListeners.delete(fn);
   }
 
+  /** Called with what the server says went wrong (the host ended the party, a code that names none). */
+  onServerError(fn: (message: string) => void) {
+    this.errorListeners.add(fn);
+    return () => void this.errorListeners.delete(fn);
+  }
+  private readonly errorListeners = new Set<(message: string) => void>();
+
   /** Called for what happens to the player during a party's song (see PlayEvent). */
   onPlayEvent(fn: (e: PlayEvent) => void) {
     this.playListeners.add(fn);
@@ -859,6 +866,7 @@ class OnlineClient {
         return;
       case 'error':
         this.set({ error: msg.message });
+        for (const l of this.errorListeners) l(msg.message);
         return;
       case 'hit':
       case 'strikeFired':
