@@ -46,13 +46,29 @@ mod store {
     pub fn save(app: &tauri::AppHandle, value: &str) -> Result<(), String> {
         let path = path(app)?;
         let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, value).map_err(|e| e.to_string())?;
+        // Made readable by its user alone from the start (not changed after it is written, when
+        // another user could have opened it meanwhile), and on the disk before it takes the
+        // place of the one kept: a crash in between leaves the old identity, never half a new one.
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).write(true).truncate(true);
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))
-                .map_err(|e| e.to_string())?;
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
         }
+        let write = || -> std::io::Result<()> {
+            use std::io::Write;
+            let mut file = options.open(&tmp)?;
+            #[cfg(unix)]
+            {
+                // A file left from before keeps its old mode when it is opened again.
+                use std::os::unix::fs::PermissionsExt;
+                file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+            }
+            file.write_all(value.as_bytes())?;
+            file.sync_all()
+        };
+        write().map_err(|e| e.to_string())?;
         std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
     }
 }

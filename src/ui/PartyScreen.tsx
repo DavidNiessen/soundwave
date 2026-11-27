@@ -279,7 +279,8 @@ function Connect({ s, onBack }: { s: OnlineState; settings: Settings; onBack(): 
   };
 
   useEffect(() => void identitySupported().then((ok) => setUnsupported(!ok)), []);
-  useEffect(() => void identity.load(), []);
+  // A store that cannot be read says so where the identity is tried, below.
+  useEffect(() => void identity.load().catch(() => {}), []);
   useEffect(() => {
     if (me?.name && !name) setName(me.name);
   }, [me?.name, name]);

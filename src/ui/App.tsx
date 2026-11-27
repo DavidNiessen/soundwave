@@ -1461,7 +1461,14 @@ export function App() {
   /** Back to the main menu's Online tab (from a screen it opened, or a party that ended). */
   // The identity is loaded as the game starts, so a server played on signs in with it by itself.
   const me = useSyncExternalStore(identity.subscribe, identity.snapshot);
-  useEffect(() => void identity.load().then((had) => had && online.resume()), []);
+  useEffect(
+    () =>
+      void identity.load().then(
+        (had) => had && online.resume(),
+        (e: Error) => notify.error(e.message),
+      ),
+    [],
+  );
   /**
    * Signed in with an identity that has no backup: asked once (per identity) to back it up, since a
    * lost device or cleared browser data would otherwise lose every account.
