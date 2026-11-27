@@ -119,7 +119,7 @@ class PartySongSync {
         if (this.held[song.id]) this.release(song.id);
         if (this.state[song.id]?.state === 'getting') this.set(song.id, null);
         const lacking = party.members.some((m) => m.id !== me && m.connected && !m.have.includes(song.id));
-        if (ctx.serverOn && mine && ctx.share && !song.cached && lacking) void this.send(ctx, song.id);
+        if (ctx.serverOn && mine && ctx.share && !song.cached && lacking) this.send(ctx, song.id);
       } else if (this.held[song.id]) {
         if (ctx.keep) void this.keep(song.id);
       } else if (ctx.serverOn && song.cached) void this.get(ctx, song.id, song.title);
@@ -135,17 +135,28 @@ class PartySongSync {
     this.changed();
   }
 
-  private async send(ctx: SyncContext, songId: string) {
+  /**
+   * The songs being sent, one after another: the server reads one upload a player at a time, and
+   * the others would wait there unread, long enough for a proxy in front of it to give up on them.
+   */
+  private sending: Promise<void> = Promise.resolve();
+
+  private send(ctx: SyncContext, songId: string) {
     const key = `send:${songId}`;
     if (this.tried.has(key)) return;
     this.tried.add(key);
+    const code = this.partyCode;
     this.set(songId, { state: 'sending' });
-    try {
-      await online.sendPartySong(songId, await ctx.file(songId));
-      this.set(songId, null);
-    } catch (e) {
-      this.set(songId, { state: 'failed', message: (e as Error).message });
-    }
+    this.sending = this.sending.then(async () => {
+      // The party is another one by now: this song is not its to send.
+      if (this.partyCode !== code) return;
+      try {
+        await online.sendPartySong(songId, await ctx.file(songId));
+        if (this.partyCode === code) this.set(songId, null);
+      } catch (e) {
+        if (this.partyCode === code) this.set(songId, { state: 'failed', message: (e as Error).message });
+      }
+    });
   }
 
   private async get(ctx: SyncContext, songId: string, title: string) {

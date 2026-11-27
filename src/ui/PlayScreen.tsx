@@ -248,8 +248,15 @@ export function PlayScreen({
       if (e.songIndex !== sd.songIndex) return;
       if (e.type === 'strikeFired') return ctrl.showStrike(e.from, e.to, e.at);
       if (e.type === 'struck') {
-        // An answer after the wait ran out is too late: the press was an overdrive.
-        if (!asking) return;
+        // An answer after the wait ran out: the press was an overdrive by then, but a Strike that
+        // landed still shows, so the player knows it hit.
+        if (!asking) {
+          if (e.target) {
+            playShowdownSfx('strike');
+            setFired({ target: e.target, at: performance.now(), ms: e.ms ?? 5000 });
+          }
+          return;
+        }
         asking = false;
         clearTimeout(askTimer);
         if (!e.target) return ctrl.overdriveNow();

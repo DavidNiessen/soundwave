@@ -58,6 +58,8 @@ const STORE_KEY = 'soundwave.online';
 /** Clock sync: rounds per measurement, and how often it is measured again (ms). */
 const SYNC_ROUNDS = 6;
 const SYNC_EVERY_MS = 30_000;
+/** How long a request (other than a file) may take before it counts as not reaching the server. */
+const REQUEST_TIMEOUT_MS = 15_000;
 
 export type Status =
   /** No server chosen. */
@@ -354,8 +356,11 @@ class OnlineClient {
   ): Promise<T> {
     const server = this.state.server;
     if (!server) throw new Error('No server is chosen.');
+    // A request that hangs (a captive portal, a connection that went nowhere) gives up in a while,
+    // so the game can say so and try again; files, which can take long, are left to the browser.
     const send = () =>
       fetch(server + path, {
+        ...(init.file || init.raw ? {} : { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }),
         method: init.method ?? (init.body === undefined && !init.raw ? 'GET' : 'POST'),
         headers: {
           ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
@@ -375,7 +380,7 @@ class OnlineClient {
         res = await send();
       }
     } catch (e) {
-      if (e instanceof Error && e.name !== 'TypeError') throw e;
+      if (e instanceof Error && e.name !== 'TypeError' && e.name !== 'TimeoutError') throw e;
       throw new Error('The server could not be reached. Check the address and your connection.');
     }
     if (res.ok) init.headers?.(res.headers);
@@ -751,6 +756,8 @@ class OnlineClient {
       done();
       if (attempt !== this.attempt) return;
       if (this.refreshToken) return this.again();
+      // Signed out after all: what waited for the connection (a party to join) is not sent later.
+      this.pending = [];
       this.set({ status: 'signed-out', error: (e as Error).message });
       return;
     }
@@ -786,6 +793,11 @@ class OnlineClient {
       // fresh one, then again.
       if (e.code === 4003) {
         this.access = null;
+        return this.again();
+      }
+      // Too many connections from this network (a shared address): said, and tried again in a while.
+      if (e.code === 4009) {
+        if (reason) this.set({ error: reason });
         return this.again();
       }
       // The server said why it closed (banned, signed in elsewhere, too old): no point trying again.
