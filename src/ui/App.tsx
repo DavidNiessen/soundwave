@@ -157,11 +157,10 @@ type View =
   | LobbyView
   /** Playing together on a server: signing in, the party's lobby and its results. */
   | { name: 'party' }
-  /** The server's leaderboards and shared replays. */
-  /** `from`: where Back returns to (Play together, unless opened from the main menu). */
+  /** The server's leaderboards and shared replays; `from`: where Back returns to (Play together, unless opened from the main menu). */
   | { name: 'boards'; from?: 'home' }
+  /** The server's admin page, for its owner and moderators. */
   | { name: 'admin' }
-  /** The player's look on the stage. */
   | { name: 'settings'; back: View }
   | EditorView
   | { name: 'play'; run: Run; buffer: AudioBuffer; key: number }
