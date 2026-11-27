@@ -10,7 +10,7 @@ import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { MESSAGE_MAX, MOD_TOPICS, PROTOCOL_VERSION, type ServerInfo, type ServerMessage, type Topic } from '../../src/net/protocol.ts';
 import { Accounts, Refusal } from './accounts.ts';
-import type { Config } from './config.ts';
+import { proxyHops, type Config } from './config.ts';
 import type { Store, UserRow } from './db.ts';
 import { Parties } from './parties.ts';
 import { Profiles } from './profiles.ts';
@@ -212,21 +212,20 @@ export async function startServer(config: Config, store: Store, log: (line: stri
   };
 
   /**
-   * The address a request is rate-limited by. Behind a proxy it is the last X-Forwarded-For entry,
-   * the one the proxy itself added: those before it are whatever the client sent, and anyone can
-   * send any. IPv6 addresses count by their /64 (limits.ts).
+   * The address a request is rate-limited by. Behind proxies it is the X-Forwarded-For entry the
+   * outermost one added, counting `trustProxy` proxies back from the end: entries before it are
+   * whatever the client sent, and anyone can send any. IPv6 addresses count by their /64 (limits.ts).
    */
-  const addressOf = (req: IncomingMessage) =>
-    addressKey(
-      (config.trustProxy
-        ? String(req.headers['x-forwarded-for'] ?? '')
-            .split(',')
-            .at(-1)!
-            .trim()
-        : '') ||
-        req.socket.remoteAddress ||
-        '?',
-    );
+  const hops = proxyHops(config);
+  const addressOf = (req: IncomingMessage) => {
+    const chain = hops
+      ? String(req.headers['x-forwarded-for'] ?? '')
+          .split(',')
+          .map((x) => x.trim())
+          .filter(Boolean)
+      : [];
+    return addressKey((hops && (chain[chain.length - hops] ?? chain[0])) || req.socket.remoteAddress || '?');
+  };
 
   const routes: Record<string, Handler> = {
     // For a container's healthcheck (Docker, Coolify): the server answers, and its database too.
@@ -630,7 +629,16 @@ export async function startServer(config: Config, store: Store, log: (line: stri
     const address = addressOf(req);
     const mine = [...wss.clients].filter((c) => addresses.get(c) === address);
     // A household or a LAN party shares one address, but no more than a few parties' worth of it.
-    if (mine.length >= SOCKETS_PER_ADDRESS) return void ws.close(4009, 'too many');
+    if (mine.length >= SOCKETS_PER_ADDRESS) {
+      // Said, so the player knows why; the game tries again after a while, as for a dropped connection.
+      ws.send(
+        JSON.stringify({
+          type: 'bye',
+          reason: 'Too many players are connected from your network right now. Trying again shortly.',
+        } satisfies ServerMessage),
+      );
+      return void ws.close(4009, 'too many');
+    }
     addresses.set(ws, address);
     // Before it says who it is, a connection may send only small messages: a hello is a few hundred bytes.
     setMaxPayload(ws, HELLO_MAX);

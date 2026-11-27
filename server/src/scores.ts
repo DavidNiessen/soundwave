@@ -42,11 +42,15 @@ const BEAT_MAX_S = 3;
 /** The longest hold, seconds. */
 const HOLD_MAX_S = 120;
 /**
- * Notes and points per second of song, on average over the whole song: expert charts keep notes
- * 65 ms apart, and drums play two at once, some 30 a second at the most at the top multiplier.
+ * Notes and points per second of song, on average over the whole song. The game's own charts stay
+ * under about 15 notes and 4,500 points a second; the track editor lets a player write far denser
+ * ones (three-note chords in sixteenths at 180 BPM is 36 notes and 10,500 points a second), which
+ * are still honest: the bounds leave room for those and stop only what no song can have.
  */
-const NOTES_PER_S = 40;
-const PAR_PER_S = 10_000;
+const NOTES_PER_S = 80;
+const PAR_PER_S = 30_000;
+/** How far past the song's end a note may stand: notes are snapped to the beat, and the last can land just after it. */
+const NOTE_AFTER_S = 2;
 /** How far before the song a run starts (the countdown, PlayController's LEAD_IN) and how long after it may go on. */
 const LEAD_IN_S = 3;
 const AFTER_S = 30;
@@ -57,7 +61,7 @@ const REWIND_S = 1.5;
  * the moment they happened, and on a busy machine can be handled well after an overdrive stamped
  * now. An input judged a little in the past earns nothing it would not have earned on time.
  */
-const BACK_SLACK_S = 1;
+const BACK_SLACK_S = 3;
 /** Float rounding between two song times the game took for the same moment. */
 const EPS = 0.05;
 /** The runs kept per player on each board: their best (and any they shared). */
@@ -91,7 +95,8 @@ type LineRow = Pick<ScoreRow, 'id' | 'user' | 'score' | 'stars' | 'accuracy' | '
 function realistic(c: WireChart): boolean {
   if (c.duration > SONG_MAX_S || c.secondsPerBeat < BEAT_MIN_S || c.secondsPerBeat > BEAT_MAX_S) return false;
   if (c.notes.length > NOTES_PER_S * c.duration + 100) return false;
-  for (const n of c.notes) if (n.t < 0 || n.t > c.duration || n.dur > HOLD_MAX_S || n.t + n.dur > c.duration + AFTER_S) return false;
+  for (const n of c.notes)
+    if (n.t < 0 || n.t > c.duration + NOTE_AFTER_S || n.dur > HOLD_MAX_S || n.t + n.dur > c.duration + AFTER_S) return false;
   return new GameSession(c as Chart).par <= PAR_PER_S * c.duration;
 }
 
@@ -114,7 +119,9 @@ function playable(c: WireChart, ops: Uint8Array, times: Float32Array): boolean {
     if ((kind === OP.press || kind === OP.release) && ops[i] >> 3 >= c.lanes) return false;
     if (kind === OP.rewind) {
       const from = i > 0 && (ops[i - 1] & 7) === OP.dropHolds ? times[i - 1] : NaN;
-      if (!(t <= from + EPS && t >= from - REWIND_S - EPS)) return false;
+      // A pause in the countdown's first moments winds back to its start, which can be a little
+      // later than the moment heard then (the output's latency and the player's offset come off).
+      if (!(t <= Math.max(from, -LEAD_IN_S) + EPS && t >= from - REWIND_S - EPS)) return false;
       clock = t;
       continue;
     }
@@ -212,28 +219,18 @@ export class Scores {
         ops,
         new Uint8Array(timeBytes),
       );
-    // Only a player's best few runs on a board are kept (those they shared too, and this one, which
-    // they may share next): the others can never show, and would only fill the database.
+    // Only a player's best few runs on a board are kept (those they shared too, this one, which
+    // they may share next, and their best of the week, for the week's board and top): the others
+    // can never show, and would only fill the database.
+    const ofBoard = 'user = ? AND song_id = ? AND chart_id = ? AND part = ? AND difficulty = ?';
+    const key = [user.id, body.songId, chartId, chart.part, chart.difficulty];
     this.store.db
       .prepare(
-        `DELETE FROM scores WHERE user = ? AND song_id = ? AND chart_id = ? AND part = ? AND difficulty = ? AND shared = 0 AND id != ?
-         AND id NOT IN (SELECT id FROM scores WHERE user = ? AND song_id = ? AND chart_id = ? AND part = ? AND difficulty = ?
-                        ORDER BY score DESC, at ASC LIMIT ?)`,
+        `DELETE FROM scores WHERE ${ofBoard} AND shared = 0 AND id != ?
+         AND id NOT IN (SELECT id FROM scores WHERE ${ofBoard} ORDER BY score DESC, at ASC LIMIT ?)
+         AND id NOT IN (SELECT id FROM scores WHERE ${ofBoard} AND at >= ? ORDER BY score DESC, at ASC LIMIT 1)`,
       )
-      .run(
-        user.id,
-        body.songId,
-        chartId,
-        chart.part,
-        chart.difficulty,
-        id,
-        user.id,
-        body.songId,
-        chartId,
-        chart.part,
-        chart.difficulty,
-        RUNS_KEPT,
-      );
+      .run(...key, id, ...key, RUNS_KEPT, ...key, this.now() - WEEK_MS);
     const board = this.board(user, body.songId, chartId, chart.part, chart.difficulty, false);
     return { id, rank: board.me?.rank ?? 0, best: before === undefined || judged.score > before };
   }

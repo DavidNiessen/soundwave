@@ -39,6 +39,17 @@ describe('rate limits', () => {
     expect(await ask('198.51.100.7')).toBe(200);
   });
 
+  it('count back as many proxies as stand in front, for a player behind two', async () => {
+    const s = await start({ trustProxy: 2 });
+    const ask = (forwarded: string) =>
+      fetch(`${s.url}/auth/challenge`, { method: 'POST', headers: { 'X-Forwarded-For': forwarded }, body: '{}' }).then((r) => r.status);
+    // The outer proxy added the player's address, the inner one the outer proxy's.
+    for (let i = 0; i < 60; i++) expect(await ask(`10.9.9.${i}, 203.0.113.9, 192.0.2.50`)).toBe(200);
+    expect(await ask('10.9.9.200, 203.0.113.9, 192.0.2.50')).toBe(429);
+    // Another player through the same two proxies has their own limit.
+    expect(await ask('198.51.100.7, 192.0.2.50')).toBe(200);
+  });
+
   it('forget the address heard from longest ago, never all at once', () => {
     const limit = new RateLimit(1, 1);
     expect(limit.take('worn out', 0)).toBe(true);

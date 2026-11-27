@@ -118,7 +118,8 @@ per player rather than per proxy. It takes the player's address from the last `X
 entry, the one your proxy added (anything before it is whatever the player's own program sent).
 That is only safe while the server can be reached through the proxy alone: keep port 7420 published
 to `127.0.0.1` as above, and if you ever publish it to the internet directly, set
-`SOUNDWAVE_TRUST_PROXY=false`.
+`SOUNDWAVE_TRUST_PROXY=false`. With two proxies in a row (Cloudflare in front of Coolify, say), set
+it to `2`, so the address counted is the one the outer proxy saw rather than the outer proxy's own.
 
 ### C. Your own PC
 

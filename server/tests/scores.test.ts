@@ -146,10 +146,15 @@ describe('leaderboards', () => {
     // A lane the chart does not have.
     expect((await send(hold, [OP.press | (6 << 3), OP.update], [1, Infinity])).status).toBe(422);
     // An input stamped well before the one ahead of it.
-    expect((await send(hold, [OP.press, OP.release, OP.press, OP.update], [1, 3, 1.5, Infinity])).status).toBe(422);
+    expect((await send(hold, [OP.press, OP.release, OP.press, OP.update], [1, 6, 1.5, Infinity])).status).toBe(422);
     // A little before it is fine: an input handled late on a busy machine.
     expect((await send(hold, [OP.press, OP.overdrive, OP.release, OP.update], [1, 3.5, 3, Infinity])).status).toBe(200);
 
+    // A pause in the countdown's first moments winds back to its start, a little after the moment heard.
+    expect((await send(hold, [OP.dropHolds, OP.rewind, OP.press, OP.update], [-3.3, -3, 1, Infinity])).status).toBe(200);
+    // A note snapped to the beat just after the song's end is a note a song can have.
+    const late = { ...chart, notes: [...chart.notes, { t: chart.duration + 0.4, lane: 0, dur: 0, phrase: -1 }] };
+    expect((await send(late, [OP.press, OP.update], [1, Infinity])).status).toBe(200);
     // A real pause is fine: the holds dropped, the song wound back a little.
     const rec = new ReplayRecorder(new GameSession(hold as Chart));
     rec.press(0, 1);
