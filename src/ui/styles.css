@@ -7474,6 +7474,16 @@ a.btn {
 .mode-tile:disabled {
   cursor: default;
 }
+/* The Online tab's party tile while the connection is being tried again: it says why it waits. */
+.tile.hero:disabled {
+  cursor: default;
+}
+.tile.hero:disabled .tile-title {
+  color: var(--ink-3);
+}
+:root[data-input='mouse'] .tile.hero:disabled:hover {
+  transform: none;
+}
 :root[data-input='mouse'] .mode-tile:disabled:hover {
   transform: none;
   background: var(--panel);

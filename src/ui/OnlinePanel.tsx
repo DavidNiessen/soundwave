@@ -269,7 +269,7 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, base, part }: OnlinePa
   const onAvatar = () => setLook({ part, look: s.avatar });
   const mod = s.account!.role !== 'player';
   const party = s.party;
-  /** The connection is gone and being tried again: a new party cannot be started until it is back. */
+  /** The connection is gone and being tried again: a party cannot be started or joined until it is back. */
   const away = s.status !== 'online';
   const [code, setCode] = useState('');
   const codeInput = useRef<HTMLInputElement>(null);
@@ -288,7 +288,7 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, base, part }: OnlinePa
   // Starting or joining a party from here opens its lobby as soon as the party is there.
   const asked = useRef(false);
   const join = () => {
-    if (!code.trim()) return;
+    if (!code.trim() || away) return;
     asked.current = true;
     online.joinParty(code);
   };
@@ -317,6 +317,7 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, base, part }: OnlinePa
         icon: PartyPopper,
         ...keysOf('party.create'),
         bar: false,
+        disabled: !party && away,
         run: start,
       },
       {
@@ -325,6 +326,7 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, base, part }: OnlinePa
         icon: UserPlus,
         ...keysOf('party.join'),
         bar: false,
+        disabled: away,
         run: () => (code.trim() ? join() : codeInput.current?.focus()),
       },
       {
@@ -403,7 +405,9 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, base, part }: OnlinePa
                     </>
                   ) : away ? (
                     <>
-                      <span className="tile-cap">The connection to the server is lost. You can start a party once it is back.</span>
+                      <span className="tile-cap">
+                        The connection to the server is lost. Starting or joining a party waits until it is back.
+                      </span>
                       <span className="tile-meta">
                         <WifiOff strokeWidth={ICON_STROKE} aria-hidden /> Trying again…
                       </span>
@@ -435,6 +439,7 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, base, part }: OnlinePa
                         <input
                           ref={codeInput}
                           value={code}
+                          disabled={away}
                           onChange={(e) =>
                             setCode(
                               e.target.value
@@ -454,13 +459,12 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, base, part }: OnlinePa
                           type="submit"
                           className="btn primary"
                           data-action={code.trim() ? 'party-join' : undefined}
-                          disabled={!code.trim()}
+                          disabled={!code.trim() || away}
                         >
                           <UserPlus strokeWidth={ICON_STROKE} aria-hidden />
                           Join
                         </button>
                       </span>
-                      {away && <span className="tile-cap">Joins as soon as the connection to the server is back.</span>}
                     </span>
                   </form>
                 )}
