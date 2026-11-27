@@ -220,8 +220,17 @@ export class Scores {
                         ORDER BY score DESC, at ASC LIMIT ?)`,
       )
       .run(
-        ...[user.id, body.songId, chartId, chart.part, chart.difficulty, id],
-        ...[user.id, body.songId, chartId, chart.part, chart.difficulty],
+        user.id,
+        body.songId,
+        chartId,
+        chart.part,
+        chart.difficulty,
+        id,
+        user.id,
+        body.songId,
+        chartId,
+        chart.part,
+        chart.difficulty,
         RUNS_KEPT,
       );
     const board = this.board(user, body.songId, chartId, chart.part, chart.difficulty, false);

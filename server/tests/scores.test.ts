@@ -129,9 +129,12 @@ describe('leaderboards', () => {
 
     // Winding back again and again over a held note, without the pause that drops it.
     const hold = { ...chart, notes: [{ t: 1, lane: 0, dur: 2, phrase: -1 }] };
-    const ops = [OP.press];
+    const ops: number[] = [OP.press];
     const times = [1];
-    for (let i = 0; i < 100; i++) (ops.push(OP.release, OP.rewind), times.push(4.9, 1));
+    for (let i = 0; i < 100; i++) {
+      ops.push(OP.release, OP.rewind);
+      times.push(4.9, 1);
+    }
     expect((await send(hold, [...ops, OP.release, OP.update], [...times, 3, Infinity])).status).toBe(422);
     // A pause's wind-back further than the game winds back.
     expect((await send(hold, [OP.press, OP.dropHolds, OP.rewind, OP.update], [1, 6, 1, Infinity])).status).toBe(422);
