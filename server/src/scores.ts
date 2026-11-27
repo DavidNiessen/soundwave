@@ -54,9 +54,10 @@ const AFTER_S = 30;
 const REWIND_S = 1.5;
 /**
  * How far one input may be stamped before the one recorded ahead of it: inputs are stamped with
- * the moment they happened and can be handled a little after an overdrive stamped now.
+ * the moment they happened, and on a busy machine can be handled well after an overdrive stamped
+ * now. An input judged a little in the past earns nothing it would not have earned on time.
  */
-const BACK_SLACK_S = 0.25;
+const BACK_SLACK_S = 1;
 /** Float rounding between two song times the game took for the same moment. */
 const EPS = 0.05;
 /** The runs kept per player on each board: their best (and any they shared). */
@@ -109,7 +110,7 @@ function playable(c: WireChart, ops: Uint8Array, times: Float32Array): boolean {
       if (t !== Infinity || i !== ops.length - 1) return false;
       continue;
     }
-    if (!Number.isFinite(t) || t < -LEAD_IN_S - EPS || t > c.duration + AFTER_S) return false;
+    if (!Number.isFinite(t) || t < -LEAD_IN_S - BACK_SLACK_S || t > c.duration + AFTER_S) return false;
     if ((kind === OP.press || kind === OP.release) && ops[i] >> 3 >= c.lanes) return false;
     if (kind === OP.rewind) {
       const from = i > 0 && (ops[i - 1] & 7) === OP.dropHolds ? times[i - 1] : NaN;

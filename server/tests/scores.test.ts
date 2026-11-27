@@ -147,6 +147,8 @@ describe('leaderboards', () => {
     expect((await send(hold, [OP.press | (6 << 3), OP.update], [1, Infinity])).status).toBe(422);
     // An input stamped well before the one ahead of it.
     expect((await send(hold, [OP.press, OP.release, OP.press, OP.update], [1, 3, 1.5, Infinity])).status).toBe(422);
+    // A little before it is fine: an input handled late on a busy machine.
+    expect((await send(hold, [OP.press, OP.overdrive, OP.release, OP.update], [1, 3.5, 3, Infinity])).status).toBe(200);
 
     // A real pause is fine: the holds dropped, the song wound back a little.
     const rec = new ReplayRecorder(new GameSession(hold as Chart));
