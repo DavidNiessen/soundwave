@@ -416,7 +416,7 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, base, part }: OnlinePa
                   )}
                 </span>
               </button>
-              <div className={`tile-stack ${more.length > 2 ? 'many' : ''}`}>
+              <div className={`tile-stack ${more.length > 2 ? 'many' : ''} ${more.length % 2 ? 'odd' : ''}`}>
                 {!party && (
                   <form
                     className="tile party-join"

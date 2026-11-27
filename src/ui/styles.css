@@ -10573,6 +10573,11 @@ a.btn {
   .online-bento .party-tiles:has(.tile-stack.many) .tile.hero .mosaic {
     max-width: 26%;
   }
+  .online-bento .party-tiles:has(.tile-stack.many) .tile.hero .party-code-text {
+    font-size: clamp(1.6rem, 2.6vw, 2.4rem);
+    letter-spacing: 0.1em;
+    white-space: nowrap;
+  }
   .online-bento .tile-stack.many {
     flex: 1.15 1 0;
     display: grid;
@@ -10600,6 +10605,13 @@ a.btn {
   }
   .online-bento .tile-stack.many .tile.small .tile-cap {
     display: none;
+  }
+  /* An odd one out (three of them, for a player) takes the whole row. */
+  .online-bento .tile-stack.many.odd > .tile.small:last-child {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
   }
 }
 
