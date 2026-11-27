@@ -70,6 +70,7 @@ function updateButton(u: UpdateStatus, upToDate: boolean): string {
   }
 }
 import { useSlide } from './useSlide';
+import { notify } from './notify';
 import {
   AREAS,
   bound,
@@ -428,7 +429,6 @@ export function SettingsScreen({ settings, model, device, onChange, onBack, inSo
   const me = useSyncExternalStore(identityStore.subscribe, identityStore.snapshot);
   useEffect(() => void identityStore.load(), []);
   const [identityDialog, setIdentityDialog] = useState<'export' | 'import' | null>(null);
-  const [identityNote, setIdentityNote] = useState<string | null>(null);
 
   const resetTab = () => {
     const patch: Partial<Settings> = {};
@@ -581,19 +581,9 @@ export function SettingsScreen({ settings, model, device, onChange, onBack, inSo
           )}
         </Dialog>
       )}
-      {identityDialog && <IdentityDialog kind={identityDialog} onClose={() => setIdentityDialog(null)} onDone={setIdentityNote} />}
-      {identityNote && (
-        <Dialog title="Your identity" variant="card" closeLabel="Done" onClose={() => setIdentityNote(null)}>
-          {(close) => (
-            <div className="pause-card">
-              <h2 className="display">Your identity</h2>
-              <p className="hint">{identityNote}</p>
-              <button type="button" className="btn primary wide" data-autofocus onClick={close}>
-                Done
-              </button>
-            </div>
-          )}
-        </Dialog>
+      {/* Done out of sight (a file saved, a sign-in changed): a notification says so, not another window. */}
+      {identityDialog && (
+        <IdentityDialog kind={identityDialog} onClose={() => setIdentityDialog(null)} onDone={(text) => notify.success(text)} />
       )}
       {library.ui}
       {updateOpen && <UpdateCard settings={settings} onClose={() => setUpdateOpen(false)} />}
