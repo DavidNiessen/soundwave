@@ -623,7 +623,9 @@ export class PlayController {
     if (this.playback) return this.start();
     this.live = true;
     if (this.engine.ctx.state !== 'running') await this.engine.ctx.resume();
-    const wait = (at - performance.now()) / 1000;
+    // Lined up at the speakers: a player whose sound comes out later (Bluetooth, the desktop app's
+    // own output) starts it that much earlier.
+    const wait = (at - performance.now()) / 1000 - this.engine.heardLag();
     const from = -LEAD_IN + Math.max(0, -wait);
     this.startAt = 0;
     this.show.from(from);
@@ -637,6 +639,10 @@ export class PlayController {
     if (this.live) {
       if (this.menu) return;
       this.menu = true;
+      // The song plays on, but the lanes are let go: under the menu no input reaches the song (a
+      // controller's releases neither), and a hold would otherwise go on scoring to its end.
+      if (this.phase === 'playing') this.recorder?.dropHolds(this.engine.time());
+      for (let l = 0; l < this.chart.lanes; l++) this.rumble.sustainEnd(l);
       this.onMenu(true);
       return;
     }
@@ -796,8 +802,13 @@ export class PlayController {
       if (this.playback) {
         this.playback.advance(t);
         this.replayShowdown(t);
-      } else this.recorder!.update(t);
-      if (this.effects.length) this.applyEffects(t);
+        if (this.effects.length) this.applyEffects(t);
+      } else {
+        // A hit's Drain is recorded at its own time before the frame moves the run on to `t`, so the
+        // score shown live is the score the run is judged again to.
+        if (this.effects.length) this.applyEffects(t);
+        this.recorder!.update(t);
+      }
       if (t > this.chart.duration + 0.5 && t > this.engine.duration) this.finish();
     }
 
