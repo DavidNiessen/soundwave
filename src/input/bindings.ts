@@ -137,7 +137,7 @@ export const COMMANDS: Command[] = [
     { id: 'party.invite', label: 'Invite a friend', key: 'KeyF', pad: 'b8' },
     { id: 'party.boards', label: 'Leaderboards', key: 'KeyG', pad: 'b10' },
     { id: 'party.avatar', label: 'Your look on the stage', key: 'KeyV' },
-    { id: 'party.admin', label: 'Run the server', key: 'KeyM' },
+    { id: 'party.admin', label: 'Run the server', key: 'KeyM', pad: 'b11' },
   ]),
   // A party's room and lobby: the mode, the set, the player's part and being ready.
   ...cmd('party', [
