@@ -4776,6 +4776,10 @@ input.text {
     width: 10rem;
     max-width: 42%;
     aspect-ratio: auto;
+    /* As tall as the card: its width is set here, so the desktop's 100% (of a card whose height is
+       its content's) would leave it a thin strip at the top. */
+    height: auto;
+    align-self: stretch;
   }
   .tile.hero .tile-text {
     padding: 0.9rem 1rem;
@@ -8002,7 +8006,10 @@ a.btn {
 .party-watch .party-board {
   position: static;
   transform: none;
+  width: auto;
   max-height: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 .party-result.me {
   outline: 2px solid var(--pink);
@@ -8088,33 +8095,45 @@ a.btn {
   }
 }
 
-/* The party's board, beside the highway on the side away from the hit feedback. */
+/* The party's board: a plate of the HUD's own in the top right corner, the left column's mirror
+   (the same margins from the edges, its width and its smoked glass), clear of the highway and the
+   hit feedback. On a touch screen it stands under the pause button. */
 .party-board {
   position: absolute;
   z-index: 2;
-  left: calc(var(--hw-x, 50%) + var(--hw-w, 400px) * 0.5 + clamp(14px, 1.6vw, 34px));
-  top: 18%;
-  width: clamp(11rem, 17vw, 16rem);
+  right: calc(1.6% + var(--safe-r));
+  top: calc(3.5% + var(--safe-t));
+  width: clamp(216px, 17.6vw, 380px);
   max-height: 60%;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 2px;
   margin: 0;
-  padding: 0.4rem;
-  border-radius: var(--r-m);
-  background: var(--panel);
+  padding: clamp(6px, 0.5vw, 10px);
+  border-radius: 12px;
+  /* The HUD's plate (.hud's --panel-hud): the board stands beside the HUD, not in it. */
+  background: rgb(6 4 14 / 0.56);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-edge),
+    inset 0 1px 0 rgb(255 255 255 / 0.08);
   list-style: none;
   pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+:root[data-input='touch'] .party-board {
+  top: calc(10px + 46px + 10px + var(--safe-t));
 }
 .party-board-row {
   display: grid;
-  grid-template-columns: 1.4rem minmax(0, 1fr) auto auto;
+  grid-template-columns: 1.6em minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0.25rem 0.45rem;
-  border-radius: var(--r-s);
-  font-size: 0.9rem;
+  gap: 0.5em;
+  padding: 0.3em 0.6em;
+  border-radius: 8px;
+  font-size: clamp(12px, 0.9vw, 19px);
 }
 .party-board-row.me {
   background: var(--pink);
@@ -9661,6 +9680,22 @@ a.btn {
 .mode-steps.compact .mode-step {
   padding: 0.35rem 0.6rem;
 }
+/* A short window (720px and under): the art and the steps tighten, so the room's cards fit under
+   its title rather than scrolling it away. */
+@media (max-height: 820px) and (min-width: 901px) {
+  .party-room .mode-art {
+    height: clamp(5.5rem, 14vh, 8rem);
+  }
+  .party-room .mode-steps {
+    gap: 0.25rem;
+  }
+  .party-room .mode-step {
+    padding: 0.3rem 0.6rem;
+  }
+  .party-room .mode-tiles {
+    min-height: 0;
+  }
+}
 
 /* ------------------------------------------------------------------------------------------- */
 /* Showdown in a song, second pass: pills, faces, the strike banner, the struck pill, the burst. */
@@ -10548,13 +10583,15 @@ a.btn {
 .online-bento .party-tiles {
   min-height: min(22rem, 46vh);
 }
-/* The week's best and who is online side by side under the bento. */
+/* The week's best and who is online side by side under the bento, each under a column of it: the
+   same shares and gap as the party tile and the stack beside it, so their edges line up. */
 .online-bento .online-side {
   width: auto;
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: clamp(0.8rem, 1.5vw, 1.5rem);
 }
 .online-bento .online-side > * {
-  flex: 1;
   min-width: 0;
 }
 .online-me {
@@ -10562,7 +10599,7 @@ a.btn {
 }
 @media (max-width: 1000px) {
   .online-bento .online-side {
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 .online-stage {
@@ -10574,57 +10611,6 @@ a.btn {
 .online-bento .tile.hero .mosaic {
   max-width: 34%;
 }
-/* Three or four ways on beside the party (the boards, the look, invites, the server's tools): two
-   by two, each its icon over its name, so the column fits beside the party tile at 720px tall. */
-@media (min-width: 641px) {
-  .online-bento .party-tiles:has(.tile-stack.many) .tile.hero {
-    flex: 1 1 0;
-  }
-  .online-bento .party-tiles:has(.tile-stack.many) .tile.hero .mosaic {
-    max-width: 26%;
-  }
-  .online-bento .party-tiles:has(.tile-stack.many) .tile.hero .party-code-text {
-    font-size: clamp(1.6rem, 2.6vw, 2.4rem);
-    letter-spacing: 0.1em;
-    white-space: nowrap;
-  }
-  .online-bento .tile-stack.many {
-    flex: 1.15 1 0;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: auto;
-    grid-auto-rows: minmax(0, 1fr);
-  }
-  .online-bento .tile-stack.many > .party-join {
-    grid-column: 1 / -1;
-  }
-  .online-bento .tile-stack.many .tile.small {
-    flex-direction: column;
-    align-items: flex-start;
-    justify-content: center;
-    gap: 0.55rem;
-    padding: 0.8rem 0.9rem;
-  }
-  .online-bento .tile-stack.many .tile-icon {
-    width: 2.6rem;
-    margin-left: 0;
-  }
-  .online-bento .tile-stack.many .tile.small .tile-text {
-    flex: none;
-    padding: 0;
-  }
-  .online-bento .tile-stack.many .tile.small .tile-cap {
-    display: none;
-  }
-  /* An odd one out (three of them, for a player) takes the whole row. */
-  .online-bento .tile-stack.many.odd > .tile.small:last-child {
-    grid-column: 1 / -1;
-    flex-direction: row;
-    align-items: center;
-    justify-content: flex-start;
-  }
-}
-
 /* The player's portrait on the Online tab: a card of the game's light, a podium, the figure in it,
    drawn above the menus (not the stage behind them). */
 .online-me {

@@ -1563,12 +1563,14 @@ export function App() {
   // A song previews by itself (unless that is switched off): the one whose page is open, else the one
   // highlighted in a list.
   const sheetOpen = !!sheet && inMenus && view.name !== 'editor';
+  // A server song previews once its audio is here (it comes while the player rests on it).
+  const audible = (id: string | null) => !!id && (byId.has(id) || !!server.held[id] || !!partySongs.songs()[id]);
   const previewId =
     launch !== null || !settings.songPreviews
       ? null
       : sheetOpen
         ? sheet.id
-        : view.name === 'library' || view.name === 'home'
+        : (view.name === 'library' || view.name === 'home') && audible(highlight)
           ? highlight
           : null;
   useEffect(() => previewSong(previewId), [previewId]);
@@ -1954,7 +1956,9 @@ export function App() {
                   held: server.held,
                   failed: server.failed,
                   known: (id) => serverSongs.known(id),
-                  onRest: (x) => settings.serverSongs === 'stream' && serverSongs.prefetch(x),
+                  // Resting on a server song brings it (streamed, kept for a while) so it can preview, and
+                  // so it is there at once when pressed; previews off and downloading, nothing comes.
+                  onRest: (x) => (settings.serverSongs === 'stream' || settings.songPreviews) && serverSongs.prefetch(x),
                   stream: settings.serverSongs === 'stream',
                   sharing: settings.shareLibrary,
                   canShare: !!serverSharing,

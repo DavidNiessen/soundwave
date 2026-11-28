@@ -87,7 +87,7 @@ export interface ServerLibrary {
   failed: Record<string, string>;
   /** What is known of a server song (held, on its way or listed), for the setlist. */
   known(id: string): SongMeta | null;
-  /** The player rested on a song (focus or the mouse, for a moment): it may start coming already. */
+  /** The player rested on a song (focus or the mouse, for a moment): it may start coming already, for its preview too. */
   onRest(song: SharedSong): void;
   /** Pressing one streams it into the setlist (true) or downloads it into the library. */
   stream: boolean;
@@ -578,6 +578,8 @@ export function LibraryScreen({
               return (
                 <li
                   key={x.id}
+                  // It previews as a song of the library does, once its audio has come (resting on it fetches it).
+                  data-preview={x.id}
                   className={`song-item server-song ${slot >= 0 ? 'in-set' : ''} ${coming ? 'coming' : ''} ${failed && !coming ? 'failed' : ''}`}
                 >
                   <button
@@ -598,9 +600,9 @@ export function LibraryScreen({
                             : 'Press to stream it into the setlist.'
                     }`}
                     onClick={() => !(coming && !server.stream) && server.onPlay(x)}
-                    onFocus={() => server.stream && rest(x)}
+                    onFocus={() => rest(x)}
                     onBlur={() => clearTimeout(restTimer.current)}
-                    onPointerEnter={(e) => e.pointerType === 'mouse' && server.stream && rest(x)}
+                    onPointerEnter={(e) => e.pointerType === 'mouse' && rest(x)}
                     onPointerLeave={() => clearTimeout(restTimer.current)}
                   >
                     <Cover title={x.title} />

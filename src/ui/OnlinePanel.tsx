@@ -138,121 +138,124 @@ function SignedOut({ settings, onParty, base }: OnlinePanelProps) {
   ]);
 
   return (
-    <div className="online-panel signed-out">
-      <div className="online-landing">
-        <section className="landing-hero" aria-label="Play online">
-          <h2 className="landing-title">Play online</h2>
-          <p className="landing-lead">
-            Soundwave servers are run by players, for their friends. Join one with its address, or the invite link someone sent you.
-          </p>
+    <>
+      <h2 className="page-title">Play online</h2>
+      <div className="online-panel signed-out">
+        <div className="online-landing">
+          <section className="landing-hero" aria-label="Play together">
+            <h2 className="landing-title">Play together</h2>
+            <p className="landing-lead">
+              Soundwave servers are run by players, for their friends. Join one with its address, or the invite link someone sent you.
+            </p>
 
-          {known ? (
-            <div className="landing-back">
-              <div className="landing-server">
-                <span className={`online-dot ${waiting ? '' : 'on'}`} aria-hidden />
-                <span className="landing-server-text">
-                  <span className="landing-server-name">{s.info?.name ?? known}</span>
-                  <span className="dim">{waiting ? 'Connecting…' : known}</span>
-                </span>
-              </div>
-              <button type="button" className="btn primary landing-go" data-action="online-connect" data-autofocus onClick={signIn}>
-                <LogIn strokeWidth={ICON_STROKE} aria-hidden />
-                Sign in
-                <Hint {...keysOf('party.create')} {...hints} />
-              </button>
-              <button type="button" className="btn quiet" onClick={() => setOther(true)}>
-                Use another server
-              </button>
-            </div>
-          ) : (
-            <form
-              className="landing-connect"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void connect();
-              }}
-            >
-              <label className="landing-field" data-ring-box>
-                <ServerIcon strokeWidth={ICON_STROKE} aria-hidden />
-                <input
-                  ref={field}
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="Server address or invite link"
-                  aria-label="Server address or invite link"
-                  spellCheck={false}
-                  autoComplete="url"
-                  inputMode="url"
-                  data-autofocus
-                />
-              </label>
-              <button type="submit" className="btn primary landing-go" data-action="online-connect" disabled={busy}>
-                {busy ? (
-                  <LoaderCircle className="spin" strokeWidth={ICON_STROKE} aria-hidden />
-                ) : (
+            {known ? (
+              <div className="landing-back">
+                <div className="landing-server">
+                  <span className={`online-dot ${waiting ? '' : 'on'}`} aria-hidden />
+                  <span className="landing-server-text">
+                    <span className="landing-server-name">{s.info?.name ?? known}</span>
+                    <span className="dim">{waiting ? 'Connecting…' : known}</span>
+                  </span>
+                </div>
+                <button type="button" className="btn primary landing-go" data-action="online-connect" data-autofocus onClick={signIn}>
                   <LogIn strokeWidth={ICON_STROKE} aria-hidden />
+                  Sign in
+                  <Hint {...keysOf('party.create')} {...hints} />
+                </button>
+                <button type="button" className="btn quiet" onClick={() => setOther(true)}>
+                  Use another server
+                </button>
+              </div>
+            ) : (
+              <form
+                className="landing-connect"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void connect();
+                }}
+              >
+                <label className="landing-field" data-ring-box>
+                  <ServerIcon strokeWidth={ICON_STROKE} aria-hidden />
+                  <input
+                    ref={field}
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder="Server address or invite link"
+                    aria-label="Server address or invite link"
+                    spellCheck={false}
+                    autoComplete="url"
+                    inputMode="url"
+                    data-autofocus
+                  />
+                </label>
+                <button type="submit" className="btn primary landing-go" data-action="online-connect" disabled={busy}>
+                  {busy ? (
+                    <LoaderCircle className="spin" strokeWidth={ICON_STROKE} aria-hidden />
+                  ) : (
+                    <LogIn strokeWidth={ICON_STROKE} aria-hidden />
+                  )}
+                  {busy ? 'Connecting…' : 'Connect'}
+                  {!busy && <Hint {...keysOf('party.create')} {...hints} />}
+                </button>
+                {other && (
+                  <button type="button" className="btn quiet" onClick={() => setOther(false)}>
+                    Back to {s.info?.name ?? s.server?.replace(/^https?:\/\//, '')}
+                  </button>
                 )}
-                {busy ? 'Connecting…' : 'Connect'}
-                {!busy && <Hint {...keysOf('party.create')} {...hints} />}
-              </button>
-              {other && (
-                <button type="button" className="btn quiet" onClick={() => setOther(false)}>
-                  Back to {s.info?.name ?? s.server?.replace(/^https?:\/\//, '')}
-                </button>
-              )}
-            </form>
-          )}
-          {problem ? (
-            <p className="party-error" role="alert">
-              {problem}
-            </p>
-          ) : (
-            s.error && (
+              </form>
+            )}
+            {problem ? (
               <p className="party-error" role="alert">
-                {s.error}
-                <button type="button" className="btn small" onClick={() => online.clearError()}>
-                  OK
-                </button>
+                {problem}
               </p>
-            )
-          )}
-          {!known && (
-            <p className="landing-small">
-              Looks like <code>play.example.com</code>, or a link ending in <code>/join?invite=…</code>. Nothing is sent anywhere until you
-              connect.
-            </p>
-          )}
-        </section>
+            ) : (
+              s.error && (
+                <p className="party-error" role="alert">
+                  {s.error}
+                  <button type="button" className="btn small" onClick={() => online.clearError()}>
+                    OK
+                  </button>
+                </p>
+              )
+            )}
+            {!known && (
+              <p className="landing-small">
+                Looks like <code>play.example.com</code>, or a link ending in <code>/join?invite=…</code>. Nothing is sent anywhere until
+                you connect.
+              </p>
+            )}
+          </section>
 
-        <aside className="landing-side" aria-label="What playing online brings">
-          <ul className="landing-features">
-            {FEATURES.map(({ icon: Icon, title, text }, i) => (
-              <li key={title} className="landing-feature" style={{ ['--i' as string]: i }}>
-                <span className="landing-feature-icon" aria-hidden>
-                  <Icon strokeWidth={ICON_STROKE} />
-                </span>
-                <span className="landing-feature-text">
-                  <span className="landing-feature-title">{title}</span>
-                  <span className="landing-feature-cap">{text}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-          <button type="button" className="landing-own" onClick={() => openExternal(SERVER_GUIDE_URL)}>
-            <span className="landing-feature-icon" aria-hidden>
-              <ServerIcon strokeWidth={ICON_STROKE} />
-            </span>
-            <span className="landing-feature-text">
-              <span className="landing-feature-title">Run your own server</span>
-              <span className="landing-feature-cap">
-                One small program for you and your friends, on a PC or any host. Your data stays yours.
+          <aside className="landing-side" aria-label="What playing online brings">
+            <ul className="landing-features">
+              {FEATURES.map(({ icon: Icon, title, text }, i) => (
+                <li key={title} className="landing-feature" style={{ ['--i' as string]: i }}>
+                  <span className="landing-feature-icon" aria-hidden>
+                    <Icon strokeWidth={ICON_STROKE} />
+                  </span>
+                  <span className="landing-feature-text">
+                    <span className="landing-feature-title">{title}</span>
+                    <span className="landing-feature-cap">{text}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <button type="button" className="landing-own" onClick={() => openExternal(SERVER_GUIDE_URL)}>
+              <span className="landing-feature-icon" aria-hidden>
+                <ServerIcon strokeWidth={ICON_STROKE} />
               </span>
-            </span>
-            <ExternalLink className="landing-own-out" strokeWidth={ICON_STROKE} aria-hidden />
-          </button>
-        </aside>
+              <span className="landing-feature-text">
+                <span className="landing-feature-title">Run your own server</span>
+                <span className="landing-feature-cap">
+                  One small program for you and your friends, on a PC or any host. Your data stays yours.
+                </span>
+              </span>
+              <ExternalLink className="landing-own-out" strokeWidth={ICON_STROKE} aria-hidden />
+            </button>
+          </aside>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -337,10 +340,11 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, base, part }: OnlinePa
         bar: false,
         run: () => setModal('account'),
       },
-      { id: 'party-invite', label: 'Invite', icon: Send, ...keysOf('party.invite'), bar: false, run: () => setModal('invite') },
+      // Invite and the server's tools stand in the action bar, each with a key and a controller button.
+      { id: 'party-invite', label: 'Invite', icon: Send, ...keysOf('party.invite'), run: () => setModal('invite') },
       { id: 'party-boards', label: 'Leaderboards', icon: Trophy, ...keysOf('party.boards'), bar: false, run: onBoards },
       { id: 'party-avatar', label: 'Your look', icon: Shirt, ...keysOf('party.avatar'), bar: false, run: onAvatar },
-      ...(mod ? [{ id: 'party-admin', label: 'Admin', icon: Gavel, ...keysOf('party.admin'), bar: false, run: onAdmin }] : []),
+      ...(mod ? [{ id: 'party-admin', label: 'Admin', icon: Gavel, ...keysOf('party.admin'), run: onAdmin }] : []),
     ],
     { passive: !!look },
   );
@@ -349,10 +353,6 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, base, part }: OnlinePa
   const more: [string, string, LucideIcon, string, string, () => void][] = [
     ['party-boards', 'party.boards', Trophy, 'Leaderboards', 'The best runs of every song here.', onBoards],
     ['party-avatar', 'party.avatar', Shirt, 'Your look', 'Your colours, on stage for everyone.', onAvatar],
-    ['party-invite', 'party.invite', Send, 'Invite friends', 'A link that brings them to this server.', () => setModal('invite')],
-    ...(mod
-      ? ([['party-admin', 'party.admin', Gavel, 'Run the server', 'Players, invites, songs and reports.', onAdmin]] as typeof more)
-      : []),
   ];
   const players = party ? party.members.length : 0;
 
@@ -420,7 +420,7 @@ function SignedIn({ settings, onParty, onBoards, onAdmin, base, part }: OnlinePa
                   )}
                 </span>
               </button>
-              <div className={`tile-stack ${more.length > 2 ? 'many' : ''} ${more.length % 2 ? 'odd' : ''}`}>
+              <div className="tile-stack">
                 {!party && (
                   <form
                     className="tile party-join"
