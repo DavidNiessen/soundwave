@@ -4776,6 +4776,10 @@ input.text {
     width: 10rem;
     max-width: 42%;
     aspect-ratio: auto;
+    /* As tall as the card: its width is set here, so the desktop's 100% (of a card whose height is
+       its content's) would leave it a thin strip at the top. */
+    height: auto;
+    align-self: stretch;
   }
   .tile.hero .tile-text {
     padding: 0.9rem 1rem;
@@ -10548,13 +10552,15 @@ a.btn {
 .online-bento .party-tiles {
   min-height: min(22rem, 46vh);
 }
-/* The week's best and who is online side by side under the bento. */
+/* The week's best and who is online side by side under the bento, each under a column of it: the
+   same shares and gap as the party tile and the stack beside it, so their edges line up. */
 .online-bento .online-side {
   width: auto;
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: clamp(0.8rem, 1.5vw, 1.5rem);
 }
 .online-bento .online-side > * {
-  flex: 1;
   min-width: 0;
 }
 .online-me {
@@ -10562,7 +10568,7 @@ a.btn {
 }
 @media (max-width: 1000px) {
   .online-bento .online-side {
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 .online-stage {
@@ -10574,57 +10580,6 @@ a.btn {
 .online-bento .tile.hero .mosaic {
   max-width: 34%;
 }
-/* Three or four ways on beside the party (the boards, the look, invites, the server's tools): two
-   by two, each its icon over its name, so the column fits beside the party tile at 720px tall. */
-@media (min-width: 641px) {
-  .online-bento .party-tiles:has(.tile-stack.many) .tile.hero {
-    flex: 1 1 0;
-  }
-  .online-bento .party-tiles:has(.tile-stack.many) .tile.hero .mosaic {
-    max-width: 26%;
-  }
-  .online-bento .party-tiles:has(.tile-stack.many) .tile.hero .party-code-text {
-    font-size: clamp(1.6rem, 2.6vw, 2.4rem);
-    letter-spacing: 0.1em;
-    white-space: nowrap;
-  }
-  .online-bento .tile-stack.many {
-    flex: 1.15 1 0;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: auto;
-    grid-auto-rows: minmax(0, 1fr);
-  }
-  .online-bento .tile-stack.many > .party-join {
-    grid-column: 1 / -1;
-  }
-  .online-bento .tile-stack.many .tile.small {
-    flex-direction: column;
-    align-items: flex-start;
-    justify-content: center;
-    gap: 0.55rem;
-    padding: 0.8rem 0.9rem;
-  }
-  .online-bento .tile-stack.many .tile-icon {
-    width: 2.6rem;
-    margin-left: 0;
-  }
-  .online-bento .tile-stack.many .tile.small .tile-text {
-    flex: none;
-    padding: 0;
-  }
-  .online-bento .tile-stack.many .tile.small .tile-cap {
-    display: none;
-  }
-  /* An odd one out (three of them, for a player) takes the whole row. */
-  .online-bento .tile-stack.many.odd > .tile.small:last-child {
-    grid-column: 1 / -1;
-    flex-direction: row;
-    align-items: center;
-    justify-content: flex-start;
-  }
-}
-
 /* The player's portrait on the Online tab: a card of the game's light, a podium, the figure in it,
    drawn above the menus (not the stage behind them). */
 .online-me {
