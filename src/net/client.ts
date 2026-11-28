@@ -433,7 +433,9 @@ class OnlineClient {
       throw new Error(
         'The web game cannot reach a server over plain HTTP: the browser blocks it on a secure page. Play on it in the desktop app, or give the server HTTPS.',
       );
-    if (server !== this.state.server) this.forget();
+    // Leaving another server signs out of it (with no server yet there is nothing to leave, and a
+    // party waiting to be joined there, from Discord, is kept).
+    if (this.state.server && server !== this.state.server) this.forget();
     this.set({ server, status: 'signed-out', error: null });
     const info = await this.request<ServerInfo>('/info');
     checkProtocol(info);
@@ -965,6 +967,8 @@ class OnlineClient {
    */
   joinFrom(server: string, code: string) {
     if (this.state.server === server && this.state.account) return this.joinParty(code);
+    // Another server is left first: leaving forgets a party that waits, so this one is kept after.
+    if (this.state.server && server !== this.state.server) this.forget();
     this.waitingParty = code;
     void this.choose(server).catch((e: Error) => {
       this.waitingParty = null;

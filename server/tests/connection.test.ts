@@ -6,9 +6,12 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, expect, it } from 'vitest';
+import { WebSocket as ServerSocket } from 'ws';
+import type { ServerMessage } from '../../src/net/protocol.ts';
 import { startServer, type RunningServer } from '../src/app.ts';
 import { DEFAULTS } from '../src/config.ts';
 import { Store } from '../src/db.ts';
+import { players } from './identity.ts';
 
 const storage = new Map<string, string>();
 Object.assign(globalThis, {
@@ -29,6 +32,7 @@ globalThis.WebSocket = class extends NativeSocket {
   }
 };
 const { online } = await import('../../src/net/client.ts');
+const { PROTOCOL_VERSION } = await import('../../src/net/protocol.ts');
 
 let server: RunningServer;
 let store: Store;
@@ -113,3 +117,35 @@ it('gives a server that passes on another server’s challenge nothing it can si
     impostor.close();
   }
 });
+
+it('joins the party a Discord Join named, when the game was not on its server before', async () => {
+  // A friend hosts a party on the server.
+  const host = await players(server.url).signUp('Host');
+  const ws = new ServerSocket(server.url.replace('http', 'ws') + '/ws');
+  await new Promise((r) => ws.once('open', r));
+  const code = await new Promise<string>((resolve) => {
+    ws.on('message', (d) => {
+      const m = JSON.parse(d.toString()) as ServerMessage;
+      if (m.type === 'welcome') ws.send(JSON.stringify({ type: 'party-create' }));
+      if (m.type === 'party' && m.party) resolve(m.party.code);
+    });
+    ws.send(JSON.stringify({ type: 'hello', protocol: PROTOCOL_VERSION, token: host.access }));
+  });
+  try {
+    // This game is on no server at all when the Join comes.
+    online.forget();
+    online.joinFrom(server.url, code);
+    await until(() => !!online.snapshot().info);
+    // Signing in there (as the party screen does) lands in the party.
+    expect(await online.signInWithIdentity()).toBe(true);
+    await until(() => online.snapshot().party?.code === code);
+    expect(
+      online
+        .snapshot()
+        .party!.members.map((m) => m.name)
+        .sort(),
+    ).toEqual(['Host', 'ana']);
+  } finally {
+    ws.close();
+  }
+}, 20_000);
