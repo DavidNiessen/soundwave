@@ -9665,6 +9665,22 @@ a.btn {
 .mode-steps.compact .mode-step {
   padding: 0.35rem 0.6rem;
 }
+/* A short window (720px and under): the art and the steps tighten, so the room's cards fit under
+   its title rather than scrolling it away. */
+@media (max-height: 820px) and (min-width: 901px) {
+  .party-room .mode-art {
+    height: clamp(5.5rem, 14vh, 8rem);
+  }
+  .party-room .mode-steps {
+    gap: 0.25rem;
+  }
+  .party-room .mode-step {
+    padding: 0.3rem 0.6rem;
+  }
+  .party-room .mode-tiles {
+    min-height: 0;
+  }
+}
 
 /* ------------------------------------------------------------------------------------------- */
 /* Showdown in a song, second pass: pills, faces, the strike banner, the struck pill, the burst. */
