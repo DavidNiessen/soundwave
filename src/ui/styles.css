@@ -8006,7 +8006,10 @@ a.btn {
 .party-watch .party-board {
   position: static;
   transform: none;
+  width: auto;
   max-height: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 .party-result.me {
   outline: 2px solid var(--pink);
@@ -8092,33 +8095,45 @@ a.btn {
   }
 }
 
-/* The party's board, beside the highway on the side away from the hit feedback. */
+/* The party's board: a plate of the HUD's own in the top right corner, the left column's mirror
+   (the same margins from the edges, its width and its smoked glass), clear of the highway and the
+   hit feedback. On a touch screen it stands under the pause button. */
 .party-board {
   position: absolute;
   z-index: 2;
-  left: calc(var(--hw-x, 50%) + var(--hw-w, 400px) * 0.5 + clamp(14px, 1.6vw, 34px));
-  top: 18%;
-  width: clamp(11rem, 17vw, 16rem);
+  right: calc(1.6% + var(--safe-r));
+  top: calc(3.5% + var(--safe-t));
+  width: clamp(216px, 17.6vw, 380px);
   max-height: 60%;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 2px;
   margin: 0;
-  padding: 0.4rem;
-  border-radius: var(--r-m);
-  background: var(--panel);
+  padding: clamp(6px, 0.5vw, 10px);
+  border-radius: 12px;
+  /* The HUD's plate (.hud's --panel-hud): the board stands beside the HUD, not in it. */
+  background: rgb(6 4 14 / 0.56);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-edge),
+    inset 0 1px 0 rgb(255 255 255 / 0.08);
   list-style: none;
   pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+:root[data-input='touch'] .party-board {
+  top: calc(10px + 46px + 10px + var(--safe-t));
 }
 .party-board-row {
   display: grid;
-  grid-template-columns: 1.4rem minmax(0, 1fr) auto auto;
+  grid-template-columns: 1.6em minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0.25rem 0.45rem;
-  border-radius: var(--r-s);
-  font-size: 0.9rem;
+  gap: 0.5em;
+  padding: 0.3em 0.6em;
+  border-radius: 8px;
+  font-size: clamp(12px, 0.9vw, 19px);
 }
 .party-board-row.me {
   background: var(--pink);
