@@ -92,6 +92,19 @@ export class Songs {
         at INTEGER NOT NULL
       );
     `);
+    // Songs shared on a server from before songs had internal ids and file hashes get theirs.
+    const had = store.columnsOf('songs');
+    if (!had.includes('uid')) store.db.exec('ALTER TABLE songs ADD COLUMN uid TEXT');
+    if (!had.includes('hash')) store.db.exec('ALTER TABLE songs ADD COLUMN hash TEXT');
+    const missing = store.db.prepare('SELECT id, audio FROM songs WHERE uid IS NULL OR hash IS NULL').all() as {
+      id: string;
+      audio: number;
+    }[];
+    for (const r of missing)
+      store.db
+        .prepare('UPDATE songs SET uid = COALESCE(uid, ?), hash = COALESCE(hash, ?) WHERE id = ?')
+        .run(randomUUID(), this.fileHash(r.id, !!r.audio), r.id);
+    store.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS songs_uid ON songs(uid)');
     // What each song takes on disk, for the quota (servers from before kept only the audio's size).
     const columns = store.db.prepare('PRAGMA table_info(songs)').all() as { name: string }[];
     if (!columns.some((c) => c.name === 'stored')) {

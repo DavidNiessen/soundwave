@@ -99,10 +99,29 @@ export class Store {
     this.db.close();
   }
 
-  /** Columns added since the first servers: their databases get them on start. */
+  /** The columns a table has now (in a database a server made before, its own). */
+  columnsOf(table: string): string[] {
+    return (this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+  }
+
+  /**
+   * Brings a database made by an earlier server up to the tables above: `CREATE TABLE IF NOT
+   * EXISTS` leaves a table that is there as it was. Columns added since are added; columns dropped
+   * since go, as nothing writes them any more and those that may not be empty would refuse every
+   * new row (an invite, a sign-up).
+   */
   private migrate() {
-    const columns = (this.db.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name);
-    if (!columns.includes('epoch')) this.db.exec('ALTER TABLE users ADD COLUMN epoch INTEGER NOT NULL DEFAULT 0');
+    const users = this.columnsOf('users');
+    // Identities came after passwords: a server from before had no column for keys.
+    if (!users.includes('pubkey')) {
+      this.db.exec('ALTER TABLE users ADD COLUMN pubkey TEXT');
+      this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_pubkey ON users(pubkey)');
+    }
+    // Passwords are gone.
+    if (users.includes('hash')) this.db.exec('ALTER TABLE users DROP COLUMN hash');
+    if (!users.includes('epoch')) this.db.exec('ALTER TABLE users ADD COLUMN epoch INTEGER NOT NULL DEFAULT 0');
+    // Invites were once of two kinds (links and key files); key files were dropped.
+    if (this.columnsOf('invites').includes('kind')) this.db.exec('ALTER TABLE invites DROP COLUMN kind');
   }
 
   getMeta(key: string): string | undefined {
